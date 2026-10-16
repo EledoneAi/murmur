@@ -443,6 +443,38 @@ func TestJumpCmd(t *testing.T) {
 	}
 }
 
+// A long conversation opens on its newest messages and scrolls a line at a time, back to its first.
+func TestThreadScrolls(t *testing.T) {
+	m := demo(110, 30, dark)
+	s := demoSnapshot(demoNow)
+	for i := range 60 {
+		s.Msgs = append(s.Msgs, protocol.Msg{ID: fmt.Sprint("long-", i), From: "carol/billing-2", To: "alice/api-9b",
+			Text: fmt.Sprintf("message %d, long enough to wrap: %s", i, strings.Repeat("words ", 30)), At: demoNow.Add(time.Duration(i-60) * time.Second).UnixMilli()})
+	}
+	m.setSnap(s)
+	m.screen()
+	m.selected = "agent:alice/api-9b"
+	press(m, "enter")
+	body := func() []string { // the lines between the header and the composer's rule
+		text, _ := m.screen()
+		lines := strings.Split(ansi.Strip(text), "\n")
+		end := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, " ───") })
+		return lines[3:end]
+	}
+	newest := body()
+	if text := strings.Join(newest, "\n"); !strings.Contains(text, "message 59") || strings.Contains(text, "message 0,") {
+		t.Fatalf("the thread opens on:\n%s", text)
+	}
+	m.thread.scroll = 1
+	if up := body(); strings.Join(up[1:], "\n") != strings.Join(newest[:len(newest)-1], "\n") {
+		t.Fatalf("one line up shows:\n%s", strings.Join(up, "\n"))
+	}
+	m.thread.scroll = 100_000
+	if oldest := body(); !strings.Contains(strings.Join(oldest, "\n"), "message 0,") || m.thread.scroll == 100_000 {
+		t.Fatalf("scrolled to the top, scroll %d:\n%s", m.thread.scroll, strings.Join(oldest, "\n"))
+	}
+}
+
 // Enter on a constellation's header opens its conversation, written to a teammate's agent in it.
 func TestHeaderOpensThread(t *testing.T) {
 	m := demo(110, 30, dark)
