@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRepoName(t *testing.T) {
@@ -201,6 +203,55 @@ func TestState(t *testing.T) {
 	git("switch", "-q", "--detach", "feat-1")
 	if r := Read(dir); r.Branch != "detached" || r.Detached != git("rev-parse", "--short", "HEAD") || r.Base != "feat-1" {
 		t.Fatalf("detached: branch %q %+v", r.Branch, r.State)
+	}
+}
+
+// wrapGit puts a git on PATH that runs the real one, except as the files in its folder say: "fail" names a subcommand
+// that fails, "slow" a folder whose calls first wait two seconds.
+func wrapGit(t *testing.T) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	bin := t.TempDir()
+	script := `#!/bin/sh
+d=$(dirname "$0")
+if [ -f "$d/fail" ]; then case " $* " in *" $(cat "$d/fail") "*) exit 1;; esac; fi
+if [ -f "$d/slow" ]; then case " $* " in *" $(cat "$d/slow") "*) sleep 2;; esac; fi
+exec '` + real + `' "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return bin
+}
+
+// A read in which a git call failed isn't kept for the next one, which reads the checkout again in full.
+func TestFailedReadIsNotKept(t *testing.T) {
+	dir, git := newRepo(t)
+	write(t, dir, map[string]string{".gitattributes": "gen.go linguist-generated\n", "a.go": "a\n", "gen.go": "g\n"})
+	git("add", "-A")
+	git("commit", "-qm", "first")
+	git("switch", "-qc", "feat")
+	write(t, dir, map[string]string{"b.go": "b\n"})
+	git("add", "-A")
+	git("commit", "-qm", "b")
+	write(t, dir, map[string]string{"a.go": "a\na\n", "gen.go": "g\ng\n"})
+	want := Read(dir)
+	bin := wrapGit(t)
+	for i, cmd := range []string{"check-attr", "log", "diff"} {
+		_ = os.WriteFile(filepath.Join(bin, "fail"), []byte(cmd), 0o644)
+		at := time.Now().Add(time.Duration(i+1) * time.Second) // a.go as it was, at another time: the read can't hold
+		_ = os.Chtimes(filepath.Join(dir, "a.go"), at, at)
+		if r := Read(dir); reflect.DeepEqual(r, want) {
+			t.Fatalf("with %s failing, the read is whole: %+v", cmd, r)
+		}
+		_ = os.Remove(filepath.Join(bin, "fail"))
+		if r := Read(dir); !reflect.DeepEqual(r, want) {
+			t.Fatalf("after %s failed: %+v, want %+v", cmd, r, want)
+		}
 	}
 }
 

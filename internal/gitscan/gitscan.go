@@ -86,6 +86,7 @@ func Read(cwd string) Result {
 		r.Branch = "detached"
 	}
 	status, err := git(ctx, r.Top, "status", "--porcelain", "-z", "--untracked-files=all")
+	whole := err == nil // every call answered: only then may the read stand for the next ones
 	if err != nil {
 		status = ""
 	}
@@ -108,7 +109,9 @@ func Read(cwd string) Result {
 	// ponytail: pushed commits drop out, so two pushed feature branches overlap only on what they still change.
 	// -z gives paths as they are, without git's quoting of spaces and accents, and untracked folders come file by
 	// file, so .gitattributes rules such as traces/** apply to them.
-	if log, err := git(ctx, r.Top, "log", "-z", "--max-count=200", "--format=", "--name-only", "HEAD", "--not", "--remotes"); err == nil {
+	log, err := git(ctx, r.Top, "log", "-z", "--max-count=200", "--format=", "--name-only", "HEAD", "--not", "--remotes")
+	whole = whole && err == nil
+	if err == nil {
 		for p := range strings.SplitSeq(log, "\x00") {
 			add(p)
 		}
@@ -117,19 +120,24 @@ func Read(cwd string) Result {
 		add(p)
 	}
 	r.Files = slices.DeleteFunc(r.Files, func(p string) bool { return lockfiles[filepath.Base(p)] })
-	r.Files = dropUnshared(ctx, r.Top, r.Files)
+	r.Files, err = dropUnshared(ctx, r.Top, r.Files)
+	whole = whole && err == nil
 	r.Files = r.Files[:min(len(r.Files), 300)]
 	slices.Sort(r.Files)
 
 	// The size of the change counts what the branch would merge, so it is taken against the default branch, unlike
 	// Files. Two more git calls: the diff, and a walk down HEAD's first parents for the branch below it.
 	ref, def := origin.ref, origin.branch
-	if numstat, err := git(ctx, r.Top, "diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--merge-base", cmp.Or(ref, "HEAD")); err == nil {
+	numstat, err := git(ctx, r.Top, "diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--merge-base", cmp.Or(ref, "HEAD"))
+	whole = whole && err == nil
+	if err == nil {
 		r.Added, r.Deleted, r.Changed = countNumstat(numstat)
 	}
 	r.Added += untrackedLines(r.Top, untracked)
 	r.Changed += len(untracked)
-	if log, err := git(ctx, r.Top, "log", "--first-parent", "--format=%h%x00%D", "--decorate-refs=refs/heads/", "-n", "500", "HEAD"); err == nil {
+	log, err = git(ctx, r.Top, "log", "--first-parent", "--format=%h%x00%D", "--decorate-refs=refs/heads/", "-n", "500", "HEAD")
+	whole = whole && err == nil
+	if err == nil {
 		base, head := baseOf(log, r.Branch, def)
 		if r.Branch != def { // the default branch is stacked on nothing, whatever merged branches it holds
 			r.Base = base
@@ -138,7 +146,9 @@ func Read(cwd string) Result {
 			r.Detached = head
 		}
 	}
-	keep(r.Top, key, r)
+	if whole && ctx.Err() == nil {
+		keep(r.Top, key, r)
+	}
 	return r
 }
 
@@ -415,16 +425,17 @@ var lockfiles = map[string]bool{
 var unsharedAttrs = []string{"linguist-generated", "linguist-vendored", "murmur-ignore", "diff"}
 
 // dropUnshared asks git which files those attributes cover, with the repo's own .gitattributes rules.
-func dropUnshared(ctx context.Context, top string, files []string) []string {
+// When git fails, it keeps them all and says so.
+func dropUnshared(ctx context.Context, top string, files []string) ([]string, error) {
 	if len(files) == 0 {
-		return files
+		return files, nil
 	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", top, "check-attr", "-z", "--stdin"}, unsharedAttrs...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00") + "\x00")
 	out, err := cmd.Output()
 	if err != nil {
-		return files
+		return files, err
 	}
 	skip := map[string]bool{}
 	f := strings.Split(string(out), "\x00") // path, attribute, value, path, attribute, value...
@@ -434,5 +445,5 @@ func dropUnshared(ctx context.Context, top string, files []string) []string {
 			skip[path] = true
 		}
 	}
-	return slices.DeleteFunc(files, func(p string) bool { return skip[p] })
+	return slices.DeleteFunc(files, func(p string) bool { return skip[p] }), nil
 }
