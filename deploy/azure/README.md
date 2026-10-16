@@ -27,8 +27,10 @@ Replace the example values with yours. Sign-in with Microsoft Entra ID is set up
 - **No platform sign-in.** Leave the app's **Authentication** (Easy Auth) off: laptops can't get through it. The
   hub signs people in itself ([docs/managed-services.md](../../docs/managed-services.md#three-rules)).
 - **Cost**, approximately: 0.25 vCPU on Container Apps about $14 a month (an open WebSocket keeps the app active,
-  so the idle rate doesn't apply), and a Burstable B1ms database about $12 plus storage: about $30 a month
-  ([billing](https://learn.microsoft.com/en-us/azure/container-apps/billing)).
+  so the idle rate doesn't apply), a Burstable B1ms database about $12 plus storage, and about $26 for the load
+  balancer and two public IP addresses that an environment in your own virtual network brings: about $55 a month
+  ([billing](https://learn.microsoft.com/en-us/azure/container-apps/billing),
+  [virtual network](https://learn.microsoft.com/en-us/azure/container-apps/custom-virtual-networks#managed-resources)).
 
 ## 1. Set variables
 
@@ -40,19 +42,35 @@ az extension add --name containerapp --upgrade
 az group create --name "$RG" --location "$LOCATION"
 ```
 
-## 2. Create the database
+## 2. Create the network and the database
+
+The database gets no public address. It lives in a virtual network, in a subnet of its own, and the Container Apps
+environment joins the same network through another subnet
+([Azure](https://learn.microsoft.com/en-us/azure/postgresql/network/concepts-networking-private)). A private DNS
+zone, linked to the network, lets the app find the server by its usual name.
 
 ```sh
+az network vnet create --resource-group "$RG" --name murmur-vnet --location "$LOCATION" \
+  --address-prefixes 10.42.0.0/16
+az network vnet subnet create --resource-group "$RG" --vnet-name murmur-vnet --name apps \
+  --address-prefixes 10.42.0.0/27 --delegations Microsoft.App/environments
+az network vnet subnet create --resource-group "$RG" --vnet-name murmur-vnet --name db \
+  --address-prefixes 10.42.1.0/28 --delegations Microsoft.DBforPostgreSQL/flexibleServers
+az network private-dns zone create --resource-group "$RG" --name murmur.private.postgres.database.azure.com
+az network private-dns link vnet create --resource-group "$RG" --zone-name murmur.private.postgres.database.azure.com \
+  --name murmur-vnet --virtual-network murmur-vnet --registration-enabled false
+
 az postgres flexible-server create --resource-group "$RG" --name <server name> --location "$LOCATION" \
   --tier Burstable --sku-name Standard_B1ms --storage-size 32 \
   --admin-user murmur --admin-password '<a long password>' \
-  --public-access 0.0.0.0
-az postgres flexible-server db create --resource-group "$RG" --server-name <server name> --database-name murmur
+  --vnet murmur-vnet --subnet db --private-dns-zone murmur.private.postgres.database.azure.com
+az postgres flexible-server db create --resource-group "$RG" --server-name <server name> --name murmur
 ```
 
-`--public-access 0.0.0.0` lets resources inside Azure reach the server, still behind its password and TLS. To keep
-it off any public address, create it with private access in a virtual network that the Container Apps environment
-shares instead.
+Don't use `--public-access 0.0.0.0` instead: it lets in connections from any resource in Azure, including other
+customers' ([Azure](https://learn.microsoft.com/en-us/azure/postgresql/network/concepts-networking-public#allow-all-azure-ip-addresses)).
+Nor a firewall rule for the app's outbound addresses: on Container Apps they can change over time
+([Azure](https://learn.microsoft.com/en-us/azure/container-apps/networking#ports-and-ip-addresses)).
 
 The store's URL is then:
 
@@ -65,8 +83,12 @@ which runs in transaction mode ([docs/managed-services.md](../../docs/managed-se
 
 ## 3. Create the environment
 
+The environment goes in the `apps` subnet. It can't move to another network later.
+
 ```sh
-az containerapp env create --name murmur-env --resource-group "$RG" --location "$LOCATION"
+az containerapp env create --name murmur-env --resource-group "$RG" --location "$LOCATION" \
+  --infrastructure-subnet-resource-id "$(az network vnet subnet show --resource-group "$RG" \
+    --vnet-name murmur-vnet --name apps --query id --output tsv)"
 ```
 
 The app's address will be `https://murmur-hub.<the environment's default domain>`:
@@ -178,24 +200,34 @@ Azure Cache for Redis is closed to new customers and retiring.
 
 ## App Service for Containers
 
-App Service runs the same image on a Linux plan. Its front end ends connections that sit idle for about four
-minutes, and that limit can't be changed
-([Azure](https://learn.microsoft.com/en-us/troubleshoot/azure/app-service/web-request-times-out-app-service));
-the 25-second pings keep laptops' connections from sitting idle. WebSockets are always on for Linux apps.
+App Service runs the same image on a Linux plan. Microsoft documents a request timeout of 240 seconds on Linux,
+which it puts down to the Azure Load Balancer's default idle timeout of four minutes
+([Azure](https://learn.microsoft.com/en-us/troubleshoot/azure/app-service/web-request-times-out-app-service)).
+The 25-second pings keep laptops' connections from sitting idle; if one is still cut, the laptop reconnects on its
+own. WebSockets are always on for Linux apps.
 
-1. Create the database as in step 2.
-2. Create a Linux plan, Basic (B1) or above, since only paid plans keep the app always on (B1 costs about $12 a
-   month), and the app:
+1. Create the network and the database as in step 2. The `apps` subnet is for Container Apps only; App Service needs
+   a subnet of its own:
+
+   ```sh
+   az network vnet subnet create --resource-group "$RG" --vnet-name murmur-vnet --name web \
+     --address-prefixes 10.42.2.0/27 --delegations Microsoft.Web/serverFarms
+   ```
+
+2. Create a Linux plan, Basic (B1, about $12 a month) or above: only paid plans keep the app always on and join a
+   virtual network. Then create the app and join it to the `web` subnet:
 
    ```sh
    az appservice plan create --name murmur-plan --resource-group "$RG" --is-linux --sku B1
    az webapp create --name <app name> --resource-group "$RG" --plan murmur-plan \
      --container-image-name "ghcr.io/eledoneai/murmur-hub:$VERSION"
+   az webapp vnet-integration add --name <app name> --resource-group "$RG" --vnet murmur-vnet --subnet web
    az webapp show --name <app name> --resource-group "$RG" --query defaultHostName --output tsv
    ```
 
-   The last command prints the app's address. `PUBLIC_URL` is `https://` followed by it, or your own domain once
-   you have added one.
+   The app then reaches the database through the network, and finds its name through the private DNS zone linked to
+   it ([Azure](https://learn.microsoft.com/en-us/azure/app-service/overview-vnet-integration)). The last command
+   prints the app's address. `PUBLIC_URL` is `https://` followed by it, or your own domain once you have added one.
 
 3. Turn on Always On, and set the settings. `WEBSITES_PORT=8080` tells App Service which port the hub listens on.
 

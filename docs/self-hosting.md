@@ -230,8 +230,9 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
   traffic. Raising it, to 3600 for example, is harmless but not needed
   ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).
 - **Google Cloud Run** ends every request at its timeout, 60 minutes at most: deploy with `--timeout=3600`.
-- **Azure Container Apps and App Service** document a timeout of about four minutes. The pings keep a connection
-  from sitting idle that long; if one is still cut, the laptop reconnects ([deploy/azure](../deploy/azure)).
+- **Azure Container Apps and App Service** document a request timeout of 240 seconds, which App Service puts down
+  to the Azure Load Balancer's idle timeout of four minutes. The pings keep a connection from sitting idle; if one is
+  still cut, the laptop reconnects ([deploy/azure](../deploy/azure)).
 - **Other proxies and load balancers**: allow WebSocket upgrades and set the idle timeout to an hour or more.
 
 Hub instances don't need sticky sessions: each laptop's connection stays on the instance it reached, and the bus
