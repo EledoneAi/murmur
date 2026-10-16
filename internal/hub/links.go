@@ -1,8 +1,10 @@
 package hub
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -43,7 +45,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "this laptop is not signed in to murmur: run `murmur join`", http.StatusUnauthorized)
 		return
 	}
-	c, err := websocket.Accept(w, r, nil)
+	c, err := websocket.Accept(smallSend{w}, r, nil)
 	if err != nil {
 		return
 	}
@@ -51,8 +53,9 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	conn := transport.New(ctx, c, outboxDepth)
+	late := time.AfterFunc(helloWait, conn.Cancel) // a laptop says hello at once
 	hello, err := conn.Read()
-	if err != nil {
+	if !late.Stop() || err != nil {
 		return
 	}
 	if hello.T != protocol.FrameHello || hello.Protocol != protocol.Version {
@@ -92,6 +95,23 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		}
 		h.handle(l, f)
 	}
+}
+
+// sendBuffer is the most the kernel holds for one laptop's connection, unsent or unacknowledged, before a write to it
+// waits, rather than the megabytes it would let it grow to for a laptop that reads slowly: the hub's container pays
+// for them, with every slow laptop at once. A laptop that takes more than ten seconds to read a frame is let go and
+// reconnects.
+const sendBuffer = 64 << 10
+
+// smallSend hands websocket.Accept the laptop's connection with a send buffer of sendBuffer.
+type smallSend struct{ http.ResponseWriter }
+
+func (w smallSend) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	c, rw, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	if t, ok := c.(*net.TCPConn); ok {
+		_ = t.SetWriteBuffer(sendBuffer)
+	}
+	return c, rw, err
 }
 
 func (l *link) send(f protocol.Frame) {

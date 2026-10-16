@@ -46,6 +46,7 @@ const (
 	aliveEvery   = 10 * time.Second // each instance says which laptops it still holds
 	aliveTimeout = 35 * time.Second // after which another instance's laptops count as gone
 	codeTTL      = 10 * time.Minute
+	helloWait    = 10 * time.Second
 	frameWindow  = 10 * time.Second
 	maxFrames    = 300 // in frameWindow, from one laptop
 )
