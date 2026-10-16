@@ -204,6 +204,36 @@ func TestState(t *testing.T) {
 	}
 }
 
+// Reading a checkout that hasn't moved since starts git twice, and a read still sees every change: more lines in a
+// file already changed, a branch below renamed, a commit.
+func TestReadAgain(t *testing.T) {
+	dir, git := newRepo(t)
+	write(t, dir, map[string]string{"a.go": "one\n"})
+	git("add", "-A")
+	git("commit", "-qm", "first")
+	git("switch", "-qc", "feat-1")
+	git("switch", "-qc", "feat-2")
+	write(t, dir, map[string]string{"a.go": "one\ntwo\n"})
+	if r := Read(dir); r.Added != 1 || r.Base != "feat-1" {
+		t.Fatalf("first read: %+v", r.State)
+	}
+	if n := spawns(t, func() { Read(dir) }); n != 2 {
+		t.Fatalf("read again: git started %d times", n)
+	}
+	write(t, dir, map[string]string{"a.go": "one\ntwo\nthree\n"}) // git status still says " M a.go"
+	if r := Read(dir); r.Added != 2 {
+		t.Fatalf("after more lines: %+v", r.State)
+	}
+	git("branch", "-m", "feat-1", "feat-0")
+	if r := Read(dir); r.Base != "feat-0" {
+		t.Fatalf("after a rename: %+v", r.State)
+	}
+	git("commit", "-qam", "two")
+	if r := Read(dir); r.Added != 2 || r.Changed != 1 || r.Base != "feat-0" || len(r.Files) != 1 {
+		t.Fatalf("after a commit: %+v, files %v", r.State, r.Files)
+	}
+}
+
 // A worktree keeps its rebase in its own git folder, not in the main checkout's .git.
 func TestOpInAWorktree(t *testing.T) {
 	dir, git := newRepo(t)

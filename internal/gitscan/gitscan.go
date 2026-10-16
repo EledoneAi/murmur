@@ -55,23 +55,39 @@ func repoName(origin, top string) string {
 
 var host, _ = os.Hostname()
 
+// Read reads a checkout from a folder in it. Each read starts git twice: once for where the checkout is, the commits
+// at HEAD and at every branch's tip and the local branches' names, once for git status. When those, and the size and
+// time of each file status names, are as they were at the checkout's last read, the rest of that read holds; else
+// four more calls read what changed.
 func Read(cwd string) Result {
 	ctx, done := context.WithTimeout(context.Background(), 8*time.Second)
 	defer done()
-	out, err := git(ctx, cwd, "rev-parse", "--show-toplevel", "--show-prefix", "--absolute-git-dir", "--abbrev-ref", "HEAD")
+	out, err := git(ctx, cwd, "rev-parse", "--show-toplevel", "--show-prefix", "--absolute-git-dir", "HEAD", "--branches", "--remotes",
+		"--symbolic-full-name", "--branches", "--abbrev-ref", "HEAD")
 	lines := strings.Split(out, "\n")
-	if err != nil || len(lines) < 4 {
+	if err != nil || len(lines) < 5 {
 		return Result{Top: cwd, Repo: filepath.Base(cwd)}
 	}
-	r := Result{Top: lines[0], Branch: lines[3]}
+	r := Result{Top: lines[0], Branch: lines[len(lines)-1]}
 	r.Dir, r.Op = strings.TrimSuffix(lines[1], "/"), opOf(lines[2])
 	sum := sha256.Sum256([]byte(host + "\x00" + r.Top))
 	r.Tree = hex.EncodeToString(sum[:6])
-	origin, _ := git(ctx, r.Top, "config", "--get", "remote.origin.url")
-	r.Repo = repoName(origin, r.Top)
+	origin := remoteOf(ctx, r.Top)
+	r.Repo = repoName(origin.url, r.Top)
 	if r.Branch == "HEAD" {
 		r.Branch = "detached"
 	}
+	status, err := git(ctx, r.Top, "status", "--porcelain", "-z", "--untracked-files=all")
+	if err != nil {
+		status = ""
+	}
+	paths, untracked := statusPaths(status)
+	key := keyOf(r.Top, []string{r.Branch, origin.ref, strings.Join(lines[3:len(lines)-1], " "), status}, paths)
+	if last, ok := lastRead(r.Top, key); ok {
+		r.Files, r.Added, r.Deleted, r.Changed, r.Base, r.Detached = last.Files, last.Added, last.Deleted, last.Changed, last.Base, last.Detached
+		return r
+	}
+
 	seen := map[string]bool{}
 	add := func(p string) {
 		if p != "" && !seen[p] && len(seen) < 5000 { // cut to 300 below, once lockfiles and ignored files are out
@@ -89,13 +105,8 @@ func Read(cwd string) Result {
 			add(p)
 		}
 	}
-	var untracked []string
-	if st, err := git(ctx, r.Top, "status", "--porcelain", "-z", "--untracked-files=all"); err == nil {
-		var paths []string
-		paths, untracked = statusPaths(st)
-		for _, p := range paths {
-			add(p)
-		}
+	for _, p := range paths {
+		add(p)
 	}
 	r.Files = slices.DeleteFunc(r.Files, func(p string) bool { return lockfiles[filepath.Base(p)] })
 	r.Files = dropUnshared(ctx, r.Top, r.Files)
@@ -104,7 +115,7 @@ func Read(cwd string) Result {
 
 	// The size of the change counts what the branch would merge, so it is taken against the default branch, unlike
 	// Files. Two more git calls: the diff, and a walk down HEAD's first parents for the branch below it.
-	ref, def := defaultBranch(ctx, r.Top)
+	ref, def := origin.ref, origin.branch
 	if numstat, err := git(ctx, r.Top, "diff", "--numstat", "-z", "--no-ext-diff", "--no-textconv", "--merge-base", cmp.Or(ref, "HEAD")); err == nil {
 		r.Added, r.Deleted, r.Changed = countNumstat(numstat)
 	}
@@ -119,6 +130,7 @@ func Read(cwd string) Result {
 			r.Detached = head
 		}
 	}
+	keep(r.Top, key, r)
 	return r
 }
 
@@ -182,24 +194,35 @@ func untrackedLines(top string, paths []string) int {
 	return n
 }
 
-// defaults keeps each checkout's default branch for a while: it rarely changes, and finding it is a git call.
-var defaults sync.Map // top -> found
+// remotes keeps each checkout's origin and default branch for a while: they rarely change, and each is a git call.
+var remotes sync.Map // top -> remote
 
-type found struct {
-	ref, name string
-	at        time.Time
+type remote struct {
+	url, ref, branch string // origin's URL; the default branch's ref and name
+	at               time.Time
+}
+
+func remoteOf(ctx context.Context, top string) remote {
+	if f, ok := remotes.Load(top); ok && time.Since(f.(remote).at) < 10*time.Minute {
+		return f.(remote)
+	}
+	url, _ := git(ctx, top, "config", "--get", "remote.origin.url")
+	ref, branch, ok := defaultBranch(ctx, top)
+	o := remote{url: url, ref: ref, branch: branch, at: time.Now()}
+	if ok {
+		remotes.Store(top, o)
+	}
+	return o
 }
 
 // defaultBranch finds the branch the team merges into: origin's HEAD, else main or master on origin, else here. It
-// returns the ref to diff against and the branch's name, or nothing when the repo has none of them.
-func defaultBranch(ctx context.Context, top string) (ref, name string) {
-	if f, ok := defaults.Load(top); ok && time.Since(f.(found).at) < 10*time.Minute {
-		return f.(found).ref, f.(found).name
-	}
+// returns the ref to diff against and the branch's name, or nothing when the repo has none of them, and false when
+// git failed.
+func defaultBranch(ctx context.Context, top string) (ref, name string, ok bool) {
 	candidates := []string{"refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"}
 	out, err := git(ctx, top, append([]string{"for-each-ref", "--format=%(refname)%00%(symref)", "refs/remotes/origin/HEAD"}, candidates...)...)
 	if err != nil {
-		return "", ""
+		return "", "", false
 	}
 	have := map[string]string{}
 	for line := range strings.SplitSeq(out, "\n") {
@@ -213,8 +236,59 @@ func defaultBranch(ctx context.Context, top string) (ref, name string) {
 		}
 	}
 	name = strings.TrimPrefix(strings.TrimPrefix(ref, "refs/remotes/origin/"), "refs/heads/")
-	defaults.Store(top, found{ref, name, time.Now()})
-	return ref, name
+	return ref, name, true
+}
+
+// reads keeps each checkout's last read, which holds while nothing it was read from has moved, for ten minutes at
+// most.
+// ponytail: what only $GIT_DIR/info/attributes or git's config changes shows within those ten minutes, not at once.
+var reads = struct {
+	sync.Mutex
+	m map[string]read // top ->
+}{m: map[string]read{}}
+
+type read struct {
+	key [sha256.Size]byte
+	r   Result
+	at  time.Time
+}
+
+// keyOf sums up what a read of top depends on: these words (the branch, the default branch, the commits, what git
+// status says), and the size and time of each file status names.
+func keyOf(top string, words, paths []string) [sha256.Size]byte {
+	var b []byte
+	for _, w := range words {
+		b = append(append(b, w...), 0)
+	}
+	for _, p := range paths {
+		if st, err := os.Lstat(filepath.Join(top, p)); err == nil {
+			b = strconv.AppendInt(append(strconv.AppendInt(b, st.Size(), 10), ' '), st.ModTime().UnixNano(), 10)
+		}
+		b = append(b, 0)
+	}
+	return sha256.Sum256(b)
+}
+
+// lastRead is the checkout's last read, if it was read from what key sums up.
+func lastRead(top string, key [sha256.Size]byte) (Result, bool) {
+	reads.Lock()
+	defer reads.Unlock()
+	last, ok := reads.m[top]
+	if !ok || last.key != key || time.Since(last.at) > 10*time.Minute {
+		return Result{}, false
+	}
+	last.r.Files = slices.Clone(last.r.Files)
+	return last.r, true
+}
+
+func keep(top string, key [sha256.Size]byte, r Result) {
+	reads.Lock()
+	defer reads.Unlock()
+	if len(reads.m) > 1000 {
+		clear(reads.m)
+	}
+	r.Files = slices.Clone(r.Files)
+	reads.m[top] = read{key: key, r: r, at: time.Now()}
 }
 
 // baseOf reads `git log --first-parent --format=%h%x00%D --decorate-refs=refs/heads/`, newest first: it returns the

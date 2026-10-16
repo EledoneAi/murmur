@@ -6,11 +6,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
-// What one read of a checkout costs, in time and in git processes, as the daemon reads a working session's every 20
-// seconds: go test ./internal/gitscan -run '^$' -bench . -benchmem
+// What one read of a checkout costs, in time, in git processes and in their CPU, as the daemon reads a working
+// session's every 20 seconds: go test ./internal/gitscan -run '^$' -bench . -benchmem
 
 // benchCheckout is a checkout of 2,000 files pushed to its origin, on a branch with five commits of its own, ten
 // files changed in the tree, and new files: five of source and a 3 MB data dump.
@@ -43,21 +45,52 @@ func benchCheckout(b *testing.B) string {
 		write(b, dir, map[string]string{fmt.Sprintf("new/n%d.go", i): strings.Repeat("new line\n", 200)})
 	}
 	write(b, dir, map[string]string{"data/dump.csv": strings.Repeat("1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16\n", 80_000)})
+	git("status") // refreshes the index, as the person's own git commands do: a fresh one makes every status hash files
 	return dir
 }
 
+// A read of the checkout as it was at the last one, as most of the daemon's are, and a read after a file changed.
 func BenchmarkRead(b *testing.B) {
 	dir := benchCheckout(b)
-	n := spawns(b, func() { Read(dir) })
-	b.ReportAllocs()
-	for b.Loop() {
-		Read(dir)
-	}
-	b.ReportMetric(float64(n), "git/op")
+	Read(dir)
+	b.Run("unchanged", func(b *testing.B) {
+		n := spawns(b, func() { Read(dir) })
+		b.ReportAllocs()
+		cpu := gitCPU()
+		for b.Loop() {
+			Read(dir)
+		}
+		b.ReportMetric(float64(n), "git/op")
+		b.ReportMetric(float64(gitCPU()-cpu)/float64(time.Millisecond)/float64(b.N), "git-cpu-ms/op")
+	})
+	b.Run("changed", func(b *testing.B) {
+		i := 0
+		edit := func() {
+			i++
+			write(b, dir, map[string]string{"pkg01/file0001.go": strings.Repeat("edited\n", 30+i%2)})
+		}
+		edit()
+		n := spawns(b, func() { Read(dir) })
+		b.ReportAllocs()
+		cpu := gitCPU()
+		for b.Loop() {
+			edit()
+			Read(dir)
+		}
+		b.ReportMetric(float64(n), "git/op")
+		b.ReportMetric(float64(gitCPU()-cpu)/float64(time.Millisecond)/float64(b.N), "git-cpu-ms/op")
+	})
+}
+
+// gitCPU is the CPU time of the processes this one started and waited for.
+func gitCPU() time.Duration {
+	var u syscall.Rusage
+	_ = syscall.Getrusage(syscall.RUSAGE_CHILDREN, &u)
+	return time.Duration(syscall.TimevalToNsec(u.Utime) + syscall.TimevalToNsec(u.Stime))
 }
 
 // spawns counts the git processes f starts, through a git on PATH that notes each one.
-func spawns(b *testing.B, f func()) int {
+func spawns(b testing.TB, f func()) int {
 	b.Helper()
 	real, err := exec.LookPath("git")
 	if err != nil {
