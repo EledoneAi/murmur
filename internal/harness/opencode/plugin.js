@@ -44,19 +44,23 @@ export const Murmur = async ({ client, directory }) => {
 
   // murmur ends its side once the message is written, and waits for the answer
   const server = createServer({ allowHalfOpen: true }, (conn) => {
-    let data = ""
+    const chunks = []
+    let size = 0
     conn.on("data", (d) => {
-      data += d
-      if (data.length > 1 << 16) conn.destroy() // a message is a few kilobytes
+      size += d.length
+      if (size > 1 << 16) return conn.destroy() // a message is a few kilobytes
+      chunks.push(d)
     })
     conn.on("error", () => {})
     conn.on("end", async () => {
       try {
-        const m = JSON.parse(data)
-        await client.session.promptAsync({
+        const m = JSON.parse(Buffer.concat(chunks).toString("utf8")) // whole, so no character is cut in two
+        const res = await client.session.promptAsync({
           path: { id: m.session },
           body: { parts: [{ type: "text", text: m.text }], agent: agent.get(m.session) },
+          throwOnError: true,
         })
+        if (res?.error) throw new Error(res.error?.data?.message ?? res.error?.message ?? JSON.stringify(res.error))
         conn.end("ok\n")
       } catch (e) {
         conn.end(`error: ${e?.message ?? e}\n`) // murmur tells the sender

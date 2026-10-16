@@ -2,8 +2,11 @@ package claude
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/harness"
@@ -92,7 +95,23 @@ func EditSettings(path, exe string, add bool) error {
 	if !add && !found {
 		return nil
 	}
-	return harness.WriteObject(path, b, o, add)
+	if err := harness.WriteObject(path, b, o, add); errors.Is(err, harness.ErrComments) {
+		// Claude Code reads settings.json as strict JSON: comments or trailing commas already make it a Settings
+		// Error, so the person has the file to fix either way
+		if !add {
+			return fmt.Errorf("%s isn't valid JSON, which Claude Code needs too: take out the hooks whose command runs "+
+				"murmur hook claude, and %s in permissions.allow, by hand", config.Tildify(path), strings.Join(toolPermissions, " and "))
+		}
+		mine := map[string]any{}
+		for _, ev := range hookEvents {
+			mine[ev] = []json.RawMessage{hookGroup(ev, exe)}
+		}
+		return fmt.Errorf("%s isn't valid JSON, which Claude Code needs too: fix it and run murmur join again, or add this by hand: %s",
+			config.Tildify(path), harness.Marshal(map[string]any{"hooks": mine, "permissions": map[string]any{"allow": toolPermissions}}))
+	} else if err != nil {
+		return err
+	}
+	return nil
 }
 
 // SetupState says whether settings.json holds murmur's hooks and tool permissions, and its crossSessionInbound.

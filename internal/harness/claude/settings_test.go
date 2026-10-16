@@ -275,3 +275,24 @@ func TestOldHooks(t *testing.T) {
 		t.Fatal("an older murmur's hooks don't count as connected: the update wouldn't set them up again")
 	}
 }
+
+// A settings.json with comments is no valid JSON for Claude Code either: murmur leaves it as it is and says where,
+// and what to add or take out by hand.
+func TestSettingsWithComments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	commented := "{\n  // mine\n  \"model\": \"opus\",\n}\n"
+	_ = os.WriteFile(path, []byte(commented), 0o644)
+	err := EditSettings(path, "/opt/murmur", true)
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "isn't valid JSON") ||
+		!strings.Contains(err.Error(), "/opt/murmur hook claude start") || !strings.Contains(err.Error(), "mcp__murmur__send") {
+		t.Fatalf("join: %v", err)
+	}
+	withOurs := "{\n  // mine\n  \"permissions\": {\"allow\": [\"mcp__murmur__who\"]},\n}\n"
+	_ = os.WriteFile(path, []byte(withOurs), 0o644)
+	if err := EditSettings(path, "", false); err == nil || !strings.Contains(err.Error(), "by hand") {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != withOurs {
+		t.Fatal("a file with comments changed")
+	}
+}

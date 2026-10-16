@@ -152,6 +152,7 @@ esac
 		Edit, Who     string
 		Sockets       int
 		Mode, Reply   string
+		Refused       string
 		Prompts       []struct {
 			Path struct{ ID string }
 			Body struct {
@@ -164,10 +165,11 @@ esac
 		t.Fatalf("%v: %s", err, out)
 	}
 	if strings.Join(got.System, "|") != "the brief" || strings.Join(got.First, "|") != "the brief" || got.Edit != "bob/b1 is also changing x.go" ||
-		got.Who != "alice, you" || got.Sockets != 1 || got.Mode != "600" || got.Reply != "ok" {
+		got.Who != "alice, you" || got.Sockets != 1 || got.Mode != "600" || got.Reply != "ok" ||
+		got.Refused != "error: session not found" {
 		t.Fatalf("got %+v", got)
 	}
-	if len(got.Prompts) != 1 || got.Prompts[0].Path.ID != "s1" || got.Prompts[0].Body.Agent != "plan" || got.Prompts[0].Body.Parts[0].Text != "[murmur] bob: hi" {
+	if len(got.Prompts) != 1 || got.Prompts[0].Path.ID != "s1" || got.Prompts[0].Body.Agent != "plan" || got.Prompts[0].Body.Parts[0].Text != "[murmur] bob: hi, café" {
 		t.Fatalf("prompts: %+v", got.Prompts)
 	}
 	calls, _ := os.ReadFile(log)
