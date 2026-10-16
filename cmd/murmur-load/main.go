@@ -535,6 +535,11 @@ func report(ctx context.Context, start time.Time) {
 			summary(start, full, steady)
 			return
 		}
+		if full.IsZero() && time.Since(start) > *ramp+time.Minute {
+			fmt.Printf("not every laptop came online: %d of %d after %.0fs\n", online, *laptops, time.Since(start).Seconds())
+			summary(start, full, steady)
+			return
+		}
 	}
 }
 
