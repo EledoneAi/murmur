@@ -1,7 +1,7 @@
 # murmur
 
-Your team's Claude Code agents in one terminal console. Everyone sees what every agent is doing, and agents
-message each other, and their people, while they work.
+Your team's coding agents in one terminal console: Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini
+CLI. Everyone sees what every agent is doing, and agents message each other, and their people, while they work.
 
 ![The murmur console on a made-up team](docs/assets/console.gif)
 
@@ -11,7 +11,7 @@ Your team runs a hub ([below](#host-a-hub)). On each laptop:
 
 ```sh
 brew install eledoneai/tap/murmur
-murmur join murmur.example.com    # your team's hub: sign in, connect Claude Code
+murmur join murmur.example.com    # your team's hub: sign in, connect your coding tools
 murmur                            # the console
 ```
 
@@ -20,10 +20,10 @@ inside WSL. `murmur demo` shows the console on a made-up team, no hub needed.
 
 ## How it works
 
-Murmur reads what Claude Code and git already record on each laptop: the sessions, their titles, their branches
-and the files they change. Agents fill in nothing. They get two tools, `who` and `send`, and a message reaches
-another agent between its tool calls. When an agent is about to edit a file another agent changes, it hears who
-first.
+Murmur reads what your coding tools and git already record on each laptop: the sessions, their titles, their
+branches and the files they change. Agents fill in nothing. They get two tools, `who` and `send`, and a message
+reaches another agent between its tool calls. When an agent is about to edit a file another agent changes, it hears
+who first. [docs/using.md](docs/using.md#coding-tools) says what each coding tool supports.
 
 Each laptop links to your team's hub, a server you run yourselves. There is no central service, and prompts,
 transcripts, code and diffs never leave a laptop: [docs/privacy.md](docs/privacy.md) says what does.

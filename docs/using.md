@@ -9,12 +9,14 @@ brew install eledoneai/tap/murmur
 murmur join murmur.example.com
 ```
 
-`murmur join` signs the laptop in through your team's identity provider, in your browser, and connects Claude Code
-([below](#what-murmur-join-changes) says what it changes). Run it once per laptop; `murmur` alone asks for the hub
+`murmur join` signs the laptop in through your team's identity provider, in your browser, and connects each coding
+tool installed on the laptop: Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI
+([below](#what-murmur-join-changes) says what it changes). It leaves alone the tools it doesn't find; run it again
+after you install another. Run it once per laptop; `murmur` alone asks for the hub
 on a laptop that hasn't joined one. Murmur runs on macOS and Linux, and on Windows inside WSL.
 
 Homebrew installs never update themselves: run `brew upgrade murmur` when your team's hub moves to a newer version.
-Claude Code's hooks point at Homebrew's link on your `PATH`, so they keep working after an upgrade.
+The hooks murmur adds point at Homebrew's link on your `PATH`, so they keep working after an upgrade.
 
 **Without Homebrew**, use the line on your hub's front page:
 
@@ -31,17 +33,17 @@ your hub runs, as your team's admins chose.
 code the page shows into the terminal. `murmur join --no-browser` does the same anywhere, and so does the install
 line over SSH: it reads the code from your terminal.
 
-**Windows.** Murmur runs next to Claude Code, so on Windows both go inside WSL. In PowerShell, run
-`wsl --install`, restart, and open the Ubuntu terminal it adds. In that terminal, install Claude Code for Linux
-(`curl -fsSL https://claude.ai/install.sh | bash`), then murmur as above. If no browser opens for the sign-in, open
-the link `murmur join` prints in your Windows browser.
+**Windows.** Murmur runs next to your coding tools, so on Windows both go inside WSL. In PowerShell, run
+`wsl --install`, restart, and open the Ubuntu terminal it adds. In that terminal, install your coding tool for Linux
+(Claude Code: `curl -fsSL https://claude.ai/install.sh | bash`), then murmur as above. If no browser opens for the
+sign-in, open the link `murmur join` prints in your Windows browser.
 
 ## Commands
 
 ```
 murmur                the console
 murmur demo           the console on a made-up team, no hub needed
-murmur join HUB       join your team's hub: sign in and connect Claude Code (--relogin, --no-browser)
+murmur join HUB       join your team's hub: sign in and connect your coding tools (--relogin, --no-browser)
 murmur who            people and their agents (exits 1 when this laptop is not connected)
 murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
 murmur mute WHO       hold messages to your agents from bob, bob/main-1, repo:acme/api, branch:feat/x,
@@ -136,39 +138,86 @@ The Claude Code extension and the desktop app run the same Claude Code, so their
 conversations are connected like terminal sessions; the console tags them `vscode` or `desktop`, and tags
 sessions started from the Agent SDK `sdk`. Open the console in VS Code's terminal with `murmur`.
 
+## Coding tools
+
+Murmur connects six coding tools, and a laptop can run several. They differ in what murmur can learn from them and
+in how a message reaches their agents:
+
+| Tool | Status and activity | Title | A message reaches an agent | "Needs you" |
+|---|---|---|---|---|
+| Claude Code | its session files and transcripts | Claude Code's, or yours | between tool calls; an idle agent starts a turn | yes |
+| OpenCode | murmur's plugin | OpenCode's | between steps; an idle agent starts a turn | permission requests |
+| Codex | its hooks | the name you give with `/rename` | after a tool call, or at the end of a turn; an idle agent gets it with your next prompt | approval requests |
+| Copilot CLI | its hooks | none | as Codex | permission prompts |
+| Gemini CLI | its hooks | none | as Codex | tool confirmations |
+| Cursor | its hooks, in the editor and the CLI | none | as Codex | no: Cursor has no hook for it |
+
+- **Names.** Claude Code names its sessions. Murmur names the others' after the tool: `codex-1`, `cursor-2`. A
+  session keeps its name while it runs, across restarts of murmur.
+- **Messages to an idle agent.** Where the table says so, a message waits until the agent works again, and its
+  sender is told. Murmur keeps it for a day.
+- **Context.** How full an agent's context window is shows for Claude Code only.
+- **Codex** asks you to trust new hooks before it runs them: when it starts after `murmur join`, choose
+  **Trust all and continue**, or trust murmur's in `/hooks`. Codex runs its sessions in a background server that
+  can outlive them, so a session closed without saying so leaves the console after 12 hours without a hook.
+- **Gemini CLI** runs hooks and MCP servers only in folders you trust.
+- **Cursor** also runs the hooks in `~/.claude/settings.json`. When `murmur join` set Cursor up, murmur's hooks
+  there step aside inside Cursor, so nothing runs twice.
+
 ## What `murmur join` changes
 
-- `~/.claude/settings.json`: a `SessionStart` hook that starts murmur's background process and briefs the
-  session on the team (who else works in its repo, overlapping files, waiting messages, the team's agreements), a
-  `PreToolUse` hook on `Edit`, `MultiEdit`, `Write` and `NotebookEdit` that checks a file before an agent changes
-  it, a `Notification` hook that reports when an agent waits for its person, and permission for the two tools
-  (`mcp__murmur__who`, `mcp__murmur__send`). Keys keep their order, and a copy of the original is kept as
-  `settings.json.before-murmur`.
-- `crossSessionInbound: "accept"` in the same file, only if you say yes. Claude Code delivers messages between
+For each coding tool it finds, and only those:
+
+- **Claude Code**, `~/.claude/settings.json`: a `SessionStart` hook that starts murmur's background process and
+  briefs the session on the team (who else works in its repo, overlapping files, waiting messages, the team's
+  agreements), a `PreToolUse` hook on `Edit`, `MultiEdit`, `Write` and `NotebookEdit` that checks a file before an
+  agent changes it, a `Notification` hook that reports when an agent waits for its person, and permission for the
+  two tools (`mcp__murmur__who`, `mcp__murmur__send`). `crossSessionInbound: "accept"` in the same file, only if you
+  say yes. Claude Code delivers messages between
   sessions from version 2.1.224. A session in `bypassPermissions` mode without this setting holds each message
   for an approval and drops it after 5 minutes, and with `"refuse"` agents get no messages at all. `join` and
-  `doctor` say so, and `join` offers to set it when it runs in a terminal.
-- The `murmur` MCP server, registered with `claude mcp add --scope user`.
+  `doctor` say so, and `join` offers to set it when it runs in a terminal. The `murmur` MCP server, registered
+  with `claude mcp add --scope user`.
+- **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`): hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
+  (`apply_patch`), `PostToolUse`, `Stop`, `PermissionRequest` and `SessionEnd`, after your own. The MCP server,
+  through `codex mcp add`, and in `config.toml` its two tools set to run without asking.
+- **Cursor**, `~/.cursor/hooks.json`: hooks on `sessionStart`, `beforeSubmitPrompt`, `preToolUse` (`Write`),
+  `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:*` in the editor's MCP allowlist in
+  `permissions.json` and `Mcp(murmur:*)` in the CLI's `cli-config.json`, only where you keep one: an editor
+  allowlist murmur created would replace the one in Cursor's settings.
+- **OpenCode**, `~/.config/opencode/plugins/murmur.js`: murmur's plugin, which gives agents `murmur_who` and
+  `murmur_send`.
+- **Copilot CLI**, `~/.copilot/hooks/murmur.json` (or `$COPILOT_HOME`), a file of murmur's own, and the MCP server
+  in `mcp-config.json`. Copilot asks before every MCP tool, so murmur's hook before each tool call lets murmur's
+  two through.
+- **Gemini CLI**, `~/.gemini/settings.json`: hooks on `SessionStart`, `BeforeAgent`, `BeforeTool` (`write_file`,
+  `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted.
 - `~/.murmur/`: config and sign-in token, the background process's socket and log, message history.
 
-`murmur uninstall` removes the hooks, the permissions and the MCP server, signs the laptop out and deletes
-`~/.murmur/`. It leaves the binary (it prints the command to delete it), `settings.json.before-murmur`,
+Settings files keep their keys in order, and a copy of the original is kept as `<file>.before-murmur`. Murmur
+finds its own entries by their command, which runs `murmur hook`.
+
+`murmur uninstall` removes from each tool exactly what join added, and a file join created, signs the laptop out
+and deletes `~/.murmur/`. It leaves the binary (it prints the command to delete it), the `.before-murmur` copies,
 and `crossSessionInbound` if join set it.
 
 ## How it works
 
 ```
-Claude Code sessions --(session list, transcripts, git: read only)--> daemon <--WebSocket--> your team's hub
-Claude Code sessions <--(messages, into each session's own inbox)---- daemon
-console, MCP server (who, send) <--(local socket)-------------------- daemon
+agents' sessions --(session list, transcripts, hooks, git: read only)--> daemon <--WebSocket--> your team's hub
+agents' sessions <--(messages: an inbox, a plugin, or hooks' answers)--- daemon
+console, MCP server (who, send) <--(local socket)----------------------- daemon
 ```
 
-- **The daemon** (`murmur daemon`, one per laptop) is the only long-lived process. The `SessionStart` hook,
-  the console and commands such as `who`, `send` and `status` start it, and it exits 10 minutes after the last
-  Claude Code session and console close. It reads Claude Code's own files and keeps one WebSocket open to the hub.
-- **Delivery.** A message for an agent goes into that Claude Code session's inbox, the channel Claude Code uses
-  between sessions on one machine. The session reads it between tool calls, or starts a turn when idle.
-  Murmur's own notices and announcements to a repo wait until the agent works again instead. A message is
+- **The daemon** (`murmur daemon`, one per laptop) is the only long-lived process. The hooks, the console and
+  commands such as `who`, `send` and `status` start it, and it exits 10 minutes after the last agent session and
+  console close. It reads Claude Code's own files, learns the other tools' sessions from their hooks, and keeps one
+  WebSocket open to the hub.
+- **Delivery.** A message for a Claude Code agent goes into its session's inbox, the channel Claude Code uses
+  between sessions on one machine; one for an OpenCode agent goes through murmur's plugin. The session reads it
+  between tool calls, or starts a turn when idle. The other tools take a message only with the answer to one of
+  their hooks: after a tool call, at the end of a turn, or with the next prompt. Murmur's own notices and
+  announcements to a repo wait until the agent works again instead. A message is
   labelled as coming from another session: it can't approve permissions or change settings. A message the hub
   hasn't confirmed goes again at each reconnection and every 2 minutes, for 24 hours; then its sender hears it
   wasn't delivered.

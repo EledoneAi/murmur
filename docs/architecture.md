@@ -1,11 +1,11 @@
 # Architecture
 
-Murmur links a team's Claude Code agents. Each person runs a small program on their laptop, and the team runs one hub. There's no central service: whoever deploys a hub owns it, and laptops talk only to their hub.
+Murmur links a team's coding agents: Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI. Each person runs a small program on their laptop, and the team runs one hub. There's no central service: whoever deploys a hub owns it, and laptops talk only to their hub.
 
 ```
  laptop                                         hub (one or more instances)
 ┌──────────────────────────────────────┐        ┌──────────────────────────────┐
-│ Claude Code sessions                 │        │ core: presence, routing,     │
+│ coding tools' sessions               │        │ core: presence, routing,     │
 │   │ hooks, session files, inbox      │        │       overlaps, limits       │
 │   ▼                                  │  wss   │ web: sign-in, team, admin    │
 │ daemon ── ipc socket ── console      │◀──────▶│ dist: install.sh, binaries   │
@@ -27,6 +27,8 @@ Murmur links a team's Claude Code agents. Each person runs a small program on th
 | `internal/transport` | The hub's side of one WebSocket connection: read loop, writer, pings. The daemon keeps its own connection |
 | `internal/harness` | What murmur needs from an AI coding tool (a harness): the `Harness` interface, with the optional `Lister`, `Pusher` and `Reader`; hook events; a session's activity; the order-preserving editor for settings files |
 | `internal/harness/claude` | Everything murmur reads or writes in Claude Code: session registry, transcripts, inbox socket, settings.json, hook payloads |
+| `internal/harness/hookish` | The harnesses whose hooks copied Claude Code's, one row of a table each: Codex, Cursor, Copilot CLI, Gemini CLI |
+| `internal/harness/opencode` | OpenCode, through a plugin (`plugin.js`, built into the binary) |
 | `internal/gitscan` | Repo, branch and changed files of a checkout, the size of its change and where it stands (base branch, rebase or merge, folder) |
 | `internal/ipc` | The local socket between the daemon and its clients: requests, replies, snapshots, and a client |
 | `internal/daemon` | The laptop process: sessions, hub link, messages, mutes, outbox, history, ipc server |
@@ -88,9 +90,19 @@ Environment variables only cover what is needed to start: where to listen, the s
 
 ## The laptop
 
-The daemon is the only long-lived process. The console, the MCP server, one-shot commands and Claude Code's hooks talk to it over a unix socket. It reads Claude Code's own files and never asks agents to fill anything in. Mutes live in its history on the laptop.
+The daemon is the only long-lived process. The console, the MCP server, one-shot commands and the coding tools' hooks talk to it over a unix socket. It reads what the tools record and never asks agents to fill anything in. Mutes live in its history on the laptop.
 
-Claude Code waits for two hooks, each bounded well under a second:
+### Harnesses
+
+Each coding tool, a harness, is behind `harness.Harness`: connect and disconnect for join and uninstall, checks for doctor, and reading a hook's input and writing its answer. Hooks run `murmur hook <harness> <event>`, which hands the daemon a `harness.Event` in murmur's words (start, prompt, before-tool, after-tool, stop, needs, end) and prints the daemon's answer in the tool's own dialect. Three optional capabilities, found by type assertion, say what more a tool offers:
+
+- **`Lister`**: the tool keeps a registry of its live sessions, which the daemon watches (Claude Code's `~/.claude/sessions`). Without one, the daemon learns each session from its hooks: the first names it (`codex-1`), a prompt or a tool call means it works, the end of a turn that it waits, and it goes when it ends, when its process does, or after 12 hours without a hook. A hook finds its tool's process by walking up past the shell that runs it. Sessions learned this way are kept in the history, so a restarted daemon knows them again.
+- **`Pusher`**: murmur can hand a running session a message (Claude Code's inbox, OpenCode's plugin). Without it, messages wait in a queue per session and leave with the answer to its next after-tool, stop or prompt hook. An idle agent gets them only when its person prompts it again; its sender is told.
+- **`Reader`**: the tool's transcripts are worth reading for the title, pull requests, tool calls and context use (Claude Code). Without one, tool calls come from the tool's hooks, through one table of every tool's tool names.
+
+Sessions are keyed by harness and session id. The console, the hub and the protocol don't know harnesses: an agent's `App` says which tool it runs in. The MCP server knows which session it speaks for from its parent process, the session id a tool gives it in its environment or in a tool call's metadata, or, failing those, the busy session of its tool.
+
+The tools that wait for hooks wait for these, each bounded well under a second:
 - **Session start:** the daemon briefs the session: who else works in its repo, the files its checkout shares with another (it asks the hub with `check`) and messages waiting for it, in five lines at most, then the team's agreements, which the daemon keeps from the hub's welcome. The MCP server's instructions carry the agreements too.
 - **Before an edit:** the daemon asks the hub whether another checkout of the repo changes the file, for at most half a second, and the first such edit in a conversation is turned back once with the other agent's name.
 

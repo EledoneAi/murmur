@@ -133,7 +133,7 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Casks
     homepage: https://github.com/EledoneAi/murmur
-    description: Your team's Claude Code agents in one terminal console
+    description: Your team's coding agents in one terminal console
     skip_upload: auto
     # brew audit --strict wants the version interpolated in the URL rather than written out.
     url:
