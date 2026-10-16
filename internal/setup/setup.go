@@ -426,15 +426,17 @@ func Hook(name, event string) {
 }
 
 func hook(h harness.Harness, event string, stdin io.Reader) []byte {
-	if h != nil && h.Name() == claude.Name && os.Getenv("CURSOR_VERSION") != "" {
-		// Cursor runs the hooks in ~/.claude/settings.json too, with its own input, and its model reads only some of
-		// what Claude Code's answers say. Cursor's own murmur hooks speak for its sessions; without them, these do.
+	data, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
+	if h != nil && h.Name() == claude.Name && bytes.Contains(data, []byte(`"cursor_version"`)) {
+		// Cursor runs the hooks in ~/.claude/settings.json too, with its own input, which names its version, and its
+		// model reads only some of what Claude Code's answers say. Cursor's own murmur hooks speak for its sessions;
+		// without them, these do.
 		if hookish.Cursor.Connected() {
 			return nil
 		}
 		h = hookish.Cursor
 	}
-	ev, ok := hookEvent(h, event, stdin)
+	ev, ok := hookEvent(h, event, data)
 	if !ok {
 		return nil
 	}
@@ -465,11 +467,10 @@ func hook(h harness.Harness, event string, stdin io.Reader) []byte {
 }
 
 // hookEvent reads a hook's input, and says whether it is one murmur acts on.
-func hookEvent(h harness.Harness, event string, stdin io.Reader) (harness.Event, bool) {
+func hookEvent(h harness.Harness, event string, data []byte) (harness.Event, bool) {
 	if h == nil {
 		return harness.Event{}, false
 	}
-	data, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
 	ev, err := h.Parse(event, data)
 	if err != nil || ev.Kind == "" || ev.SessionID == "" {
 		return ev, false

@@ -194,10 +194,10 @@ func TestHookTerminal(t *testing.T) {
 	}
 	t.Setenv("TMUX_PANE", "%7")
 	t.Setenv("TERM_PROGRAM", "iTerm.app")
-	if ev, _ := hookEvent(claude.Claude{}, "start", strings.NewReader(`{"session_id":"s1"}`)); ev.Term["TMUX_PANE"] != "%7" || ev.Term["TERM_PROGRAM"] != "iTerm.app" || len(ev.Term) != 2 {
+	if ev, _ := hookEvent(claude.Claude{}, "start", []byte(`{"session_id":"s1"}`)); ev.Term["TMUX_PANE"] != "%7" || ev.Term["TERM_PROGRAM"] != "iTerm.app" || len(ev.Term) != 2 {
 		t.Fatalf("start: %v", ev.Term)
 	}
-	if ev, _ := hookEvent(claude.Claude{}, "edit", strings.NewReader(`{"session_id":"s1"}`)); ev.Term != nil {
+	if ev, _ := hookEvent(claude.Claude{}, "edit", []byte(`{"session_id":"s1"}`)); ev.Term != nil {
 		t.Fatalf("edit: %v", ev.Term)
 	}
 }
@@ -207,12 +207,17 @@ func TestHookTerminal(t *testing.T) {
 func TestCursorRunsClaudeHooks(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())
 	t.Setenv("CURSOR_CONFIG_DIR", t.TempDir())
-	t.Setenv("CURSOR_VERSION", "3.13.25")
 	input := `{"conversation_id":"c9","session_id":"c9","tool_name":"Write","tool_input":{"file_path":"/w/x.go","content":"x"},"cwd":"","hook_event_name":"preToolUse","cursor_version":"3.13.25","workspace_roots":["/w"]}`
 	fakeDaemon(t, &ipc.Reply{OK: true, Text: "bob/b1 is also changing x.go"})
 	out := hook(claude.Claude{}, "edit", strings.NewReader(input))
 	if !strings.Contains(string(out), `"permission":"deny"`) || !strings.Contains(string(out), `"agent_message":"bob/b1 is also changing x.go"`) {
 		t.Fatalf("without murmur's Cursor hooks: %s", out)
+	}
+	// Claude Code in Cursor's terminal is Claude Code: its input names no Cursor version, whatever the environment says
+	t.Setenv("CURSOR_VERSION", "3.13.25")
+	claudeInput := `{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/w/x.go"}}`
+	if out := hook(claude.Claude{}, "edit", strings.NewReader(claudeInput)); string(out) != string(claude.Deny("bob/b1 is also changing x.go")) {
+		t.Fatalf("Claude Code in Cursor's terminal: %s", out)
 	}
 	if checks := hookish.Cursor.Connect("/opt/murmur", nil); !checks[0].OK {
 		t.Fatalf("connect: %+v", checks)
