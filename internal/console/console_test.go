@@ -86,24 +86,31 @@ func golden(t *testing.T, name, got string) {
 	}
 }
 
-// Every screen fills the terminal exactly, at any size, whatever is selected.
+// Every screen fills the terminal exactly, at any size, whatever is selected, a thread too.
 func TestScreenFits(t *testing.T) {
-	for _, size := range [][2]int{{40, 10}, {60, 24}, {84, 30}, {110, 12}, {160, 50}, {200, 8}} {
+	for _, size := range [][2]int{{40, 10}, {60, 24}, {84, 30}, {110, 12}, {160, 50}, {200, 8}, {84, 5}} {
 		w, h := size[0], size[1]
 		m := demo(w, h, dark)
-		for range 12 {
+		fits := func(where string) {
+			t.Helper()
 			text, _ := m.screen()
 			lines := strings.Split(text, "\n")
 			if len(lines) != h {
-				t.Fatalf("%dx%d: %d lines", w, h, len(lines))
+				t.Fatalf("%dx%d, %s: %d lines", w, h, where, len(lines))
 			}
 			for _, l := range lines {
 				if ansi.StringWidth(l) != w {
-					t.Fatalf("%dx%d: a line is %d wide: %q", w, h, ansi.StringWidth(l), ansi.Strip(l))
+					t.Fatalf("%dx%d, %s: a line is %d wide: %q", w, h, where, ansi.StringWidth(l), ansi.Strip(l))
 				}
 			}
+		}
+		for range 12 {
+			fits("on " + m.selected)
 			press(m, "down")
 		}
+		m.selected = "agent:alice/api-9b"
+		press(m, "enter")
+		fits("in a thread")
 	}
 }
 

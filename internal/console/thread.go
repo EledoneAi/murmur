@@ -180,7 +180,7 @@ func (m *model) threadScreen(b *board, room int) []line {
 	compose = append(compose, line{text: pad(" "+st.dim.Render(m.readsWhen(b, t.to)), m.w)})
 
 	// the messages, newest at the bottom: only as many as the screen and the scroll show are drawn
-	room -= len(compose)
+	room = max(0, room-len(compose)) // a terminal too short for both keeps the composer
 	var body []line
 	for i := len(msgs) - 1; i >= 0 && len(body) < room+t.scroll; i-- {
 		body = append(lines(msgs[i]), body...)
