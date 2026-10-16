@@ -110,7 +110,7 @@ func (m *model) now() time.Time { return m.clock() }
 
 // oneProcessor runs the console's goroutines on one processor, unless GOMAXPROCS says otherwise. Bubble Tea wakes
 // the console 60 times a second to flush a frame, and with a processor for every core each wake-up woke idle threads
-// too: 0.47% of a core at rest, against 0.30% on one. The console draws one frame at a time anyway.
+// too: 0.47% of a core at rest, against about 0.35% on one. The console draws one frame at a time anyway.
 func oneProcessor() {
 	if os.Getenv("GOMAXPROCS") == "" {
 		runtime.GOMAXPROCS(1)
