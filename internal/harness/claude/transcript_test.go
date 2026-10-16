@@ -226,6 +226,25 @@ func TestLongTranscriptFromItsStart(t *testing.T) {
 	}
 }
 
+// A transcript whose last answer came before a tool output longer than recentCalls still shows that answer, read from
+// its start: its call, and the context it used. The output is in many lines, or in one too long to read.
+func TestLastAnswerBeforeALongOutput(t *testing.T) {
+	answer := answerLine(toolBlock("Bash", `{"command":"go test ./..."}`), 300_000)
+	output := func(n int) string {
+		return `{"parentUuid":"p","message":{"role":"user","content":[{"type":"tool_result","content":"` + strings.Repeat("o", n) +
+			`"}]},"type":"user"}` + "\n"
+	}
+	many := slices.Repeat([]string{output(60_000)}, recentCalls/60_000+10)
+	for name, lines := range map[string][]string{"many lines": many, "one line": {output(recentCalls + 1000)}} {
+		path := filepath.Join(t.TempDir(), "t.jsonl")
+		appendLines(t, path, append([]string{answer}, lines...)...)
+		s := &reading{Transcript: &Transcript{Path: path}}
+		if s.Read(); s.Doing != "Running go" || s.Kinds != "x" || s.Context != 30 {
+			t.Fatalf("%s: doing %q kinds %q context %d", name, s.Doing, s.Kinds, s.Context)
+		}
+	}
+}
+
 func TestWindowOf(t *testing.T) {
 	for model, want := range map[string]int{"claude-opus-5-5": 1_000_000, "claude-fable-5-1": 1_000_000, "": 1_000_000,
 		"claude-haiku-5-5": 200_000, "claude-sonnet-4-5": 200_000, "claude-sonnet-4-5[1m]": 1_000_000, "claude-3-7-sonnet": 200_000,

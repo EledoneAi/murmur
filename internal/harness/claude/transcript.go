@@ -28,7 +28,8 @@ var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"cust
 // readers keeps the buffers transcripts are read through: each session's is read again at every line Claude Code adds.
 var readers = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64<<10) }}
 
-// recentCalls is how much of a long transcript's end its tool calls are read from, when it is read from its start.
+// recentCalls is how much of a long transcript's end its tool calls are read from, when it is read from its start,
+// with the last answer before it.
 // ponytail: Kinds keeps 30 calls and the loop hint 12, which 4 MB holds unless the answers are huge; the folders
 // the calls named (Dirs, for the repos a session touched) lose what came before.
 const recentCalls = 4 << 20
@@ -86,6 +87,9 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 	}()
 	changed := false
 	pos := t.Offset
+	// the last answer before callsFrom, decoded when the read gets past it: a long tool output can fill the window,
+	// and the session would show no activity and no context until its next answer
+	var before []byte
 	for {
 		line, err := r.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
@@ -104,9 +108,15 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 			break // EOF, possibly mid-line: that line is read again next time
 		}
 		pos += int64(len(line))
+		if len(before) > 0 && pos > callsFrom {
+			changed = t.assistant(before, a) || changed
+			before = before[:0]
+		}
 		if bytes.Contains(line, assistantLine) {
 			if pos > callsFrom {
 				changed = t.assistant(line, a) || changed
+			} else {
+				before = append(before[:0], line...)
 			}
 			continue
 		}
@@ -163,6 +173,9 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		if title := t.title(); a.Title != title {
 			a.Title, changed = title, true
 		}
+	}
+	if len(before) > 0 { // nothing but lines too long to read came after it
+		changed = t.assistant(before, a) || changed
 	}
 	t.Offset = pos
 	return changed
