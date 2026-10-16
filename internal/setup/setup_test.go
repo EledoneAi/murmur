@@ -14,6 +14,7 @@ import (
 
 	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/harness/claude"
+	"github.com/EledoneAi/murmur/internal/harness/hookish"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/release"
 )
@@ -198,5 +199,25 @@ func TestHookTerminal(t *testing.T) {
 	}
 	if ev, _ := hookEvent(claude.Claude{}, "edit", strings.NewReader(`{"session_id":"s1"}`)); ev.Term != nil {
 		t.Fatalf("edit: %v", ev.Term)
+	}
+}
+
+// Cursor runs the Claude Code hooks too, with its own input. Without murmur's Cursor hooks, they answer as Cursor's
+// do, so the refusal reaches Cursor's agent; with them, they step aside and nothing runs twice.
+func TestCursorRunsClaudeHooks(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	t.Setenv("CURSOR_CONFIG_DIR", t.TempDir())
+	t.Setenv("CURSOR_VERSION", "3.13.25")
+	input := `{"conversation_id":"c9","session_id":"c9","tool_name":"Write","tool_input":{"file_path":"/w/x.go","content":"x"},"cwd":"","hook_event_name":"preToolUse","cursor_version":"3.13.25","workspace_roots":["/w"]}`
+	fakeDaemon(t, &ipc.Reply{OK: true, Text: "bob/b1 is also changing x.go"})
+	out := hook(claude.Claude{}, "edit", strings.NewReader(input))
+	if !strings.Contains(string(out), `"permission":"deny"`) || !strings.Contains(string(out), `"agent_message":"bob/b1 is also changing x.go"`) {
+		t.Fatalf("without murmur's Cursor hooks: %s", out)
+	}
+	if checks := hookish.Cursor.Connect("/opt/murmur", nil); !checks[0].OK {
+		t.Fatalf("connect: %+v", checks)
+	}
+	if out := hook(claude.Claude{}, "edit", strings.NewReader(input)); out != nil {
+		t.Fatalf("with them: %s", out)
 	}
 }

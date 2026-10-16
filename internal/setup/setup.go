@@ -28,13 +28,14 @@ import (
 	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/harness/claude"
+	"github.com/EledoneAi/murmur/internal/harness/hookish"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 )
 
 // Harnesses are the AI coding tools murmur connects, in the order join sets them up.
-var Harnesses = []harness.Harness{claude.Claude{}}
+var Harnesses = []harness.Harness{claude.Claude{}, hookish.Codex, hookish.Cursor, hookish.Copilot, hookish.Gemini}
 
 // Harness is the harness called name, or nil.
 func Harness(name string) harness.Harness {
@@ -424,6 +425,14 @@ func Hook(name, event string) {
 }
 
 func hook(h harness.Harness, event string, stdin io.Reader) []byte {
+	if h != nil && h.Name() == claude.Name && os.Getenv("CURSOR_VERSION") != "" {
+		// Cursor runs the hooks in ~/.claude/settings.json too, with its own input, and its model reads only some of
+		// what Claude Code's answers say. Cursor's own murmur hooks speak for its sessions; without them, these do.
+		if hookish.Cursor.Connected() {
+			return nil
+		}
+		h = hookish.Cursor
+	}
 	ev, ok := hookEvent(h, event, stdin)
 	if !ok {
 		return nil
