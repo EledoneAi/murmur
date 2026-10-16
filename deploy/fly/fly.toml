@@ -1,5 +1,5 @@
 # Fly.io: the hub on one Machine, with its sqlite store on a volume. README.md in this folder walks through it.
-# Change app, primary_region and the [env] values; secrets go in with fly secrets set.
+# Change app, primary_region and the [env] values; secrets go in with fly secrets import, as README.md shows.
 
 app = "murmur-hub-example"
 # A region near your team, the same as the volume's: fly platform regions lists them.

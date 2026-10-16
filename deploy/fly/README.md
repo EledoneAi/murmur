@@ -27,10 +27,14 @@ WebSockets through.
    fly volumes create murmur_data --region <region> --size 1
    ```
 
-3. Set the secrets:
+3. Set the secrets. `fly secrets import` reads them from its input as `NAME=VALUE` lines
+   ([Fly](https://fly.io/docs/flyctl/secrets-import/)), so they stay off the command line and out of the shell's
+   history:
 
    ```sh
-   fly secrets set SESSION_SECRET="$(openssl rand -base64 32)" OIDC_CLIENT_SECRET='<from your identity provider>'
+   read -rs OIDC_CLIENT_SECRET    # paste the secret from your identity provider, then press Enter
+   printf 'SESSION_SECRET=%s\nOIDC_CLIENT_SECRET=%s\n' "$(openssl rand -base64 32)" "$OIDC_CLIENT_SECRET" |
+     fly secrets import
    ```
 
    For Google or GitHub sign-in, set `GOOGLE_CLIENT_SECRET` or `GITHUB_CLIENT_SECRET` instead, and put the

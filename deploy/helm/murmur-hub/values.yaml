@@ -43,11 +43,13 @@ existingSecret: ""
 #   ADMINS: you@example.com
 env: {}
 
-# The volume for the sqlite store. Used only when store is empty or sqlite:// and replicaCount is 1.
+# The volume for the sqlite store. Used only when store is empty or sqlite:// and replicaCount is 1. Keep it with the
+# -litestream image: without it, /data is an emptyDir, and a pod replacing an evicted one could write next to it.
 persistence:
   enabled: true
   size: 1Gi
   storageClass: ""
+  # ReadWriteOncePod, with a CSI storage class, keeps even two pods on one node from sharing the volume.
   accessMode: ReadWriteOnce
   # Use a claim you created yourself instead of letting the chart create one.
   existingClaim: ""

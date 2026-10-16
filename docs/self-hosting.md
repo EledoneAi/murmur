@@ -71,7 +71,7 @@ memory (`local://`).
 | Looking around | `memory://` | `local://` |
 | One instance on a server or a VM with a disk (most teams) | `sqlite:///data/murmur.db` (the image's default) | `local://` (the default) |
 | One instance on a platform without a lasting disk, such as Cloud Run | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `local://` |
-| One instance without a lasting disk, on a platform that never runs two at once (ECS with your own deployment settings, Kubernetes) | `sqlite:///data/murmur.db` with the [Litestream image](../deploy/litestream) | `local://` |
+| One instance without a lasting disk, on a platform that never runs two at once (ECS on Fargate with your own deployment settings) | `sqlite:///data/murmur.db` with the [Litestream image](../deploy/litestream) | `local://` |
 | More than one instance | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `postgres://...`, `redis://...` or `rediss://...` |
 
 - **memory** loses everything when the hub stops: everyone signs in again.

@@ -74,13 +74,21 @@ The data lives in the PersistentVolumeClaim the chart creates. `helm uninstall` 
 data survives a reinstall; delete it yourself when you mean to. Give it a block storage class (the default on most
 clusters), not NFS or another network file system: sqlite isn't safe there.
 
-On a cluster without block storage, or to keep a copy off the cluster, use the `-litestream` image: it copies the
-sqlite file to object storage and restores it when a new pod starts ([deploy/litestream](../../litestream#kubernetes)).
+To keep a copy off the cluster, use the `-litestream` image, with this volume still on: it copies the sqlite file
+to object storage as it changes ([deploy/litestream](../../litestream#kubernetes)). Never run it without the volume,
+on an `emptyDir`.
 
 With sqlite, the chart uses the `Recreate` strategy, whatever `replicaCount` says: during an upgrade the old pod
 stops, letting go of the sqlite file and its ReadWriteOnce volume, before the new one starts. Laptops reconnect a few
 seconds later. It does the same with the local bus, where two pods would each hold part of the team. Rolling
 updates need a `store` that is a Postgres or Firestore URL and a `bus` that is a Postgres or Redis URL.
+
+`Recreate` applies to upgrades only. When a pod is evicted, or deleted as its node drains, Kubernetes starts the
+replacement at once, while the old pod may still be stopping
+([Kubernetes](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#recreate-deployment)). A
+ReadWriteOnce volume keeps a replacement on another node waiting until the old pod lets go of it, but two pods on the
+same node can share it. With a CSI storage class, `persistence.accessMode: ReadWriteOncePod` lets only one pod use
+the volume at a time ([Kubernetes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes)).
 
 ## More than one replica
 
@@ -171,7 +179,7 @@ laptop reconnects on its own and resends what wasn't confirmed: a reconnection, 
 | `bus` | `""` (`local://`) | `BUS` for the hub; rolling updates need a Postgres or Redis URL here and a networked `store` |
 | `replicaCount` | `1` | Above 1 needs a networked store and bus |
 | `image.repository`, `image.tag` | `ghcr.io/eledoneai/murmur-hub`, appVersion | The image; pin `image.tag` |
-| `persistence.*` | enabled, 1Gi | The sqlite volume (one replica only) |
+| `persistence.*` | enabled, 1Gi, ReadWriteOnce | The sqlite volume (one replica only); keep it with the `-litestream` image |
 | `ingress.*` | disabled, no annotations | `className` and `annotations` are your controller's; the host defaults to the host of `publicURL` |
 | `httpRoute.*` | disabled | A Gateway API HTTPRoute; `parentRefs` is required, `hostnames` defaults to the host of `publicURL`, `timeouts` stays unset |
 | `serviceAccount.annotations` | `{}` | For example Workload Identity, to reach Firestore on GKE |

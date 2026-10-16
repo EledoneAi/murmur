@@ -5,5 +5,5 @@ dbs:
   - path: /data/murmur.db
     replica:
       # Where the copy goes, for example s3://my-bucket/murmur, gs://my-bucket/murmur or
-      # abs://<account>@<account>.blob.core.windows.net/<container>/murmur. One hub, and only one, writes there.
+      # abs://<account>@<container>/murmur. One hub, and only one, writes there.
       url: ${LITESTREAM_REPLICA_URL}
