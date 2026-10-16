@@ -38,7 +38,7 @@ docker run --rm -p 127.0.0.1:8080:8080 -e DEV_LOGIN=1 -e PUBLIC_URL=http://local
 ```
 
 For a team, [docs/self-hosting.md](docs/self-hosting.md) helps you choose where, and [deploy/](deploy) has recipes
-for Docker Compose, Kubernetes, Cloud Run, Fly.io, AWS, Azure and systemd.
+for Docker Compose on any VM, Kubernetes, Cloud Run, Fly.io, Railway, Render, AWS, Azure and systemd.
 
 ## Docs
 

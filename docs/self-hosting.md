@@ -37,9 +37,12 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 |---|---|---|
 | One server, Docker Compose | [deploy/compose](../deploy/compose) | The simplest real setup. Caddy gets the certificate. Also a two-instance variant with Postgres. |
 | One server, binary and systemd | [deploy/systemd](../deploy/systemd) | No Docker. Bring your own reverse proxy for HTTPS. |
+| A VM at Hetzner, Lightsail, DigitalOcean, EC2 or Azure | [deploy/vm](../deploy/vm) | The Compose recipe on the cheapest real setup, from about €5 a month. |
 | Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | Set your ingress controller's timeouts for WebSockets. |
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
+| Railway | [deploy/railway](../deploy/railway) | One service with a volume for sqlite. A redeploy disconnects laptops for a moment. |
+| Render | [deploy/render](../deploy/render) | One paid instance with a disk for sqlite. Free instances sleep. |
 | AWS: ECS Express Mode, or ECS on Fargate with your own load balancer | [deploy/aws](../deploy/aws) | No local disk: use RDS for PostgreSQL. |
 | Azure Container Apps, or App Service for Containers | [deploy/azure](../deploy/azure) | No disk safe for sqlite: use Azure Database for PostgreSQL. |
 
