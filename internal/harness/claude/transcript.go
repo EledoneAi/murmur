@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -23,6 +24,9 @@ var assistantLine = []byte(`"type":"assistant"`)
 // the conversation runs on, and compactions.
 var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"custom-title"`), []byte(`"type":"pr-link"`),
 	[]byte(`"type":"model"`), []byte(`"subtype":"compact_boundary"`)}
+
+// readers keeps the buffers transcripts are read through: each session's is read again at every line Claude Code adds.
+var readers = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64<<10) }}
 
 // recentCalls is how much of a long transcript's end its tool calls are read from, when it is read from its start.
 // ponytail: Kinds keeps 30 calls and the loop hint 12, which 4 MB holds unless the answers are huge; the folders
@@ -74,7 +78,12 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 	if t.Offset == 0 && st != nil {
 		callsFrom = st.Size() - recentCalls
 	}
-	r := bufio.NewReaderSize(f, 64<<10)
+	r := readers.Get().(*bufio.Reader)
+	r.Reset(f)
+	defer func() {
+		r.Reset(nil)
+		readers.Put(r)
+	}()
 	changed := false
 	pos := t.Offset
 	for {
