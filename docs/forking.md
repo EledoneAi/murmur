@@ -35,7 +35,8 @@ them again from a hub that serves yours.
 
 - `.goreleaser.yaml`:
   - `dockers_v2`: the image name `ghcr.io/eledoneai/murmur-hub`, and the `org.opencontainers.image.source` label;
-  - `homebrew_casks`: the tap `repository` (`owner: eledoneai`, `name: homebrew-tap`) and `homepage`;
+  - `homebrew_casks`: the tap `repository` (`owner: eledoneai`, `name: homebrew-tap`), the `url` template and
+    `homepage`;
   - `release.github`: `owner` and `name`;
   - the release `footer` and the comments, which name the image and the tap.
 - `deploy/docker/Dockerfile`: the `org.opencontainers.image.source` label.
