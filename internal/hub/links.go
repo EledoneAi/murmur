@@ -129,7 +129,6 @@ func (h *Hub) attach(ctx context.Context, l *link, dev store.Device) {
 		l.agents = old.agents // keep the agents visible until the laptop says hello again
 	}
 	h.links[l.dev] = l
-	h.newLinks = append(h.newLinks, l)
 	l.send(h.welcomeLocked(l))
 	h.mu.Unlock()
 	h.markDirty()
@@ -191,6 +190,9 @@ func (h *Hub) handle(l *link, f protocol.Frame) {
 		l.agents = f.Agents
 		h.changes++
 		l.changed = h.changes
+		if f.T == protocol.FrameHello { // its first roster goes to it first, and has its agents
+			h.newLinks = append(h.newLinks, l)
+		}
 		h.publishLinkLocked(context.Background(), l)
 		h.mu.Unlock()
 		h.markDirty()

@@ -181,6 +181,40 @@ func TestMessageAfterItsSendersRoster(t *testing.T) {
 	}
 }
 
+// A laptop goes first for rosters once it says hello, when a roster has its agents, not when it connects: one worked
+// out in between would miss them, and on a big, busy team the laptop would wait a whole round for one that has them.
+func TestRosterAfterHello(t *testing.T) {
+	h, links := bigTeam(t, 1000)
+	h.mu.Lock()
+	for _, l := range links {
+		l.roster = func(...[]byte) {}
+	}
+	h.mu.Unlock()
+	busy(t, h, links)
+	time.Sleep(300 * time.Millisecond)
+
+	got := make(chan struct{})
+	var once sync.Once
+	late := newLink("late")
+	late.roster = func(parts ...[]byte) {
+		if bytes.Contains(bytes.Join(parts, nil), []byte(`"z-late"`)) {
+			once.Do(func() { close(got) })
+		}
+	}
+	h.mu.Lock()
+	u := &store.User{Email: late.email, Handle: late.handle}
+	h.users[u.Email], h.handles[u.Handle], h.colours = u, u, nil
+	h.mu.Unlock()
+	h.attach(t.Context(), late, store.Device{ID: late.dev, Email: late.email})
+	time.Sleep(300 * time.Millisecond) // a roster is worked out before its hello
+	h.handle(late, protocol.Frame{T: protocol.FrameHello, Agents: []protocol.Agent{{Name: "z-late", Status: protocol.StatusIdle}}})
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no roster with the laptop's own agents within 2 s of its hello")
+	}
+}
+
 // copyAgents copies agents as a laptop's next frame brings them: the hub cleans what it gets in place.
 func copyAgents(agents []protocol.Agent) []protocol.Agent {
 	out := slices.Clone(agents)
