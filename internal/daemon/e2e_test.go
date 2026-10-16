@@ -207,7 +207,8 @@ func (d *Daemon) edit(id, path string) string {
 	data, _ := json.Marshal(map[string]any{"session_id": id, "cwd": filepath.Dir(path), "hook_event_name": "PreToolUse", "tool_name": "Edit",
 		"tool_input": map[string]string{"file_path": path, "old_string": "a", "new_string": "b"}})
 	ev, _ := claude.Claude{}.Parse("edit", data)
-	return d.onHook(ev)
+	why, _ := d.onHook(ev)
+	return why
 }
 
 // Two people change the same file: their consoles show the overlap, as a pair and as the line the console showed
@@ -460,7 +461,11 @@ func TestE2EHookedAgent(t *testing.T) {
 	bob := tm.laptop("bob", agentSession("b1", "conv-b", newInbox(t)))
 	cwd := t.TempDir()
 	hook := func(kind string) string {
-		return alice.onHook(harness.Event{Kind: kind, Harness: "codex", SessionID: "019a", PID: os.Getpid(), Cwd: cwd})
+		text, token := alice.onHook(harness.Event{Kind: kind, Harness: "codex", SessionID: "019a", PID: os.Getpid(), Cwd: cwd, Carries: true})
+		if token != "" {
+			alice.settle(token, true)
+		}
+		return text
 	}
 	hook(harness.Start)
 	tm.until("bob sees alice/codex-1", func() bool { return strings.Contains(whoOf(bob), `"alice/codex-1" · idle`) })

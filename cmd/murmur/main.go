@@ -131,6 +131,10 @@ func main() {
 	case "hook":
 		if len(args) > 2 {
 			setup.Hook(args[1], args[2])
+		} else {
+			// an older version's hook, which names no harness: it answers nothing, but this version's daemon, once it
+			// runs, sets the laptop's hooks up again
+			_ = ipc.EnsureDaemon()
 		}
 	case "mcp":
 		name := ""

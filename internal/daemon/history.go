@@ -34,7 +34,13 @@ type histLine struct {
 	Hooked  *hookedSession `json:"hooked,omitempty"` // a session learned from hooks
 	Gone    string         `json:"gone,omitempty"`   // and gone, by session key
 	Queued  *heldMsg       `json:"queued,omitempty"` // waiting for its session's next hook (Agent is the session key)
-	Taken   string         `json:"taken,omitempty"`  // and everything queued for that session key taken
+	Took    *took          `json:"took,omitempty"`   // and taken, or dropped with its session
+}
+
+// took is a message that left a session's queue.
+type took struct {
+	Key string `json:"key"`
+	ID  string `json:"id"`
 }
 
 func (d *Daemon) loadHistory() {
@@ -106,8 +112,11 @@ func (d *Daemon) loadHistory() {
 			if h.Queued != nil && !slices.ContainsFunc(d.queued[h.Queued.Agent], func(x heldMsg) bool { return x.Msg.ID == h.Queued.Msg.ID }) {
 				d.queued[h.Queued.Agent] = append(d.queued[h.Queued.Agent], *h.Queued)
 			}
-			if h.Taken != "" {
-				delete(d.queued, h.Taken)
+			if h.Took != nil {
+				d.queued[h.Took.Key] = slices.DeleteFunc(d.queued[h.Took.Key], func(x heldMsg) bool { return x.Msg.ID == h.Took.ID })
+				if len(d.queued[h.Took.Key]) == 0 {
+					delete(d.queued, h.Took.Key)
+				}
 			}
 		}
 		f.Close()
@@ -150,7 +159,7 @@ func (d *Daemon) loadHistory() {
 		}
 		for _, s := range d.sessions {
 			if s.hooked {
-				_ = enc.Encode(histLine{Hooked: &hookedSession{Harness: s.harness, ID: s.id, PID: s.pid, Name: s.name, Cwd: s.cwd}})
+				_ = enc.Encode(histLine{Hooked: s.hookedLine()})
 			}
 		}
 		for _, q := range d.queued {

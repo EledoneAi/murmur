@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -65,6 +66,7 @@ type Daemon struct {
 	handed     map[string]bool      // message id, or "notice id/Claude session id": the agent, or that conversation, has it
 	held       map[string][]heldMsg // agent name -> notes waiting while it is idle
 	queued     map[string][]heldMsg // session key -> messages waiting for its next hook, when murmur can't push to it
+	inflight   map[string]inflight  // token -> messages a hook's answer carries, until the hook printed them
 	names      map[string]string    // session key -> the name murmur gave a session learned from hooks, from the history
 	outbox     map[string]outMsg
 	failed     map[string]failure      // messages sent from here that failed, by id
@@ -87,6 +89,11 @@ type Daemon struct {
 
 	// notify shows a desktop notification. Tests leave it nil, which shows none.
 	notify func(title, text string)
+	// reapply sets the laptop's harnesses up again after an update, once the daemon has reached the hub: an update
+	// that never gets there is rolled back, and the older version must find the setup it knows. Tests leave it nil.
+	reapply   func()
+	reapplied bool
+	lock      *os.File // held while the daemon runs: closing it, as the garbage collector would, lets another start
 
 	kick chan struct{}
 	w    *fsnotify.Watcher
@@ -116,8 +123,9 @@ func Run() error {
 	}
 	_ = os.Chmod(config.SockPath(), 0o600)
 	cfg := config.Load()
+	config.UseDirs(cfg) // the tools' folders as join saw them, whoever started this daemon
 	d := newDaemon(cfg.Handle)
-	d.me.Name, d.ln, d.team.Agreements, d.notify = cfg.Name, ln, cfg.Agreements, desktop
+	d.me.Name, d.ln, d.team.Agreements, d.notify, d.reapply, d.lock = cfg.Name, ln, cfg.Agreements, desktop, setup.Reapply, lock
 	d.loadHistory()
 	if d.w, err = fsnotify.NewWatcher(); err != nil {
 		return err
@@ -133,7 +141,6 @@ func Run() error {
 	go d.publishLoop()
 	go d.tickLoop()
 	go d.hubLoop()
-	go setup.Reapply()
 	log.Printf("murmur %s started (pid %d)", release.Version, os.Getpid())
 	for {
 		c, err := ln.Accept()
@@ -193,14 +200,27 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 	list := l.Sessions()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	live, writing := map[string]bool{}, map[int]bool{}
+	live, writing, byKey := map[string]bool{}, map[int]bool{}, map[string][]harness.Session{}
 	for _, e := range list {
 		if e.ID == "" {
 			writing[e.PID] = true // half-written: the next event reads it again
 			continue
 		}
-		live[harness.Key(e.Harness, e.ID)] = true
-		d.listedLocked(e)
+		k := harness.Key(e.Harness, e.ID)
+		byKey[k] = append(byKey[k], e)
+	}
+	for k, es := range byKey {
+		// the same conversation open in two processes (claude --resume while it runs) shows as two agents, each kept
+		// under its own key so neither replaces the other on every scan
+		slices.SortFunc(es, func(a, b harness.Session) int { return a.PID - b.PID })
+		for i, e := range es {
+			key := k
+			if i > 0 {
+				key += "@" + strconv.Itoa(e.PID)
+			}
+			live[key] = true
+			d.listedLocked(e, key)
+		}
 	}
 	for k, s := range d.sessions {
 		if s.harness == name && !live[k] && !writing[s.pid] {
@@ -209,9 +229,8 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 	}
 }
 
-// listedLocked takes in a session as its harness lists it.
-func (d *Daemon) listedLocked(e harness.Session) {
-	key := harness.Key(e.Harness, e.ID)
+// listedLocked takes in a session as its harness lists it, under key.
+func (d *Daemon) listedLocked(e harness.Session, key string) {
 	s := d.sessions[key]
 	fresh := s == nil || s.started != e.Started || s.pid != e.PID
 	if fresh {
@@ -219,6 +238,9 @@ func (d *Daemon) listedLocked(e harness.Session) {
 			d.removeLocked(key)
 		}
 		s = &session{harness: e.Harness, id: e.ID, pid: e.PID, started: e.Started}
+		if key != harness.Key(e.Harness, e.ID) {
+			s.k = key
+		}
 		d.sessions[key] = s
 	}
 	statusChanged := s.status != e.Status
@@ -259,6 +281,7 @@ func (d *Daemon) removeLocked(key string) {
 	if s := d.sessions[key]; s != nil {
 		if s.hooked {
 			d.appendHistory(histLine{Gone: key})
+			d.unreadLocked(key)
 		}
 		d.unwatchLocked(s)
 		delete(d.hints, key)
@@ -397,7 +420,7 @@ func (d *Daemon) tickLoop() {
 		}
 		d.mu.Lock()
 		for k, s := range d.sessions {
-			if !harness.Alive(s.pid) || (s.hooked && time.Since(s.heard) > hookedTTL) {
+			if !harness.Alive(s.pid) || (s.hooked && (!s.running() || time.Since(s.heard) > hookedTTL)) {
 				d.removeLocked(k)
 				continue
 			}
@@ -673,6 +696,7 @@ func (d *Daemon) toHub(f protocol.Frame) {
 // check asks the hub which agents change these files in other checkouts of repo, and waits at most wait for the
 // answer. No hub, or no answer in time, counts as none: a check must never hold an agent up.
 func (d *Daemon) check(repo, tree string, files []string, wait time.Duration) []string {
+	files = checkable(files)
 	timeout := time.After(wait)
 	id, answer := protocol.RandomHex(8), make(chan protocol.Frame, 1)
 	d.mu.Lock()
@@ -741,6 +765,10 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 		pairs := cleanPairs(f.Pairs)
 		d.mu.Lock()
 		d.people, d.pairs, d.state = f.People, pairs, "online"
+		if d.reapply != nil && !d.reapplied {
+			d.reapplied = true
+			go d.reapply()
+		}
 		d.mu.Unlock()
 		d.changed()
 	case protocol.FrameMsg:
@@ -776,6 +804,23 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 			}
 		}
 	}
+}
+
+// A check names at most maxCheck files, maxCheckBytes of paths in all: a frame stays far under what the hub reads.
+const (
+	maxCheck      = 500
+	maxCheckBytes = 256 << 10
+)
+
+// checkable are the first files a check can name.
+func checkable(files []string) []string {
+	size := 0
+	for i, f := range files {
+		if size += len(f) + 3; i >= maxCheck || size > maxCheckBytes {
+			return files[:i]
+		}
+	}
+	return files
 }
 
 // cleanPairs cleans the overlaps a roster brings, which this laptop's console prints.

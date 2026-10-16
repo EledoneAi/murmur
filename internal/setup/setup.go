@@ -216,6 +216,13 @@ func Join(hub string, relogin, noBrowser bool) error {
 	if !found {
 		step(false, "Coding tools", "none found: install one of "+titles()+", then run murmur join again")
 	}
+	cfg.Dirs = map[string]string{} // where the tools are, for a daemon that a tool with a bare environment starts
+	for _, k := range config.DirVars {
+		cfg.Dirs[k] = os.Getenv(k)
+	}
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
 
 	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
 
@@ -381,7 +388,7 @@ func reapply(exe string) {
 		}
 		again = append(again, h.Title())
 		for _, c := range checks {
-			if !c.OK {
+			if !c.OK && !notes[c.Name] {
 				failed = append(failed, h.Title()+" "+strings.ToLower(c.Name)+": "+c.Detail)
 			}
 		}
@@ -389,27 +396,37 @@ func reapply(exe string) {
 	if len(again) > 0 {
 		line := "set up again for " + release.Version + ": " + strings.Join(again, ", ")
 		if len(failed) > 0 {
-			line += "; " + strings.Join(failed, "; ")
+			line += "; failed, tried again at the next start: " + strings.Join(failed, "; ")
 		}
 		log.Print(line)
 	}
-	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
+	if len(failed) == 0 { // a harness that failed is set up again at the next start
+		_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
+	}
 }
+
+// notes are the checks that say something to the person rather than fail: Claude Code's messages setting, a step
+// such as trusting Codex's hooks, Gemini CLI's folder trust, an old version.
+var notes = map[string]bool{"Messages": true, "Next": true, "Folders": true, "Version": true}
 
 func Uninstall() error {
 	if err := guardDev(); err != nil {
 		return err
 	}
 	cfg := config.Load()
-	for _, h := range Harnesses { // each removes only its own entries, so this undoes join wherever it went
-		was := h.Connected()
+	var failed []string
+	for _, h := range Harnesses { // each removes only its own entries, from the tools that hold any
+		if !h.Holds() {
+			continue
+		}
 		switch err := h.Disconnect(config.Exe()); {
 		case errors.Is(err, harness.ErrDev):
 			step(false, h.Title(), err.Error())
-		case err != nil:
-			return fmt.Errorf("%s: %w", h.Title(), err)
-		case was:
-			step(true, h.Title(), "hooks and MCP server removed")
+		case err != nil: // the rest goes on: sign-out matters more than one file
+			step(false, h.Title(), err.Error())
+			failed = append(failed, h.Title())
+		default:
+			step(true, h.Title(), "murmur's hooks and MCP server removed")
 		}
 	}
 	if c, err := ipc.Dial(); err == nil {
@@ -427,6 +444,9 @@ func Uninstall() error {
 	_ = os.RemoveAll(config.Dir())
 	step(true, "Data", "removed "+config.Tildify(config.Dir()))
 	fmt.Printf("\nThe binary stays at %s; delete it with: rm -f %s %s\n", config.Exe(), config.Exe(), config.Exe()+".prev")
+	if len(failed) > 0 {
+		return fmt.Errorf("murmur's entries are still in %s: see above", strings.Join(failed, ", "))
+	}
 	return nil
 }
 
@@ -438,47 +458,64 @@ const hookWait = 800 * time.Millisecond
 // an overlap as the reason an edit is turned back. It never holds a session up: on any failure, and after hookWait,
 // it prints nothing.
 func Hook(name, event string) {
-	_, _ = os.Stdout.Write(hook(Harness(name), event, os.Stdin))
+	hook(Harness(name), event, os.Stdin, os.Stdout)
 }
 
-func hook(h harness.Harness, event string, stdin io.Reader) []byte {
+// hook answers one hook on out. Whatever goes wrong inside it, the hook prints at most what the harness reads as no
+// objection, and exits 0: a harness may refuse a tool when its hook fails.
+func hook(h harness.Harness, event string, stdin io.Reader, out io.Writer) {
+	defer func() { _ = recover() }()
 	data, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	if h != nil && h.Name() == claude.Name && bytes.Contains(data, []byte(`"cursor_version"`)) {
+	var cursor struct {
+		Version string `json:"cursor_version"`
+	}
+	if h != nil && h.Name() == claude.Name && json.Unmarshal(data, &cursor) == nil && cursor.Version != "" {
 		// Cursor runs the hooks in ~/.claude/settings.json too, with its own input, which names its version, and its
 		// model reads only some of what Claude Code's answers say. Cursor's own murmur hooks speak for its sessions;
 		// without them, these do.
 		if hookish.Cursor.Connected() {
-			return nil
+			return
 		}
 		h = hookish.Cursor
 	}
 	ev, ok := hookEvent(h, event, data)
 	if !ok {
-		return nil
+		return
 	}
 	req := ipc.Request{Op: "hook", Hook: &ev}
-	if ev.Kind == harness.Needs { // the harness doesn't wait for this one
-		_ = ipc.Call(req, nil, 2*time.Second)
-		return nil
+	if ev.Kind == harness.Start || ev.Kind == harness.Prompt || ev.Kind == harness.Needs {
+		_ = ipc.EnsureDaemon() // before the wait below starts counting: a tool call never starts the daemon
 	}
-	out := make(chan []byte, 1)
+	if ev.Kind == harness.Needs { // the harness doesn't wait for this one
+		_ = ipc.CallRunning(req, nil, 2*time.Second)
+		return
+	}
+	type answer struct {
+		b    []byte
+		done func(printed bool)
+	}
+	res := make(chan answer, 1)
 	go func() {
-		var r ipc.Reply
-		call := ipc.CallRunning // a tool call never starts the daemon: without one, it goes ahead
-		if ev.Kind == harness.Start || ev.Kind == harness.Prompt {
-			call = ipc.Call
-		}
-		if call(req, &r, hookWait) != nil {
-			out <- h.Answer(ev, "") // what a harness answers without murmur's word
+		defer func() {
+			if recover() != nil {
+				res <- answer{b: h.Answer(ev, "")}
+			}
+		}()
+		r, done, err := ipc.Hook(req, hookWait)
+		if err != nil {
+			res <- answer{b: h.Answer(ev, "")} // what a harness answers without murmur's word
 			return
 		}
-		out <- h.Answer(ev, r.Text)
+		res <- answer{h.Answer(ev, r.Text), done}
 	}()
 	select {
-	case b := <-out:
-		return b
+	case a := <-res:
+		_, err := out.Write(a.b)
+		if a.done != nil {
+			a.done(err == nil) // the messages it carried leave the daemon only now
+		}
 	case <-time.After(hookWait):
-		return h.Answer(ev, "")
+		_, _ = out.Write(h.Answer(ev, "")) // anything the daemon answers later stays with it
 	}
 }
 

@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 )
 
@@ -27,6 +29,7 @@ type hookedSession struct {
 	Harness string `json:"harness"`
 	ID      string `json:"id"`
 	PID     int    `json:"pid"`
+	Started string `json:"started,omitempty"` // when its process started: a pid given to another process since doesn't match
 	Name    string `json:"name"`
 	Cwd     string `json:"cwd,omitempty"`
 }
@@ -46,8 +49,8 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 		if ev.PID <= 1 {
 			return // a hook that couldn't find its harness: a session without a process would never go
 		}
-		s = &session{harness: ev.Harness, id: ev.SessionID, pid: ev.PID, cwd: ev.Cwd, app: ev.Harness, hooked: true,
-			status: protocol.StatusIdle, since: time.Now().UnixMilli()}
+		s = &session{harness: ev.Harness, id: ev.SessionID, pid: ev.PID, started: harness.StartTime(ev.PID), cwd: ev.Cwd,
+			app: ev.Harness, hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli()}
 		s.name = d.nameLocked(ev.Harness, d.names[key])
 		d.sessions[key] = s
 		if d.names != nil {
@@ -60,13 +63,13 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 	}
 	moved := ev.PID > 1 && ev.PID != s.pid
 	if moved {
-		s.pid = ev.PID // the same conversation, resumed in another process
+		s.pid, s.started = ev.PID, harness.StartTime(ev.PID) // the same conversation, resumed in another process
 	}
 	if ev.Cwd != "" && ev.Cwd != s.cwd {
 		s.cwd, moved = ev.Cwd, true
 	}
 	if fresh || moved {
-		d.appendHistory(histLine{Hooked: &hookedSession{Harness: s.harness, ID: s.id, PID: s.pid, Name: s.name, Cwd: s.cwd}})
+		d.appendHistory(histLine{Hooked: s.hookedLine()})
 	}
 	if ev.Version != "" {
 		s.version = ev.Version
@@ -79,7 +82,7 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 	case harness.Prompt, harness.BeforeTool, harness.AfterTool:
 		status = protocol.StatusBusy
 	case harness.Stop:
-		if len(d.queued[key]) == 0 { // otherwise the messages it is about to take keep it working
+		if !ev.Carries || len(d.queued[key]) == 0 { // otherwise the messages it is about to take keep it working
 			status = protocol.StatusIdle
 		}
 	case harness.Needs:
@@ -128,16 +131,32 @@ func (d *Daemon) nameLocked(h, before string) string {
 	}
 }
 
-// restoreLocked takes back the sessions the history learned from hooks whose processes still run.
+// hookedLine is the session as the history keeps it.
+func (s *session) hookedLine() *hookedSession {
+	return &hookedSession{Harness: s.harness, ID: s.id, PID: s.pid, Started: s.started, Name: s.name, Cwd: s.cwd}
+}
+
+// running says whether a session's process still runs: the same pid, started at the same time.
+func (s *session) running() bool {
+	return harness.Alive(s.pid) && (s.started == "" || harness.StartTime(s.pid) == s.started)
+}
+
+// restoreLocked takes back the sessions the history learned from hooks whose processes still run. What waited for a
+// session that is gone, its senders hear of.
 func (d *Daemon) restoreLocked(sessions map[string]hookedSession) {
 	for key, h := range sessions {
-		if d.sessions[key] != nil || !harness.Alive(h.PID) {
+		s := &session{harness: h.Harness, id: h.ID, pid: h.PID, started: h.Started, name: h.Name, cwd: h.Cwd, app: h.Harness,
+			hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli(), heard: time.Now()}
+		if d.sessions[key] != nil || !s.running() {
 			continue
 		}
-		s := &session{harness: h.Harness, id: h.ID, pid: h.PID, name: h.Name, cwd: h.Cwd, app: h.Harness, hooked: true,
-			status: protocol.StatusIdle, since: time.Now().UnixMilli(), heard: time.Now()}
 		d.sessions[key] = s
 		d.gitLocked(s)
+	}
+	for key := range d.queued {
+		if d.sessions[key] == nil {
+			d.unreadLocked(key)
+		}
 	}
 }
 
@@ -152,21 +171,73 @@ func (d *Daemon) queueLocked(s *session, m protocol.Msg) {
 	d.appendHistory(histLine{Queued: &h})
 }
 
-// take hands over what waits for a session, as the text its hook's answer carries.
-func (d *Daemon) take(key string) string {
+// maxDelivery is about how much of the queue one hook's answer carries: the first message whatever its size, then
+// more while they fit. The rest waits for the next hook. Codex moves a long context out of the conversation.
+const maxDelivery = 8 << 10
+
+// inflight are messages a hook's answer carries, until the hook says it printed them.
+type inflight struct {
+	key  string
+	msgs []heldMsg
+}
+
+// take gives a hook's answer what waits for its session, each message in its own envelope, and a token: the
+// messages leave the queue when settle says the hook printed them, and go back to it otherwise.
+func (d *Daemon) take(key string) (string, string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	q := d.queued[key]
-	if len(q) == 0 {
-		return ""
-	}
-	delete(d.queued, key)
-	d.appendHistory(histLine{Taken: key})
 	var parts []string
-	for _, h := range q {
-		if time.Since(h.At) < heldTTL {
-			parts = append(parts, protocol.Prompt(h.Msg))
+	n, size := 0, 0
+	for _, h := range d.queued[key] {
+		text := harness.Envelope(protocol.Prompt(h.Msg))
+		if n > 0 && size+len(text) > maxDelivery {
+			break
+		}
+		parts, size, n = append(parts, text), size+len(text), n+1
+	}
+	if n == 0 {
+		return "", ""
+	}
+	token := protocol.RandomHex(8)
+	if d.inflight == nil {
+		d.inflight = map[string]inflight{}
+	}
+	d.inflight[token] = inflight{key, slices.Clone(d.queued[key][:n])}
+	if d.queued[key] = d.queued[key][n:]; len(d.queued[key]) == 0 {
+		delete(d.queued, key)
+	}
+	return strings.Join(parts, "\n\n"), token
+}
+
+// settle ends a delivery: the messages leave for good when the hook printed them, and wait again otherwise.
+func (d *Daemon) settle(token string, printed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	f, ok := d.inflight[token]
+	if !ok {
+		return
+	}
+	delete(d.inflight, token)
+	if !printed {
+		d.queued[f.key] = append(f.msgs, d.queued[f.key]...)
+		if d.sessions[f.key] == nil { // it ended meanwhile
+			d.unreadLocked(f.key)
+		}
+		return
+	}
+	for _, h := range f.msgs {
+		d.appendHistory(histLine{Took: &took{f.key, h.Msg.ID}})
+	}
+}
+
+// unreadLocked drops what waits for a session that is gone, and tells each sender their message wasn't read.
+func (d *Daemon) unreadLocked(key string) {
+	for _, h := range d.queued[key] {
+		d.appendHistory(histLine{Took: &took{key, h.Msg.ID}})
+		if m := h.Msg; m.From != protocol.System {
+			first, _, _ := strings.Cut(strings.TrimSpace(m.Text), "\n")
+			go d.send(ipc.Request{To: m.From, Text: fmt.Sprintf("%s closed before it read your message (%q).", m.To, protocol.Cut(first, 80))})
 		}
 	}
-	return strings.Join(parts, "\n\n")
+	delete(d.queued, key)
 }

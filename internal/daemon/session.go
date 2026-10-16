@@ -16,6 +16,7 @@ import (
 //   - git, in the session's folder: repo, branch, files changed on the branch, the size of the change and where the
 //     checkout stands
 type session struct {
+	k       string // its key, when it isn't harness.Key(harness, id): the same conversation open in a second process
 	harness string
 	id      string
 	pid     int
@@ -44,7 +45,12 @@ type session struct {
 	gitBusy                 bool
 }
 
-func (s *session) key() string { return harness.Key(s.harness, s.id) }
+func (s *session) key() string {
+	if s.k != "" {
+		return s.k
+	}
+	return harness.Key(s.harness, s.id)
+}
 
 // listed is the session as its harness knows it, for the harness to push a message to.
 func (s *session) listed() harness.Session {

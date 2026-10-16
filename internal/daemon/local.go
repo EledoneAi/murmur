@@ -24,7 +24,8 @@ import (
 func (d *Daemon) serve(c net.Conn) {
 	defer c.Close()
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	line, err := bufio.NewReaderSize(c, 1<<16).ReadBytes('\n')
+	r := bufio.NewReaderSize(c, 1<<16)
+	line, err := r.ReadBytes('\n')
 	if err != nil {
 		return
 	}
@@ -36,11 +37,16 @@ func (d *Daemon) serve(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Op {
 	case "hook":
-		var text string
+		var text, token string
 		if req.Hook != nil {
-			text = d.onHook(*req.Hook)
+			text, token = d.onHook(*req.Hook)
 		}
-		_ = enc.Encode(ipc.Reply{OK: true, Text: text})
+		err := enc.Encode(ipc.Reply{OK: true, Text: text, Ack: token != ""})
+		if token != "" { // the messages leave once the hook printed them
+			_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			said, _ := r.ReadString('\n')
+			d.settle(token, err == nil && strings.TrimSpace(said) == "printed")
+		}
 	case "who":
 		d.mu.Lock()
 		snap := d.snapshotLocked()
@@ -124,8 +130,8 @@ func (d *Daemon) serve(c net.Conn) {
 
 // onHook takes what a harness's hook reports, and returns murmur's text for the agent: the brief when a session
 // starts, a reason to turn an edit back, the messages waiting for a session whose harness murmur can't push to, or
-// nothing.
-func (d *Daemon) onHook(ev harness.Event) string {
+// nothing. Messages go only with an answer the harness reads, and a token says which, for settle.
+func (d *Daemon) onHook(ev harness.Event) (string, string) {
 	key := harness.Key(ev.Harness, ev.SessionID)
 	l, listed := setup.Harness(ev.Harness).(harness.Lister)
 	d.mu.Lock()
@@ -165,13 +171,20 @@ func (d *Daemon) onHook(ev harness.Event) string {
 		if listed {
 			d.scan(ev.Harness, l)
 		}
-		return strings.TrimSpace(d.brief(ev) + "\n\n" + d.take(key))
+		brief := d.brief(ev)
+		if !ev.Carries {
+			return brief, ""
+		}
+		waiting, token := d.take(key)
+		return strings.TrimSpace(brief + "\n\n" + waiting), token
 	case harness.BeforeTool:
-		return d.editCheck(ev)
+		return d.editCheck(ev), ""
 	case harness.AfterTool, harness.Stop, harness.Prompt:
-		return d.take(key)
+		if ev.Carries {
+			return d.take(key)
+		}
 	}
-	return ""
+	return "", ""
 }
 
 func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
@@ -328,10 +341,21 @@ func appWords(app string) string {
 	return " · in " + h.Title()
 }
 
-// senderLocked finds the session an MCP server speaks for: by the session id its harness gives it, else by the
-// harness process that started it. A process that runs several sessions sends for the one at work, the most recent.
+// senderLocked finds the session an MCP server speaks for: by the harness process that started it, and among its
+// sessions by the session id the harness gives it; else by that id alone. A process that runs several sessions sends
+// for the one at work, the most recent. A harness whose MCP servers run apart from its sessions (Cursor) sends for
+// its agent at work.
 func (d *Daemon) senderLocked(req ipc.Request) *session {
-	if req.Session != "" {
+	var found []*session
+	for _, s := range d.sessions {
+		if req.PID != 0 && s.pid == req.PID && (req.Harness == "" || s.harness == req.Harness) {
+			if req.Session != "" && s.id == req.Session {
+				return s
+			}
+			found = append(found, s)
+		}
+	}
+	if len(found) == 0 && req.Session != "" {
 		if s := d.sessions[harness.Key(req.Harness, req.Session)]; s != nil {
 			return s
 		}
@@ -339,13 +363,7 @@ func (d *Daemon) senderLocked(req ipc.Request) *session {
 			return s
 		}
 	}
-	var found []*session
-	for _, s := range d.sessions {
-		if req.PID != 0 && s.pid == req.PID && (req.Harness == "" || s.harness == req.Harness) {
-			found = append(found, s)
-		}
-	}
-	if len(found) == 0 && req.Harness != "" { // an MCP server another process started (Cursor's): its harness's agent at work
+	if a, ok := setup.Harness(req.Harness).(harness.Apart); ok && a.MCPApart() && len(found) == 0 {
 		for _, s := range d.sessions {
 			if s.harness == req.Harness && s.status == protocol.StatusBusy {
 				found = append(found, s)

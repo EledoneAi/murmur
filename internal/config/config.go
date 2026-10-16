@@ -27,6 +27,24 @@ type Config struct {
 	// Agreements are the team's, as its hub last sent them: sessions that start before the daemon reaches the hub
 	// get them too.
 	Agreements string `json:"agreements,omitempty"`
+	// Dirs are the coding tools' folder variables as join saw them, "" for unset: the daemon uses these, whatever
+	// environment the process that started it had (Codex clears its MCP servers').
+	Dirs map[string]string `json:"dirs,omitempty"`
+}
+
+// DirVars are the variables that name the coding tools' folders.
+var DirVars = []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME",
+	"COPILOT_HOME", "GEMINI_CLI_HOME"}
+
+// UseDirs sets the coding tools' folder variables as join saw them, when it recorded them.
+func UseDirs(c Config) {
+	for k, v := range c.Dirs {
+		if v == "" {
+			_ = os.Unsetenv(k)
+		} else {
+			_ = os.Setenv(k, v)
+		}
+	}
 }
 
 func Home() string {
