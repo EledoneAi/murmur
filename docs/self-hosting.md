@@ -7,8 +7,6 @@ talk only to it.
 This page helps you choose where to run it, which store and bus to use and how to set up sign-in. The folders in
 [deploy/](../deploy) hold step-by-step recipes. [configuration.md](configuration.md) lists every setting.
 
-Murmur is before 1.0. Read the release notes before you upgrade.
-
 ## What a hub needs
 
 - **An HTTPS address** that every laptop and browser on the team can reach, such as
@@ -40,7 +38,7 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
 | Azure Container Apps | [below](#azure-container-apps) | Use Azure Database for PostgreSQL for the store. |
-| AWS ECS on Fargate | [below](#aws-ecs-on-fargate) | Behind an Application Load Balancer with a longer idle timeout. |
+| AWS ECS on Fargate | [below](#aws-ecs-on-fargate) | Behind an Application Load Balancer. |
 
 ### Not supported
 
@@ -51,7 +49,10 @@ These platforms run code per request and can't hold the long-lived WebSocket eac
 - **Cloudflare Workers**: a Worker runs per request in Cloudflare's JavaScript and WebAssembly runtime. Holding
   WebSockets there takes Durable Objects, a different model from a Go server listening on a port.
 - **Vercel**: functions end after a time limit and don't accept WebSocket connections.
-- **AWS App Runner**: it doesn't support WebSockets.
+
+**AWS App Runner** has been closed to new customers since 30 April 2026
+([AWS](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html)), and it never supported
+WebSockets. ECS Express Mode is AWS's replacement for it.
 
 ## Choose a store and a bus
 
@@ -179,7 +180,8 @@ of a minute is enough; an hour leaves a wide margin. When a proxy does cut a con
 and resends what was not confirmed, so a cut costs a reconnection, not messages.
 
 - **Caddy** passes WebSockets through with no time limit. `reverse_proxy localhost:8080` is all it needs.
-- **nginx** needs the upgrade headers and longer timeouts than its 60-second default:
+- **nginx** needs the upgrade headers. Its 60-second timeouts are enough with the pings; this example raises them
+  to leave a margin:
 
   ```nginx
   map $http_upgrade $connection_upgrade {
@@ -206,8 +208,12 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
   }
   ```
 
-- **ingress-nginx** on Kubernetes: the Helm chart sets `proxy-read-timeout` and `proxy-send-timeout` to 3600.
-- **AWS Application Load Balancer**: raise the idle timeout from its 60-second default, to 3600 for example.
+- **ingress-nginx** on Kubernetes was archived on 24 March 2026
+  ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)) and gets no more fixes. Where it
+  still runs, the Helm chart's annotations set its `proxy-read-timeout` and `proxy-send-timeout` to 3600.
+- **AWS Application Load Balancer**: its default idle timeout of 60 seconds works, because WebSocket pings count as
+  traffic. Raising it, to 3600 for example, is harmless but not needed
+  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).
 - **Google Cloud Run** ends every request at its timeout, 60 minutes at most: deploy with `--timeout=3600`.
 - **Other proxies and load balancers**: allow WebSocket upgrades and set the idle timeout to an hour or more.
 
@@ -222,8 +228,9 @@ carries what the others need.
 3. Store `SESSION_SECRET`, the client secret and the Postgres URL as secrets of the app, and reference them in
    the environment: `STORE=postgres://...?sslmode=require`, `PUBLIC_URL` (the app's address or your domain), and
    the sign-in settings.
-4. For more than one replica, also set `BUS` to the same Postgres URL, or to an Azure Redis instance with
-   `rediss://:<access key>@<host>:<port>`.
+4. For more than one replica, also set `BUS` to the same Postgres URL, or to Azure Managed Redis with
+   `rediss://:<access key>@<host>:10000`. Create it with the Enterprise or Non-clustered clustering policy, and turn
+   on access keys. Azure Cache for Redis is closed to new customers and retiring.
 
 Don't put sqlite on an Azure Files share: its file locking isn't safe for sqlite.
 
@@ -235,8 +242,8 @@ Don't put sqlite on an Azure Files share: its file locking isn't safe for sqlite
    settings as environment variables, and `SESSION_SECRET`, the client secret and the Postgres URL from Secrets
    Manager.
 3. Run it as a service behind an Application Load Balancer: an HTTPS listener with your certificate, a target
-   group on port 8080 with the health check path `/healthz`, and the load balancer's idle timeout raised to 3600
-   seconds.
+   group on port 8080 with the health check path `/healthz`. The load balancer's default idle timeout of 60 seconds
+   works.
 4. With one task, keep the default bus. With more, set `BUS` to the Postgres URL, or to ElastiCache for Redis
    (`rediss://` when in-transit encryption is on).
 
