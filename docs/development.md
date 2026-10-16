@@ -237,7 +237,7 @@ make snapshot
 
 That runs GoReleaser into `dist/`, builds the hub image for both architectures locally, and signs with a
 throwaway key unless `MURMUR_RELEASE_KEY` is set. It uses `goreleaser` from your `PATH`, or `go run` if there
-is none.
+is none. The cask's install steps need GoReleaser 2.19 or later.
 
 ### Images built from source
 

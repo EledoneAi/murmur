@@ -17,10 +17,10 @@ HUB_URL    ?= http://localhost:$(PORT)
 IMAGE      ?= murmur-hub:dev
 
 # Keep in step with the golangci-lint version in .github/workflows/ci.yml.
-GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT_VERSION ?= v2.15.0
 GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 GOVULNCHECK   ?= $(GO) run golang.org/x/vuln/cmd/govulncheck@latest
-GORELEASER    ?= $(shell command -v goreleaser 2>/dev/null || echo '$(GO) run github.com/goreleaser/goreleaser/v2@latest')
+GORELEASER    ?= $(shell command -v goreleaser 2>/dev/null || echo '$(GO) run github.com/goreleaser/goreleaser/v2@v2.19.0-1015c53f-nightly')
 SHA256        := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 'shasum -a 256')
 
 # The gated store and bus tests run against these (see make services).
