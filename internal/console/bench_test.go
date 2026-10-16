@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // The console's costs, on the demo team and on teams of 10, 100 and 500 people with four agents each and the 300
@@ -60,14 +61,20 @@ func benchModel(s ipc.Snapshot) *model {
 	return m
 }
 
+// live is a snapshot as the daemon sends it, from the console's own version.
+func live(s ipc.Snapshot) ipc.Snapshot {
+	s.Version = release.Version
+	return s
+}
+
 var benchTeams = []struct {
 	name string
 	snap func() ipc.Snapshot
 }{
-	{"demo", func() ipc.Snapshot { return demoSnapshot(demoNow) }},
-	{"10", func() ipc.Snapshot { return teamOf(10) }},
-	{"100", func() ipc.Snapshot { return teamOf(100) }},
-	{"500", func() ipc.Snapshot { return teamOf(500) }},
+	{"demo", func() ipc.Snapshot { return live(demoSnapshot(demoNow)) }},
+	{"10", func() ipc.Snapshot { return live(teamOf(10)) }},
+	{"100", func() ipc.Snapshot { return live(teamOf(100)) }},
+	{"500", func() ipc.Snapshot { return live(teamOf(500)) }},
 }
 
 // A frame: what Bubble Tea asks for after every message.
@@ -142,7 +149,7 @@ func BenchmarkDecode(b *testing.B) {
 
 // A long conversation open: 300 messages between two agents.
 func BenchmarkThread(b *testing.B) {
-	s := teamOf(100)
+	s := live(teamOf(100))
 	for i := range s.Msgs {
 		s.Msgs[i].From, s.Msgs[i].To = "p010/svc-0", "p011/svc-1"
 		if i%2 == 1 {
