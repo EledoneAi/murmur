@@ -255,6 +255,27 @@ func TestFailedReadIsNotKept(t *testing.T) {
 	}
 }
 
+// A session's first read doesn't wait for another checkout's slow read: the session's brief waits for it.
+func TestFirstReadSkipsTheQueue(t *testing.T) {
+	slow, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	fast, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	bin := wrapGit(t)
+	_ = os.WriteFile(filepath.Join(bin, "slow"), []byte(slow), 0o644)
+	go Read(slow)
+	time.Sleep(200 * time.Millisecond) // the slow read holds the queue
+	start := time.Now()
+	if r := ReadNow(fast); r.Branch != "main" {
+		t.Fatalf("read %+v", r)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("a first read waited %v behind a slow one", took)
+	} else {
+		t.Logf("a first read took %v while another took 2 s", took)
+	}
+}
+
 // An origin added to a checkout, or to the main checkout of a linked worktree, names its repo at the next read.
 func TestOriginAddedShowsAtOnce(t *testing.T) {
 	dir, git := newRepo(t)

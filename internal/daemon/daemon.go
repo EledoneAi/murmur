@@ -352,8 +352,12 @@ func (d *Daemon) gitLocked(s *session) {
 	}
 	s.gitBusy = true
 	cwd, dirs := s.cwd, slices.Clone(s.act.Dirs)
+	read := gitscan.Read
+	if s.gitAt.IsZero() { // the session's start brief waits for its first read: not behind another checkout's
+		read = gitscan.ReadNow
+	}
 	go func() {
-		r := gitscan.Read(cwd)
+		r := read(cwd)
 		also := d.alsoOf(dirs, r.Top, r.Repo)
 		d.mu.Lock()
 		defer d.mu.Unlock()
