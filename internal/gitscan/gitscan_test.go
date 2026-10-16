@@ -255,6 +255,25 @@ func TestFailedReadIsNotKept(t *testing.T) {
 	}
 }
 
+// An origin added to a checkout, or to the main checkout of a linked worktree, names its repo at the next read.
+func TestOriginAddedShowsAtOnce(t *testing.T) {
+	dir, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	wt := filepath.Join(t.TempDir(), "wt")
+	git("worktree", "add", "-q", "-b", "feat", wt)
+	if r := Read(dir); r.Repo != filepath.Base(dir) {
+		t.Fatalf("without an origin: %q", r.Repo)
+	}
+	Read(wt)
+	git("remote", "add", "origin", "git@github.com:acme/web.git")
+	if r := Read(dir); r.Repo != "acme/web" {
+		t.Fatalf("after git remote add: %q", r.Repo)
+	}
+	if r := Read(wt); r.Repo != "acme/web" {
+		t.Fatalf("in the worktree, after git remote add: %q", r.Repo)
+	}
+}
+
 // Reading a checkout that hasn't moved since starts git twice, and a read still sees every change: more lines in a
 // file already changed, a branch below renamed, a commit.
 func TestReadAgain(t *testing.T) {

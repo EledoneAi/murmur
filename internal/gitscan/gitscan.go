@@ -80,7 +80,7 @@ func Read(cwd string) Result {
 	r.Dir, r.Op = strings.TrimSuffix(lines[1], "/"), opOf(lines[2])
 	sum := sha256.Sum256([]byte(host + "\x00" + r.Top))
 	r.Tree = hex.EncodeToString(sum[:6])
-	origin := remoteOf(ctx, r.Top)
+	origin := remoteOf(ctx, r.Top, lines[2])
 	r.Repo = repoName(origin.url, r.Top)
 	if r.Branch == "HEAD" {
 		r.Branch = "detached"
@@ -238,20 +238,45 @@ var remotes sync.Map // top -> remote
 
 type remote struct {
 	url, ref, branch string // origin's URL; the default branch's ref and name
+	config           string // the repo's config file as it was, its size and time: an origin added since shows at once
 	at               time.Time
 }
 
-func remoteOf(ctx context.Context, top string) remote {
-	if f, ok := remotes.Load(top); ok && time.Since(f.(remote).at) < 10*time.Minute {
+// remoteOf is the origin and default branch of the checkout at top, whose git folder is gitDir.
+func remoteOf(ctx context.Context, top, gitDir string) remote {
+	config := stamp(configOf(gitDir))
+	if f, ok := remotes.Load(top); ok && f.(remote).config == config && time.Since(f.(remote).at) < 10*time.Minute {
 		return f.(remote)
 	}
 	url, _ := git(ctx, top, "config", "--get", "remote.origin.url")
 	ref, branch, ok := defaultBranch(ctx, top)
-	o := remote{url: url, ref: ref, branch: branch, at: time.Now()}
+	o := remote{url: url, ref: ref, branch: branch, config: config, at: time.Now()}
 	if ok {
 		remotes.Store(top, o)
 	}
 	return o
+}
+
+// configOf is the config file of the repo whose git folder is gitDir: a linked worktree's is its main checkout's.
+// ponytail: an origin set in a file the config includes shows within the ten minutes, not at once.
+func configOf(gitDir string) string {
+	if b, err := os.ReadFile(filepath.Join(gitDir, "commondir")); err == nil {
+		dir := strings.TrimSpace(string(b))
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(gitDir, dir)
+		}
+		return filepath.Join(dir, "config")
+	}
+	return filepath.Join(gitDir, "config")
+}
+
+// stamp is a file's size and modification time, or "" when it is missing.
+func stamp(path string) string {
+	st, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatInt(st.Size(), 10) + " " + strconv.FormatInt(st.ModTime().UnixNano(), 10)
 }
 
 // defaultBranch finds the branch the team merges into: origin's HEAD, else main or master on origin, else here. It
