@@ -20,8 +20,8 @@ storage as it changes ([deploy/litestream](../litestream)).
 
 ## Hetzner Cloud
 
-- The smallest shared-vCPU server, CX23, costs about €5.49 a month
-  ([Hetzner](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/)).
+- The smallest shared-vCPU server, CX23, costs about €5.49 a month excluding VAT, and its IPv4 address is billed on
+  top ([Hetzner](https://docs.hetzner.com/general/infrastructure-and-availability/price-adjustment/)).
 - Pick an Ubuntu image and add your SSH key when you create it.
 - Add a firewall that lets in ports 22, 80 and 443, and attach it to the server.
 - Point an A record (and an AAAA record for IPv6) at the server's addresses. They stay the same as long as the

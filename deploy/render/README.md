@@ -11,6 +11,10 @@ terminates HTTPS and sets no maximum on how long a WebSocket stays open
   instance before it starts the new one ([Render](https://render.com/docs/disks)). Laptops disconnect for a
   moment at each deploy and reconnect on their own.
 - **Backups.** Render snapshots each disk every 24 hours and keeps the snapshots for at least seven days.
+- **Check the first write.** The image runs as user 65532, and Render doesn't say which users may write to a disk.
+  The hub creates `/data/murmur.db` as it starts: if the first deploy fails and the log shows a `STORE:` error
+  about that file, the disk isn't writable by that user. Then use a Postgres store, such as Render Postgres, and no
+  disk.
 
 ## Deploy
 
@@ -38,7 +42,8 @@ terminates HTTPS and sets no maximum on how long a WebSocket stays open
    [docs/configuration.md](../../docs/configuration.md) lists every setting, and
    [docs/self-hosting.md](../../docs/self-hosting.md) shows how to set up each identity provider.
 
-5. Deploy, open `PUBLIC_URL`, sign in, and share the install line it shows.
+5. Deploy, and check in the log that the hub started ([Things to know first](#things-to-know-first)). Open
+   `PUBLIC_URL`, sign in, and share the install line it shows.
 
 A service that runs an image doesn't deploy on its own when a new release comes out: change the tag and deploy it
 by hand ([Render](https://render.com/docs/web-services)).

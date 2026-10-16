@@ -22,10 +22,13 @@ and keeps WebSockets open with no time limit
 3. Give the service a public domain, with target port 8080, or your own domain. `PUBLIC_URL` is `https://`
    followed by it. Register `PUBLIC_URL` followed by `/auth/callback` as the redirect URL with your identity
    provider.
-4. Set the variables:
+4. Set the variables. Railway injects a `PORT` variable and checks the service's health on that port
+   ([Railway](https://docs.railway.com/deployments/healthchecks)), and the hub listens on the port `PORT` names:
+   `PORT=8080` keeps both on the target port of step 3.
 
    ```sh
    RAILWAY_RUN_UID=0
+   PORT=8080
    PUBLIC_URL=https://<the service's domain>
    TRUST_PROXY=1
    SESSION_SECRET=<openssl rand -base64 32>

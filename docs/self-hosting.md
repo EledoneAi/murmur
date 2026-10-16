@@ -37,7 +37,7 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 |---|---|---|
 | One server, Docker Compose | [deploy/compose](../deploy/compose) | The simplest real setup. Caddy gets the certificate. Also a two-instance variant with Postgres. |
 | One server, binary and systemd | [deploy/systemd](../deploy/systemd) | No Docker. Bring your own reverse proxy for HTTPS. |
-| A VM at Hetzner, Lightsail, DigitalOcean, EC2 or Azure | [deploy/vm](../deploy/vm) | The Compose recipe on the cheapest real setup, from about €5 a month. |
+| A VM at Hetzner, Lightsail, DigitalOcean, EC2 or Azure | [deploy/vm](../deploy/vm) | The Compose recipe on the cheapest real setup, from about €6 a month before VAT. |
 | Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | An Ingress or a Gateway API HTTPRoute. Check your controller's or gateway's timeouts for WebSockets. |
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
