@@ -56,11 +56,18 @@ func repoName(origin, top string) string {
 
 var host, _ = os.Hostname()
 
+// reading lets one read run at a time. The daemon reads every working session's checkout on the same tick, and eight
+// git processes started together took twice the CPU each that they took one after another.
+// ponytail: a checkout whose git takes seconds holds the other reads back as long; let two run at once if that shows.
+var reading sync.Mutex
+
 // Read reads a checkout from a folder in it. Each read starts git twice: once for where the checkout is, the commits
 // at HEAD and at every branch's tip and the local branches' names, once for git status. When those, and the size and
 // time of each file status names, are as they were at the checkout's last read, the rest of that read holds; else
 // four more calls read what changed.
 func Read(cwd string) Result {
+	reading.Lock()
+	defer reading.Unlock()
 	ctx, done := context.WithTimeout(context.Background(), 8*time.Second)
 	defer done()
 	out, err := git(ctx, cwd, "rev-parse", "--show-toplevel", "--show-prefix", "--absolute-git-dir", "HEAD", "--branches", "--remotes",
