@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,7 @@ func main() {
 		return
 	}
 	log := logger(os.Getenv("LOG_FORMAT"))
+	memoryLimit()
 	if err := run(log); err != nil {
 		log.Error("stopped", "error", err.Error())
 		os.Exit(1)
@@ -166,6 +168,23 @@ func seedSettings() (hub.Settings, error) {
 		s.TokenDays = n
 	}
 	return s, s.Valid()
+}
+
+// memoryLimit has Go's garbage collector keep the hub under 80% of its container's memory limit, unless GOMEMLIMIT
+// sets another. Go reads a container's CPU limit but not its memory limit: without this, a burst of garbage can take
+// the hub past it, and the container is killed, while what it keeps is a fraction of the limit. The rest is for
+// what Go doesn't count, such as the kernel's socket buffers.
+func memoryLimit() {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return
+	}
+	b, err := os.ReadFile("/sys/fs/cgroup/memory.max") // cgroup v2; "max" when there is no limit
+	if err != nil {
+		return
+	}
+	if n, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64); err == nil && n > 0 {
+		debug.SetMemoryLimit(n / 10 * 8)
+	}
 }
 
 func dirExists(p string) bool {
