@@ -148,19 +148,23 @@ in how a message reaches their agents:
 | Claude Code | its session files and transcripts | Claude Code's, or yours | between tool calls; an idle agent starts a turn | yes |
 | OpenCode | murmur's plugin | OpenCode's | between steps; an idle agent starts a turn | permission requests |
 | Codex | its hooks | the name you give with `/rename` | after a tool call, or at the end of a turn; an idle agent gets it with your next prompt | approval requests |
-| Copilot CLI | its hooks | none | as Codex | permission prompts |
 | Gemini CLI | its hooks | none | as Codex | tool confirmations |
-| Cursor | its hooks, in the editor and the CLI | none | as Codex | no: Cursor has no hook for it |
+| Copilot CLI | its hooks | none | after a tool call, or at the end of a turn; an idle agent gets it once it works again | permission prompts |
+| Cursor | its hooks, in the editor and the CLI | none | as Copilot CLI | no: Cursor has no hook for it |
 
 - **Names.** Claude Code names its sessions. Murmur names the others' after the tool: `codex-1`, `cursor-2`. A
   session keeps its name while it runs, across restarts of murmur.
 - **Messages to an idle agent.** Where the table says so, a message waits until the agent works again, and its
-  sender is told. Murmur keeps it for a day.
+  sender is told. Murmur keeps it for a day; if the session closes first, its sender hears that it wasn't read.
+  Each message comes into the agent's context under a line that says it comes from another session, not from its
+  person, and can't approve anything.
 - **Context.** How full an agent's context window is shows for Claude Code only.
-- **Codex** asks you to trust new hooks before it runs them: when it starts after `murmur join`, choose
-  **Trust all and continue**, or trust murmur's in `/hooks`. Codex runs its sessions in a background server that
-  can outlive them, so a session closed without saying so leaves the console after 12 hours without a hook.
-- **Gemini CLI** runs hooks and MCP servers only in folders you trust.
+- **Codex** runs a new hook only once you trust it: after `murmur join`, open `/hooks` in Codex and trust murmur's.
+  If you keep your Codex hooks in `config.toml`, murmur's go there too. Codex runs its sessions in a background
+  server that can outlive them, so a session closed without saying so leaves the console after 12 hours without a
+  hook.
+- **Gemini CLI** has folder trust on by default, and in a folder you haven't trusted it runs no hooks and no MCP
+  server: murmur doesn't see its sessions there. Trust each project folder when Gemini CLI asks.
 - **Cursor** also runs the hooks in `~/.claude/settings.json`. When `murmur join` set Cursor up, murmur's hooks
   there step aside inside Cursor, so nothing runs twice.
 
@@ -178,27 +182,30 @@ For each coding tool it finds, and only those:
   for an approval and drops it after 5 minutes, and with `"refuse"` agents get no messages at all. `join` and
   `doctor` say so, and `join` offers to set it when it runs in a terminal. The `murmur` MCP server, registered
   with `claude mcp add --scope user`.
-- **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`): hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
+- **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`), or `config.toml` when your hooks are there: hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
   (`apply_patch`), `PostToolUse`, `Stop`, `PermissionRequest` and `SessionEnd`, after your own. The MCP server,
   through `codex mcp add`, and in `config.toml` its two tools set to run without asking.
 - **Cursor**, `~/.cursor/hooks.json`: hooks on `sessionStart`, `beforeSubmitPrompt`, `preToolUse` (`Write`),
-  `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:*` in the editor's MCP allowlist in
-  `permissions.json` and `Mcp(murmur:*)` in the CLI's `cli-config.json`, only where you keep one: an editor
-  allowlist murmur created would replace the one in Cursor's settings.
+  `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:who` and `murmur:send` in the
+  editor's MCP allowlist in `permissions.json`, only where you keep one (an allowlist murmur created would replace
+  the one in Cursor's settings), and `Mcp(murmur:who)` and `Mcp(murmur:send)` in the CLI's `cli-config.json`.
 - **OpenCode**, `~/.config/opencode/plugins/murmur.js`: murmur's plugin, which gives agents `murmur_who` and
   `murmur_send`.
 - **Copilot CLI**, `~/.copilot/hooks/murmur.json` (or `$COPILOT_HOME`), a file of murmur's own, and the MCP server
-  in `mcp-config.json`. Copilot asks before every MCP tool, so murmur's hook before each tool call lets murmur's
-  two through.
+  in `mcp-config.json`. Copilot asks before every MCP tool, so murmur's hook before edits and murmur's tools lets
+  `murmur-who` and `murmur-send` through, and lets everything through if murmur is gone.
 - **Gemini CLI**, `~/.gemini/settings.json`: hooks on `SessionStart`, `BeforeAgent`, `BeforeTool` (`write_file`,
-  `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted.
+  `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted for its two
+  tools. A project's own server called `murmur` doesn't inherit that trust: Gemini CLI replaces the entry whole.
 - `~/.murmur/`: config and sign-in token, the background process's socket and log, message history.
 
-Settings files keep their keys in order, and a copy of the original is kept as `<file>.before-murmur`. Murmur
-finds its own entries by their command, which runs `murmur hook`.
+Settings files keep their keys in order, their indentation and what they say, and a copy of the original is kept as
+`<file>.before-murmur`; murmur's own entries keep their place when join runs again. A settings file with comments
+(Gemini CLI allows them) is never rewritten: join says what to add by hand. Murmur finds its own entries by their
+exact command, `murmur hook <tool> <event>`.
 
-`murmur uninstall` removes from each tool exactly what join added, and a file join created, signs the laptop out
-and deletes `~/.murmur/`. It leaves the binary (it prints the command to delete it), the `.before-murmur` copies,
+`murmur uninstall` removes from each tool that holds murmur's entries exactly what join added, and a file join
+created, signs the laptop out and deletes `~/.murmur/`. A file it can't change doesn't stop it: it says which. It leaves the binary (it prints the command to delete it), the `.before-murmur` copies,
 and `crossSessionInbound` if join set it.
 
 ## How it works
