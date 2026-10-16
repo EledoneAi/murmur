@@ -1,0 +1,68 @@
+name: Claude Code compatibility
+
+# Murmur reads files Claude Code writes and talks to its inbox. Each night this checks those against the newest
+# Claude Code, so a change on their side shows up as an issue here before a team finds it.
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+      - name: Install the latest Claude Code
+        id: claude
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          echo "version=$(claude --version)" >> "$GITHUB_OUTPUT"
+      - name: Check
+        env: # one of the two; without either, the check is skipped with a warning
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::warning::Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in the repository's secrets to run this check."
+            exit 0
+          fi
+          make compat
+      - name: Open or update the compat issue
+        if: failure()
+        uses: actions/github-script@v8
+        env:
+          CLAUDE_VERSION: ${{ steps.claude.outputs.version }}
+        with:
+          script: |
+            const label = 'compat';
+            try {
+              await github.rest.issues.createLabel({
+                ...context.repo, name: label, color: 'd93f0b',
+                description: 'murmur and the latest Claude Code disagree',
+              });
+            } catch (e) {
+              if (e.status !== 422) throw e; // 422: the label exists already
+            }
+            const version = process.env.CLAUDE_VERSION || 'unknown version';
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `The nightly compatibility check failed with Claude Code ${version}.\n\nRun: ${run}`;
+            const { data: open } = await github.rest.issues.listForRepo({
+              ...context.repo, labels: label, state: 'open', per_page: 1,
+            });
+            if (open.length > 0) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo, title: `Compatibility check fails with Claude Code ${version}`, labels: [label], body,
+              });
+            }

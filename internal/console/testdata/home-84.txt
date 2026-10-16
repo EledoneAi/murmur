@@ -1,0 +1,32 @@
+ ╭─┬─╮                                                                              
+ ● ● ●  murmur    Team    Mine    All      A alice · 4 online · 12 agents   ● live  
+                                                                                    
+ ◆ Needs you  3                                                                     
+   A api-1a             approve running go test ./ocr/...           ━━╸───── 3:12   
+   D dave               asks you “ok to merge #1827 before v2?”     ━─────── 1:05   
+   B main-1 ┄⇢ 9b       held “Staging uses the shadow certifier t…” ╸─────── 0:40   
+                                                                                    
+ Billing   api · 3 people                                ≈ in tune on certifier.go  
+▌  ╭────◆ A api-1a     …/billing-ocr ⟵ v2    approve running go t…  ━━╸───── 3:12   
+▌  │          ↳ Running go test ./ocr/... · +51 −4 in 3 files · context 31%         
+ ╭─┴─┬┄┄● A api-9b     feat/billing-v2²      Rerun billing on sta…  ›▪·›››⇢›·▪››    
+ │   ╰┄┄● B main-1     main                  Review the billing c…  ·▪···∿······    
+ ╰──────◇ C billing-2  …/billing-certifier   waiting for carol      ━━━━━━━─ 8:40   
+                                                                                    
+ Search   web · 2 people                                                         ≈  
+ ╭──────● A web-4c     feat/search-ui        Search filters and e…  ·▪▪▪▪··▪▪▪·▪    
+ ╰──────● C web-2      feat/search-api       Search endpoint pagi…  ››▪▪▪··▪▪››▪    
+                                                                                    
+ Not in touch                                                      × 1 out of tune  
+        ● A infra-3    chore/tf-providers    Upgrade the Terrafor…  ··▪›··▪››··›    
+        ● A notes      ⌂ notes               Draft the weekly plan  ···▪··▪∿···▪    
+        ○ A api-2f     feat/billing-v2       Billing fixtures for…  idle 40m        
+        ● D ingest-1   queue-v2              looping? the same co…  ››››·›››››››    
+        ○ D infra-1    pilot/terraform-6     Pilot Terraform 6      idle 1h         
+            × main.tf  infra-3 and infra-1 both change it, never talked  introduce  
+                                                                                    
+ · 1 quiet agent, folded                                                            
+                                                                                    
+                                                                                    
+                                                                                    
+ g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                   ? keys  

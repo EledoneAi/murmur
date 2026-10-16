@@ -1,0 +1,33 @@
+name: Feature request
+description: Something murmur could do for you or your team.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what gets in the way today. A real example helps most.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How you picture it working. Rough is fine.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Workarounds you use, or other ways you considered.
+
+  - type: dropdown
+    id: side
+    attributes:
+      label: Where it would live
+      options:
+        - The laptop (console, CLI, agents' tools)
+        - The hub (sign-in, admin, deployment)
+        - Both
+        - Not sure

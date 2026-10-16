@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+#
+# The published hub image, assembled by GoReleaser (dockers_v2 in .goreleaser.yaml) from the binaries it built.
+# It carries the laptop binaries of the same release with the signed checksums, so a hub serves installs and
+# updates without reaching the internet. To build from source instead, use deploy/docker/Dockerfile.
+
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/murmur-hub /usr/local/bin/murmur-hub
+COPY dist/client/ dist/checksums.txt dist/checksums.txt.sig /usr/share/murmur/dist/
+# WORKDIR creates /data owned by the image's user (nonroot), so a named volume mounted there starts out writable.
+WORKDIR /data
+VOLUME /data
+ENV PORT=8080 \
+    STORE=sqlite:///data/murmur.db \
+    DIST_DIR=/usr/share/murmur/dist
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/murmur-hub"]

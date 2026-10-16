@@ -1,0 +1,113 @@
+{{- include "murmur-hub.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "murmur-hub.fullname" . }}
+  labels:
+    {{- include "murmur-hub.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- if not (include "murmur-hub.networkedBus" .) }}
+  # With the local bus, an old and a new pod running side by side during an update would each hold part of the
+  # team, and a sqlite volume can't be shared by two pods. So the old pod stops before the new one starts; laptops
+  # reconnect on their own.
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "murmur-hub.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "murmur-hub.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "murmur-hub.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: hub
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          {{- with .Values.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          env:
+            - name: PORT
+              value: "8080"
+            - name: PUBLIC_URL
+              value: {{ required "set publicURL, for example https://murmur.example.com" .Values.publicURL | quote }}
+            - name: TRUST_PROXY # the ingress appends the client's address to X-Forwarded-For
+              value: "1"
+            {{- with .Values.store }}
+            - name: STORE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.bus }}
+            - name: BUS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | toString | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # the root filesystem is read-only; this is the only other place the hub may write
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          {{- if include "murmur-hub.pvc" . }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "murmur-hub.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

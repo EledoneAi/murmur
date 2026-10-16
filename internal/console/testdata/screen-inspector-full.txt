@@ -1,0 +1,32 @@
+ ╭─┬─╮                                                                              
+ ● ● ●  murmur    Team    Mine    All      A alice · 4 online · 12 agents   ● live  
+                                                                                    
+  A api-9b                                                           ● working 12m  
+  Rerun billing on staging                                                          
+                                                                                    
+  PLACE      acme/api feat/billing-v2²                                              
+             checkout 2 of this branch                                              
+                                                                                    
+  NOW        Running go test ./billing/ -run Rerun                                  
+             ···›▪▪·›››▪›··⇢▪›››▪·›››⇢›·▪››                                         
+             read 26% · edit 20% · run 46% · talk 6%                                
+                                                                                    
+  CHANGES    +214 −38 in 6 files · #1822                                            
+  CONTEXT    ▆ 78% · compacts soon                                                  
+                                                                                    
+  IN TOUCH   ─ C billing-2 2                                                        
+             ─ A api-1a 1                                                           
+             ┄ B main-1 held for you                                                
+                                                                                    
+  HARMONY    ≈ certifier.go · talking with billing-2                                
+                                                                                    
+  write  copy  open #1822  go to terminal                                           
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+ n next need  ⏎ thread  ␣ close  z mute                                     ? keys  

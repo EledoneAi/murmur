@@ -1,0 +1,15 @@
+# Deploying a hub
+
+[docs/self-hosting.md](../docs/self-hosting.md) helps you choose a platform, a store and a bus. Each folder here
+is one way to run the hub, with a README you can follow from start to finish:
+
+| Folder | What it runs |
+|---|---|
+| [compose](compose) | Docker Compose on one server, with Caddy for HTTPS; also two instances with Postgres |
+| [helm/murmur-hub](helm/murmur-hub) | A Helm chart for Kubernetes |
+| [cloudrun](cloudrun) | Google Cloud Run, with Firestore or Cloud SQL |
+| [fly](fly) | Fly.io, one Machine with a volume |
+| [systemd](systemd) | The release binary as a hardened systemd service |
+
+The other folders are for building and releasing murmur itself: [docker](docker) holds the hub's Dockerfiles,
+and [sign](sign) signs a release's checksums (see [docs/development.md](../docs/development.md)).

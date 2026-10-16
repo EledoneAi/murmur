@@ -1,0 +1,107 @@
+# Values for the murmur hub. README.md in this folder walks through an install; docs/configuration.md lists
+# every setting the hub reads.
+
+# More than one replica needs a networked store and bus (see store and bus below). The chart refuses otherwise.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/eledoneai/murmur-hub
+  # Empty means the chart's appVersion. Pin a release, for example "1.0.0".
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# The address people and laptops use, for example https://murmur.example.com. Required.
+publicURL: ""
+
+# Where the hub keeps its data. Empty: the image's default, sqlite on the persistent volume below, for one replica.
+# Otherwise postgres://... or firestore://PROJECT[/DATABASE]. Put a password in existingSecret and refer to it as
+# $(KEY), for example postgres://murmur:$(POSTGRES_PASSWORD)@postgres:5432/murmur
+store: ""
+
+# How hub replicas tell each other about events. Empty: local://, for one replica.
+# Otherwise postgres://..., redis://... or rediss://..., with passwords as $(KEY) like store.
+# Unless it is a Postgres or Redis URL, upgrades use the Recreate strategy: the old pod stops before the new one
+# starts.
+bus: ""
+
+# The name of an existing Secret in the release's namespace. Each of its keys becomes an environment variable of the
+# hub. Put SESSION_SECRET (required), the identity provider's client secret (OIDC_CLIENT_SECRET,
+# GOOGLE_CLIENT_SECRET or GITHUB_CLIENT_SECRET) and any password store or bus refer to in it.
+existingSecret: ""
+
+# Every other setting, as plain environment variables: the identity provider, who may join, the first admins,
+# LOG_FORMAT, TOKEN_DAYS. Every replica gets the same values, so leave INSTANCE_ID out. Without OIDC_ISSUER,
+# GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID (here or in existingSecret) the hub refuses to start. For example:
+#   OIDC_ISSUER: https://login.example.com
+#   OIDC_CLIENT_ID: murmur
+#   OIDC_NAME: Example SSO
+#   ALLOWED_DOMAINS: example.com
+#   ADMINS: you@example.com
+env: {}
+
+# The volume for the sqlite store. Used only when store is empty or sqlite:// and replicaCount is 1.
+persistence:
+  enabled: true
+  size: 1Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  # Use a claim you created yourself instead of letting the chart create one.
+  existingClaim: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  # For example the Workload Identity annotation, when the hub uses Firestore on GKE.
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  # Each laptop holds one WebSocket open for as long as it is connected. Laptops and the hub ping each other every
+  # 25 seconds, so an idle timeout of a minute works, but some controllers also cap how long a connection may last.
+  # These are ingress-nginx's settings; other controllers have their own, set them to an hour or more.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  # Empty means the host of publicURL.
+  host: ""
+  tls: []
+  #  - secretName: murmur-tls
+  #    hosts:
+  #      - murmur.example.com
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  # makes the volume writable by the hub
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,32 @@
+ ●─●─●  murmur                               ◆ 3   A ● live 
+                                                            
+ ◆ Needs you  3                                             
+   A api-1a             approve             ━━╸───── 3:12   
+   D dave               asks                ━─────── 1:05   
+   B main-1 ┄⇢ 9b       held                ╸─────── 0:40   
+                                                            
+ Billing   api · 3 people                                ≈  
+▌  ╭────◆ A api-1a                          ━━╸───── 3:12   
+▌  │          ↳ Running go test ./ocr/... · +51 −4 in 3 f…  
+ ╭─┴─┬┄┄● A api-9b                          ›▪·›››⇢›·▪››    
+ │   ╰┄┄● B main-1                          ·▪···∿······    
+ ╰──────◇ C billing-2                       ━━━━━━━─ 8:40   
+                                                            
+ Search   web · 2 people                                 ≈  
+ ╭──────● A web-4c                          ·▪▪▪▪··▪▪▪·▪    
+ ╰──────● C web-2                           ››▪▪▪··▪▪››▪    
+                                                            
+ Not in touch                                          × 1  
+        ● A infra-3                         ··▪›··▪››··›    
+        ● A notes                           ···▪··▪∿···▪    
+        ○ A api-2f                          idle 40m        
+        ● D ingest-1                        ››››·›››››››    
+        ○ D infra-1                         idle 1h         
+            × main.tf  introduce                            
+                                                            
+ · 1 quiet agent, folded                                    
+                                                            
+                                                            
+                                                            
+                                                            
+ g terminal  ⏎ thread  ␣ inspect  w write  c copy   ? keys  

@@ -1,0 +1,18 @@
+---
+// Every page: the frame, the faces and the colours. The page's own component mounts into #app.
+import '../styles/murmur.css'
+const { title } = Astro.props
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{title ? `${title} · murmur` : 'murmur'}</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <div class="mx-auto max-w-[1120px] px-6 pb-24"><div id="app"></div><slot /></div>
+  </body>
+</html>

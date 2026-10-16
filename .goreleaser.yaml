@@ -1,0 +1,139 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+#
+# How a release is made. .github/workflows/release.yml runs it for every v* tag; make snapshot runs it locally
+# without publishing. docs/development.md describes the whole release process.
+#
+# What a release holds:
+#   murmur-<os>-<arch>                 the laptop binary, for darwin and linux on amd64 and arm64
+#   murmur-hub_<version>_<os>_<arch>   the hub, for linux (servers) and darwin (trying it locally)
+#   checksums.txt, checksums.txt.sig       SHA-256 of every file above, signed with the project's release key
+#   ghcr.io/eledoneai/murmur-hub       the hub image, carrying the laptop binaries and the signed checksums
+#   a Homebrew cask in eledoneai/homebrew-tap
+version: 2
+project_name: murmur
+
+builds:
+  - id: murmur
+    main: ./cmd/murmur
+    binary: murmur
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/EledoneAi/murmur/internal/release.Version={{ .Version }}
+      - -X github.com/EledoneAi/murmur/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    hooks:
+      post:
+        # The hub image serves these binaries under the names laptops ask for (see dockers_v2 below).
+        - mkdir -p dist/client
+        - cp "{{ .Path }}" "dist/client/murmur-{{ .Os }}-{{ .Arch }}"
+
+  - id: murmur-hub
+    main: ./cmd/murmur-hub
+    binary: murmur-hub
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/EledoneAi/murmur/internal/release.Version={{ .Version }}
+      - -X github.com/EledoneAi/murmur/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  # The laptop binary ships bare: the hub serves the same files, and checksums.txt names them as they are.
+  - id: murmur
+    ids: [murmur]
+    formats: [binary]
+    name_template: "murmur-{{ .Os }}-{{ .Arch }}"
+
+  - id: murmur-hub
+    ids: [murmur-hub]
+    formats: [tar.gz]
+    name_template: "murmur-hub_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# The release manifest is checksums.txt, signed with the project's ed25519 key. deploy/sign reads the private key
+# from MURMUR_RELEASE_KEY and writes checksums.txt.sig; laptops verify it with the public key built into them.
+signs:
+  - id: release-key
+    artifacts: checksum
+    cmd: go
+    args: [run, ./deploy/sign, "${artifact}"]
+    signature: "${artifact}.sig"
+
+dockers_v2:
+  - id: murmur-hub
+    ids: [murmur-hub]
+    dockerfile: deploy/docker/Dockerfile.release
+    images: [ghcr.io/eledoneai/murmur-hub]
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not (or .Prerelease .IsSnapshot) }}latest{{ end }}"
+    platforms: [linux/amd64, linux/arm64]
+    extra_files:
+      - dist/client/murmur-darwin-amd64
+      - dist/client/murmur-darwin-arm64
+      - dist/client/murmur-linux-amd64
+      - dist/client/murmur-linux-arm64
+      - dist/checksums.txt
+      - dist/checksums.txt.sig
+    labels:
+      org.opencontainers.image.title: murmur-hub
+      org.opencontainers.image.description: The hub that links a team's murmur laptops
+      org.opencontainers.image.source: https://github.com/EledoneAi/murmur
+      org.opencontainers.image.licenses: Apache-2.0
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
+# GoReleaser publishes Homebrew installs of prebuilt binaries as casks (its formula support is deprecated).
+# People run brew install eledoneai/tap/murmur and murmur join https://<hub>, then
+# brew upgrade murmur.
+homebrew_casks:
+  - name: murmur
+    ids: [murmur]
+    repository:
+      owner: eledoneai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/EledoneAi/murmur
+    description: Your team's Claude Code agents in one terminal console
+    skip_upload: auto
+    hooks:
+      post:
+        # The binaries aren't notarized; without this, macOS refuses to open a download from the internet.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", staged_path.to_s]
+          end
+    caveats: |
+      Connect this laptop to your team's hub with: murmur join https://<your hub>
+      Murmur installed from Homebrew never updates itself.
+      When your team's hub moves to a newer version, run: brew upgrade murmur
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "^Merge branch"
+
+release:
+  github:
+    owner: EledoneAi
+    name: murmur
+  prerelease: auto
+  footer: |
+    ## Hub image
+
+    `ghcr.io/eledoneai/murmur-hub:{{ .Version }}` carries the laptop binaries of this release. Deploy it and
+    every laptop connected to the hub follows. See docs/self-hosting.md.

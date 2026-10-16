@@ -1,0 +1,40 @@
+ ╭─┬─╮                                                                                                        
+ ● ● ●  murmur    Near me    Team    All                            A alice · 23 online · 69 agents   ● live  
+                                                                                                              
+ ◆ Needs you  3                                                                                               
+▌  A  api-1a             approve running go test ./ocr/...                                    ━━╸───── 3:12   
+   D  dave               asks you “ok to merge #1827 before v2?”                              ━─────── 1:05   
+   B  main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until …” ╸─────── 0:40   
+                                                                                                              
+ Billing   api · 3 people                                                          ≈ in tune on certifier.go  
+   ╭────◆ A  api-1a     feat/billing-ocr ⟵ v2   approve running go test ./ocr/...             ━━╸───── 3:12   
+ ╭─┴─┬┄┄● A  api-9b     feat/billing-v2²        Rerun billing on staging                      ›▪·›››⇢›·▪››    
+ │   ╰┄┄● B  main-1     main                    Review the billing config                     ·▪···∿······    
+ ╰──────◇ C  billing-2  feat/billing-certifier  waiting for carol                             ━━━━━━━─ 8:40   
+                                                                                                              
+ Search   web · 2 people                                                                                   ≈  
+ ╭──────● A  web-4c     feat/search-ui          Search filters and empty states               ·▪▪▪▪··▪▪▪·▪    
+ ╰──────● C  web-2      feat/search-api         Search endpoint pagination                    ››▪▪▪··▪▪››▪    
+                                                                                                              
+ Not in touch                                                                                × 1 out of tune  
+        ● A  infra-3    chore/tf-providers      Upgrade the Terraform providers               ··▪›··▪››··›    
+        ● A  notes      ⌂ notes                 Draft the weekly plan                         ···▪··▪∿···▪    
+        ○ A  api-2f     feat/billing-v2         Billing fixtures for the rerun                idle 40m        
+        ○ D  infra-1    pilot/terraform-6       Pilot Terraform 6                             idle 1h         
+            × main.tf  infra-3 and infra-1 both change it, never talked  introduce                            
+                                                                                                              
+ ELSEWHERE  19 constellations · 57 agents · what needs attention first                                        
+   ●●◇      Topic 0                     svc-0                                                    ◇ 1 waiting  
+   ●●◇      Topic 4                     svc-4                                                    ◇ 1 waiting  
+   ●●◇      Topic 8                     svc-1                                                    ◇ 1 waiting  
+   ●●◇      Topic 12                    svc-5                                                    ◇ 1 waiting  
+   ●●◇      Topic 16                    svc-2                                                    ◇ 1 waiting  
+   ●●●      Topic 1                     svc-1                                                              ≈  
+   + 13 more · 1 lone agent · All unfolds them                                                                
+                                                                                                              
+ · 1 quiet agent, folded                                                                                      
+                                                                                                              
+                                                                                                              
+                                                                                                              
+                                                                                                              
+ g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                                             ? keys  

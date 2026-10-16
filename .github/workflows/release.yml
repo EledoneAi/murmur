@@ -1,0 +1,55 @@
+name: Release
+
+# A v* tag publishes a release: binaries, signed checksums, the hub image and the Homebrew cask.
+# docs/development.md lists the secrets this needs and how to make the release key.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # the GitHub release and its files
+  packages: write # the hub image on ghcr.io
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the changelog needs the history
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # An unsigned release would be refused by every laptop, so stop before building anything.
+      - name: Check the release key is set
+        env:
+          MURMUR_RELEASE_KEY: ${{ secrets.MURMUR_RELEASE_KEY }}
+          MURMUR_RELEASE_PUBKEY: ${{ vars.MURMUR_RELEASE_PUBKEY }}
+        run: |
+          if [ -z "$MURMUR_RELEASE_KEY" ]; then
+            echo "::error::Set the MURMUR_RELEASE_KEY secret (go run ./deploy/sign -keygen makes one)."
+            exit 1
+          fi
+          # without the public key built in, laptops would check checksums only and accept anything a hub serves
+          if [ -z "$MURMUR_RELEASE_PUBKEY" ]; then
+            echo "::error::Set the MURMUR_RELEASE_PUBKEY variable to the public half of the release key."
+            exit 1
+          fi
+      - run: go test ./...
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MURMUR_RELEASE_KEY: ${{ secrets.MURMUR_RELEASE_KEY }}
+          MURMUR_RELEASE_PUBKEY: ${{ vars.MURMUR_RELEASE_PUBKEY }}
+          # GITHUB_TOKEN can't push to another repository, so the cask needs its own token for the tap.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

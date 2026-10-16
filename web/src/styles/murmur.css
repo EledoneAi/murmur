@@ -1,0 +1,82 @@
+/* murmur on the web. Quiet on purpose: text sits on the page, separated by space and the odd hairline, not by boxes.
+ * Prose is set in IBM Plex Sans; monospace is kept for what you'd type or read off a terminal: agent names,
+ * branches, clocks and the texture of tool calls. One colour asks for attention, and only that one: teal means
+ * something waits for you. Thorn marks what failed. People keep their colour, on their initial only. */
+
+@import 'tailwindcss';
+@import '@fontsource-variable/ibm-plex-sans/wght.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
+
+:root {
+  color-scheme: light;
+  --bg: #fafaf9;
+  --raised: #f2f2f0;
+  --line: #e4e4e1;
+  --muted: #6b6d74;
+  --text: #2b2c31;
+  --strong: #141518;
+  --teal: #0a7569;
+  --thorn: #b3303c;
+  --link: #3354ad;
+  --lilac: #7b4aa8;
+  --p0: #2f62d0; --p1: #4d7d10; --p2: #6f45c9; --p3: #c2357f;
+  --p4: #8a6a00; --p5: #b35a12; --p6: #2f7a1c; --p7: #9046b8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #131417;
+    --raised: #1b1c20;
+    --line: #2a2c31;
+    --muted: #8e919a;
+    --text: #d6d8de;
+    --strong: #f1f2f4;
+    --teal: #55c9b8;
+    --thorn: #e9808b;
+    --link: #a3b4ee;
+    --lilac: #c1a3e6;
+    --p0: #7ea6f2; --p1: #a8d06e; --p2: #b39ef0; --p3: #ef93c3;
+    --p4: #d9bd6c; --p5: #eba97c; --p6: #86c46a; --p7: #cfa6ef;
+  }
+}
+
+@theme inline {
+  --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+  --color-bg: var(--bg);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-text: var(--text);
+  --color-strong: var(--strong);
+  --color-teal: var(--teal);
+  --color-thorn: var(--thorn);
+  --color-link: var(--link);
+  --color-lilac: var(--lilac);
+  --color-p0: var(--p0); --color-p1: var(--p1); --color-p2: var(--p2); --color-p3: var(--p3);
+  --color-p4: var(--p4); --color-p5: var(--p5); --color-p6: var(--p6); --color-p7: var(--p7);
+}
+
+@layer base {
+  html { background: var(--bg); }
+  body { @apply bg-bg font-sans text-[15px] leading-relaxed text-text antialiased; }
+  h1, h2, h3 { @apply text-strong; }
+  a { @apply text-link hover:underline underline-offset-2; }
+  code { @apply font-mono text-[0.9em] text-strong; }
+  :focus-visible { @apply outline-2 outline-offset-2 outline-link rounded-sm; }
+  ::selection { background: color-mix(in srgb, var(--link) 25%, transparent); }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center gap-2 rounded-md border border-line px-3 py-1.5 text-sm text-strong hover:bg-raised disabled:opacity-50 cursor-pointer; }
+  .btn-primary { @apply inline-flex items-center gap-2 rounded-md bg-strong px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90 disabled:opacity-50 cursor-pointer; }
+  .btn-quiet { @apply cursor-pointer text-sm text-link hover:underline underline-offset-2 disabled:opacity-50; }
+  .btn-danger { @apply inline-flex items-center rounded-md border border-thorn/40 px-3 py-1.5 text-sm text-thorn hover:bg-thorn/8 cursor-pointer disabled:opacity-50; }
+  .input { @apply w-full rounded-md border border-line bg-bg px-3 py-2 text-sm text-strong placeholder:text-muted focus:border-link focus:outline-none; }
+  .label { @apply block text-sm font-medium text-strong; }
+  .hint { @apply block text-[13px] text-muted; }
+  .data { @apply font-mono text-[13.5px]; }
+  .chip { @apply inline-grid h-6 min-w-6 place-items-center rounded-md px-1 text-xs font-semibold; }
+  .rule { @apply border-t border-line; }
+}

@@ -1,0 +1,20 @@
+The murmur hub is starting at {{ .Values.publicURL }}
+
+Register this redirect URL with your identity provider:
+  {{ .Values.publicURL }}/auth/callback
+
+Laptops install with:
+  curl -fsSL {{ .Values.publicURL }}/install.sh | sh
+{{- if not .Values.ingress.enabled }}
+
+No Ingress was created. Route {{ .Values.publicURL }} to service {{ include "murmur-hub.fullname" . }} port {{ .Values.service.port }} yourself, or look at it from your machine with:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "murmur-hub.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+{{- if not (or .Values.existingSecret .Values.env.SESSION_SECRET .Values.env.DEV_LOGIN) }}
+
+WARNING: no existingSecret is set, so the hub has no SESSION_SECRET and refuses to start.
+{{- end }}
+{{- if not (or .Values.env.OIDC_ISSUER .Values.env.GOOGLE_CLIENT_ID .Values.env.GITHUB_CLIENT_ID .Values.env.DEV_LOGIN) }}
+
+WARNING: env sets no sign-in provider (OIDC_ISSUER, GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID), so the hub refuses to start unless existingSecret sets one. docs/self-hosting.md shows how to set one up.
+{{- end }}
