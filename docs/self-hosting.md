@@ -15,6 +15,9 @@ This page helps you choose where to run it, which store and bus to use and how t
   proxy in front must allow WebSocket upgrades on `/ws` and leave connections open for many minutes.
 - **An identity provider** your team already signs in with.
 - **A place for its data**, the store. For one instance a sqlite file on a disk that survives restarts is enough.
+- **Nothing that signs people in before the hub.** Laptops, scripts and GitHub reach it without a browser, and the
+  hub signs people in itself. Leave the platform's own sign-in off: see
+  [managed-services.md](managed-services.md#three-rules).
 
 The hub is one Go binary in a small image.
 
@@ -71,11 +74,14 @@ memory (`local://`).
 - **sqlite** is one file. It needs a disk that outlives the container, and only one instance may use it. Don't
   put it on a network file system such as NFS, EFS or Azure Files.
 - **Postgres** can be both the store and the bus, so a two-instance hub needs nothing else. Any recent version
-  works, managed or not.
+  works, managed or not. The bus needs a direct connection or a session pooler, not a transaction pooler.
 - **Redis** works as the bus only. It keeps nothing, so it needs no persistence or backups.
 - **Firestore** is Google Cloud's document database, natural on Cloud Run. The hub finds its credentials the way
   Google's client libraries do: the service account on Google Cloud, or `GOOGLE_APPLICATION_CREDENTIALS`
   elsewhere.
+
+[managed-services.md](managed-services.md) goes through the clouds' managed Postgres and Redis services: which
+endpoint to use, and which poolers and flavours don't work.
 
 One instance is enough for a team: if it restarts, laptops reconnect within seconds and resend what was waiting.
 Run two when even that short gap matters, or to upgrade without one.
