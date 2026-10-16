@@ -64,6 +64,8 @@ type Daemon struct {
 	seen       map[string]bool
 	handed     map[string]bool      // message id, or "notice id/Claude session id": the agent, or that conversation, has it
 	held       map[string][]heldMsg // agent name -> notes waiting while it is idle
+	queued     map[string][]heldMsg // session key -> messages waiting for its next hook, when murmur can't push to it
+	names      map[string]string    // session key -> the name murmur gave a session learned from hooks, from the history
 	outbox     map[string]outMsg
 	failed     map[string]failure      // messages sent from here that failed, by id
 	repos      map[string]string       // folder -> the repo it is in, "" outside git: for the repos sessions touch
@@ -145,7 +147,8 @@ func Run() error {
 func newDaemon(handle string) *Daemon {
 	return &Daemon{
 		sessions: map[string]*session{}, hints: map[string]string{}, sockets: map[string]string{}, terms: map[string]map[string]string{}, watched: map[string]string{},
-		seen: map[string]bool{}, handed: map[string]bool{}, held: map[string][]heldMsg{}, outbox: map[string]outMsg{},
+		seen: map[string]bool{}, handed: map[string]bool{}, held: map[string][]heldMsg{}, queued: map[string][]heldMsg{}, names: map[string]string{},
+		outbox: map[string]outMsg{},
 		failed: map[string]failure{}, repos: map[string]string{}, asks: map[string]protocol.Msg{},
 		answers: map[string]string{}, done: map[string]bool{}, subs: map[chan struct{}]bool{}, acks: map[string]chan protocol.Frame{},
 		checks: map[string]chan protocol.Frame{}, me: protocol.Person{Handle: handle}, state: "connecting", lastUse: time.Now(),
@@ -254,6 +257,9 @@ func (d *Daemon) statusLocked(s *session, status string, since int64) {
 
 func (d *Daemon) removeLocked(key string) {
 	if s := d.sessions[key]; s != nil {
+		if s.hooked {
+			d.appendHistory(histLine{Gone: key})
+		}
 		d.unwatchLocked(s)
 		delete(d.hints, key)
 		delete(d.sessions, key)
@@ -391,7 +397,7 @@ func (d *Daemon) tickLoop() {
 		}
 		d.mu.Lock()
 		for k, s := range d.sessions {
-			if !harness.Alive(s.pid) {
+			if !harness.Alive(s.pid) || (s.hooked && time.Since(s.heard) > hookedTTL) {
 				d.removeLocked(k)
 				continue
 			}
@@ -921,7 +927,12 @@ func (d *Daemon) onMsg(m protocol.Msg, echo bool) {
 			case "declined":
 				ok, why = false, "its person declined it"
 			default:
-				ok, why = d.handOver(m, agent)
+				var text string
+				if ok, text = d.handOver(m, agent); ok {
+					note = text
+				} else {
+					why = text
+				}
 			}
 		}
 		d.toHub(protocol.Frame{T: protocol.FrameDelivered, ID: m.ID, OK: ok, Err: why, Note: note})
@@ -1026,7 +1037,8 @@ func (d *Daemon) answer(op, id string) error {
 // conversation (an outbox sends a message again when its answer was lost). Murmur's notices go to each conversation
 // once: one that comes again under the same id doesn't prompt a conversation that has it, while one started since
 // gets it. Only a delivery the session took counts: one that failed is tried again when the message comes back, and
-// an echo meant for the console never counts.
+// an echo meant for the console never counts. It says whether the message went, and a note for its sender when it
+// did, or why when it didn't.
 func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 	d.mu.Lock()
 	var target *session
@@ -1039,7 +1051,7 @@ func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 	if target != nil {
 		p, _ = setup.Harness(target.harness).(harness.Pusher)
 	}
-	if target == nil || p == nil || target.sock == "" {
+	if target == nil || (p != nil && target.sock == "") {
 		d.mu.Unlock()
 		return false, m.To + " is no longer running"
 	}
@@ -1057,6 +1069,18 @@ func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 		d.holdLocked(agent, m)
 		d.mu.Unlock()
 		return true, ""
+	}
+	if p == nil { // the harness takes messages only with its hooks' answers
+		d.queueLocked(target, m)
+		d.handed[key] = true
+		d.appendHistory(histLine{Handed: key})
+		note := ""
+		if target.status != protocol.StatusBusy {
+			note = "waiting: " + m.To + " runs in " + titleOf(target.harness) + ", which takes messages only while its agent works; " +
+				"it gets this once its person prompts it again"
+		}
+		d.mu.Unlock()
+		return true, note
 	}
 	d.mu.Unlock()
 	if err := p.Push(to, protocol.Prompt(m)); err != nil {
@@ -1172,6 +1196,14 @@ func (d *Daemon) maybeReport() {
 		r.OK = r.OK && c.OK
 	}
 	d.toHub(protocol.Frame{T: protocol.FrameReport, Report: &r})
+}
+
+// titleOf names a harness for people.
+func titleOf(name string) string {
+	if h := setup.Harness(name); h != nil {
+		return h.Title()
+	}
+	return name
 }
 
 func (d *Daemon) muteListLocked() []string {

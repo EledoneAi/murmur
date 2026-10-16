@@ -27,10 +27,11 @@ const editTools = "Edit|MultiEdit|Write|NotebookEdit"
 
 // hookGroup is murmur's entry for one event. Claude Code waits for the start hook, whose brief only counts as
 // the session's context when Claude Code waits for it, and for the edit hook, which may turn an edit back. Both give
-// up on their own in under a second, well before these timeouts. The Notification hook runs in the background.
+// up on their own in under a second, well before these timeouts. The Notification hook runs in the background. Every
+// group has a matcher, empty for all: Cursor, which runs these hooks too, skips a settings file whose groups lack one.
 func hookGroup(ev, exe string) json.RawMessage {
 	h := map[string]any{"type": "command", "command": harness.ShellQuote(exe) + " " + hookArgs[ev], "timeout": 5}
-	g := map[string]any{"hooks": []any{h}}
+	g := map[string]any{"matcher": "", "hooks": []any{h}}
 	switch ev {
 	case "PreToolUse":
 		g["matcher"] = editTools
@@ -42,22 +43,6 @@ func hookGroup(ev, exe string) json.RawMessage {
 }
 
 var toolPermissions = []string{"mcp__murmur__who", "mcp__murmur__send"}
-
-// OurGroup says whether a group of hooks in a Claude-style settings file holds one of murmur's.
-func OurGroup(group json.RawMessage) bool {
-	var g struct {
-		Hooks []struct {
-			Command string `json:"command"`
-		} `json:"hooks"`
-	}
-	_ = json.Unmarshal(group, &g)
-	for _, h := range g.Hooks {
-		if harness.Ours(h.Command) {
-			return true
-		}
-	}
-	return false
-}
 
 // EditSettings adds (or with add=false removes) murmur's entries in Claude Code's settings.json.
 func EditSettings(path, exe string, add bool) error {
@@ -71,7 +56,7 @@ func EditSettings(path, exe string, add bool) error {
 		if v := hooks.Get(ev); v != nil {
 			_ = json.Unmarshal(v, &groups)
 		}
-		groups = slices.DeleteFunc(groups, OurGroup)
+		groups = slices.DeleteFunc(groups, harness.OurGroup)
 		if add {
 			groups = append(groups, hookGroup(ev, exe))
 		}
@@ -114,7 +99,7 @@ func SetupState(path string) (hooks, perms bool, inbound string) {
 	for _, ev := range hookEvents {
 		var groups []json.RawMessage
 		_ = json.Unmarshal(o.Sub("hooks").Get(ev), &groups)
-		hooks = hooks && slices.ContainsFunc(groups, OurGroup)
+		hooks = hooks && slices.ContainsFunc(groups, harness.OurGroup)
 	}
 	var allow []string
 	_ = json.Unmarshal(o.Sub("permissions").Get("allow"), &allow)

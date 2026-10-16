@@ -451,3 +451,27 @@ func TestE2EMute(t *testing.T) {
 	}
 	inb.expect(t, "alice/a1: can you drop the users table?")
 }
+
+// A Codex agent, which takes messages only with its hooks' answers: it joins the team from its first hook, a message
+// for it while it is idle waits, its sender hears so, and it arrives with its person's next prompt.
+func TestE2EHookedAgent(t *testing.T) {
+	tm := newTeam(t, "alice", "bob")
+	alice := tm.laptop("alice")
+	bob := tm.laptop("bob", agentSession("b1", "conv-b", newInbox(t)))
+	cwd := t.TempDir()
+	hook := func(kind string) string {
+		return alice.onHook(harness.Event{Kind: kind, Harness: "codex", SessionID: "019a", PID: os.Getpid(), Cwd: cwd})
+	}
+	hook(harness.Start)
+	tm.until("bob sees alice/codex-1", func() bool { return strings.Contains(whoOf(bob), `"alice/codex-1" · idle`) })
+	r := bob.send(ipc.Request{PID: bob.pidOfAgent("b1"), To: "alice/codex-1", Text: "the API moved to v2"})
+	if !r.OK || !strings.Contains(r.Note, "once its person prompts it again") {
+		t.Fatalf("send to an idle Codex agent: %+v", r)
+	}
+	if got := hook(harness.Prompt); !strings.Contains(got, "[murmur] bob/b1: the API moved to v2") {
+		t.Fatalf("with the next prompt: %q", got)
+	}
+	if got := hook(harness.AfterTool); got != "" {
+		t.Fatalf("again: %q", got)
+	}
+}

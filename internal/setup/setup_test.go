@@ -18,6 +18,8 @@ import (
 	"github.com/EledoneAi/murmur/internal/release"
 )
 
+// After an update, the first daemon of the new version sets the connected harnesses up again, once: a hook an older
+// version wrote is rewritten. A harness join never connected stays as it is.
 func TestReinstallOncePerVersion(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
@@ -25,23 +27,32 @@ func TestReinstallOncePerVersion(t *testing.T) {
 	defer func(v string) { release.Version = v }(release.Version)
 	release.Version = "v2"
 	settings := filepath.Join(claude.Dir(), "settings.json")
-	exists := func() bool { _, err := os.Stat(settings); return err == nil }
-	if Reapply(); exists() {
+	old := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/usr/local/bin/murmur hook start"}]}]}}`
+	current := func() bool { b, _ := os.ReadFile(settings); return strings.Contains(string(b), "hook claude start") }
+	if err := os.WriteFile(settings, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if Reapply(); current() {
 		t.Fatal("signed out, yet set up")
 	}
 	if err := config.Save(config.Config{Hub: "https://hub", Token: "t"}); err != nil {
 		t.Fatal(err)
 	}
-	if Reapply(); !exists() {
+	if Reapply(); !current() {
 		t.Fatal("first start of v2 did not set up")
 	}
-	os.Remove(settings)
-	if Reapply(); exists() {
+	_ = os.WriteFile(settings, []byte(old), 0o600)
+	if Reapply(); current() {
 		t.Fatal("set up twice for one version")
 	}
 	release.Version = "v3"
-	if Reapply(); !exists() {
+	if Reapply(); !current() {
 		t.Fatal("v3 did not set up")
+	}
+	os.Remove(settings)
+	release.Version = "v4"
+	if Reapply(); current() {
+		t.Fatal("set up a harness join never connected")
 	}
 }
 

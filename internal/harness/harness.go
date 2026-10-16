@@ -5,13 +5,16 @@ package harness
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 
 	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/internal/release"
 )
 
 // Harness is one AI coding tool.
@@ -25,6 +28,9 @@ type Harness interface {
 	Connect(exe string, ask func(question string) bool) []protocol.Check
 	Disconnect(exe string) error // undoes exactly what Connect added
 	Checks() []protocol.Check    // what Connect set up, for doctor and the laptop's report
+	// SessionVar is the environment variable in which the harness names the session to the MCP servers it starts, or
+	// "" when it doesn't.
+	SessionVar() string
 	// Parse reads what a hook gets on stdin, for the event its command names. It runs in the hook's own process, so it
 	// may read the environment the harness gives its hooks.
 	Parse(event string, stdin []byte) (Event, error)
@@ -76,9 +82,11 @@ type Event struct {
 	Transcript string            `json:"transcript,omitempty"`
 	Socket     string            `json:"socket,omitempty"` // where murmur pushes messages to the session, if the harness has one
 	Term       map[string]string `json:"term,omitempty"`   // where the session runs, on start
-	Call       *Call             `json:"call,omitempty"`   // the tool call, on before-tool
+	Tool       string            `json:"tool,omitempty"`   // the harness's name for the tool, on before-tool and after-tool
+	Call       *Call             `json:"call,omitempty"`   // the tool call, in murmur's words
 	Paths      []string          `json:"paths,omitempty"`  // the files an edit would change, absolute, on before-tool
 	Needs      string            `json:"needs,omitempty"`  // permission or input, on needs
+	Title      string            `json:"title,omitempty"`  // the session's title, when the harness says it
 	Version    string            `json:"version,omitempty"`
 }
 
@@ -228,6 +236,27 @@ func ShellQuote(s string) string {
 // uninstall find their own entries by it, whichever version of murmur wrote them.
 func Ours(command string) bool {
 	return strings.Contains(command, "murmur") && strings.Contains(command, " hook ")
+}
+
+// ErrDev is a development build's refusal to touch a harness's own settings.
+var ErrDev = errors.New("development build")
+
+// Skipped is the name of the one check Connect returns when Guard stops it.
+const Skipped = "Skipped"
+
+// Guard keeps a build from source off a developer's own harness: join writes the running binary's path into the
+// harness's settings, and `go run` builds into a folder Go deletes afterwards. The harness's own variable for its
+// folder (CLAUDE_CONFIG_DIR, CODEX_HOME…), set to a folder of the developer's, lets it through; make laptop sets them.
+func Guard(env string) error {
+	if !release.Dev() || os.Getenv(env) != "" {
+		return nil
+	}
+	return fmt.Errorf("%w: set %s to a folder of your own to connect it (make laptop does)", ErrDev, env)
+}
+
+// Guarded is what Connect returns when Guard stops it.
+func Guarded(err error) []protocol.Check {
+	return []protocol.Check{{Name: Skipped, Detail: err.Error()}}
 }
 
 // Check is a protocol.Check whose detail is fix when it fails.

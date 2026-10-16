@@ -873,3 +873,82 @@ func TestTerminal(t *testing.T) {
 		t.Fatalf("an agent this laptop doesn't run: %+v", r)
 	}
 }
+
+// A harness without a session registry or an inbox: its sessions come from their hooks, under names murmur gives
+// them, and messages wait for the next hook that can carry them. Both outlast a daemon restart, while the session's
+// process runs.
+func TestHookedSessions(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	start := func() *Daemon {
+		d := newDaemon("alice")
+		d.out, d.state = make(chan protocol.Frame, 64), "online"
+		d.loadHistory()
+		return d
+	}
+	d := start()
+	pid, cwd := os.Getpid(), t.TempDir()
+	hook := func(kind, id string, call *harness.Call) string {
+		return d.onHook(harness.Event{Kind: kind, Harness: "codex", SessionID: id, PID: pid, Cwd: cwd, Call: call})
+	}
+	hook(harness.Start, "t1", nil)
+	hook(harness.Start, "t2", nil)
+	agent := func(id string) *session {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.sessions["codex/"+id]
+	}
+	if a, b := agent("t1"), agent("t2"); a == nil || a.name != "codex-1" || b.name != "codex-2" || a.status != protocol.StatusIdle ||
+		a.agent(false).App != "codex" {
+		t.Fatalf("sessions: %+v %+v", a, b)
+	}
+
+	ok, note := d.handOver(protocol.Msg{ID: "m1", From: "bob/b1", To: "alice/codex-1", Text: "is the schema final?"}, "codex-1")
+	if !ok || !strings.Contains(note, "once its person prompts it again") {
+		t.Fatalf("to an idle agent: %v %q", ok, note)
+	}
+	if got := hook(harness.Prompt, "t1", nil); !strings.Contains(got, "[murmur] bob/b1: is the schema final?") || agent("t1").status != protocol.StatusBusy {
+		t.Fatalf("with the next prompt: %q, %s", got, agent("t1").status)
+	}
+	hook(harness.BeforeTool, "t1", &harness.Call{Kind: protocol.KindRun, Doing: "Running go", Shell: 7})
+	if a := agent("t1").agent(false); a.Doing != "Running go" || a.Kinds != "x" {
+		t.Fatalf("after a tool call: %+v", a)
+	}
+	if ok, note := d.handOver(protocol.Msg{ID: "m2", From: "bob/b1", To: "alice/codex-1", Text: "and the index?"}, "codex-1"); !ok || note != "" {
+		t.Fatalf("to a working agent: %v %q", ok, note)
+	}
+	d.handOver(protocol.Msg{ID: "m2", From: "bob/b1", To: "alice/codex-1", Text: "and the index?"}, "codex-1") // sent again
+	if got := hook(harness.AfterTool, "t1", nil); strings.Count(got, "and the index?") != 1 {
+		t.Fatalf("after the tool call: %q", got)
+	}
+	d.handOver(protocol.Msg{ID: "m3", From: "bob/b1", To: "alice/codex-1", Text: "one more thing"}, "codex-1")
+	if got := hook(harness.Stop, "t1", nil); !strings.Contains(got, "one more thing") || agent("t1").status != protocol.StatusBusy {
+		t.Fatalf("at the end of the turn: %q, %s", got, agent("t1").status) // the agent goes on with the message
+	}
+	if hook(harness.Stop, "t1", nil); agent("t1").status != protocol.StatusIdle {
+		t.Fatalf("at the end of the next turn: %s", agent("t1").status)
+	}
+
+	// an MCP server started by that process speaks for its session at work
+	hook(harness.Prompt, "t2", nil)
+	d.mu.Lock()
+	sender := d.senderLocked(ipc.Request{Harness: "codex", PID: pid})
+	d.mu.Unlock()
+	if sender == nil || sender.name != "codex-2" {
+		t.Fatalf("sender: %+v", sender)
+	}
+
+	d.handOver(protocol.Msg{ID: "m4", From: "bob/b1", To: "alice/codex-1", Text: "after the restart"}, "codex-1")
+	hook(harness.End, "t2", nil)
+	d.hist.Close()
+	d = start()
+	defer d.hist.Close()
+	if a, b := agent("t1"), agent("t2"); a == nil || a.name != "codex-1" || b != nil {
+		t.Fatalf("after a restart: %+v, %+v", a, b)
+	}
+	if got := hook(harness.Prompt, "t1", nil); !strings.Contains(got, "after the restart") {
+		t.Fatalf("what waited across the restart: %q", got)
+	}
+	if hook(harness.Start, "t3", nil); agent("t3").name != "codex-2" {
+		t.Fatalf("a new session after codex-2 ended: %s", agent("t3").name)
+	}
+}

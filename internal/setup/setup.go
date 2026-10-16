@@ -64,7 +64,18 @@ func step(ok bool, label, detail string) {
 	case color:
 		mark = "\033[32m✓\033[0m"
 	}
-	fmt.Printf("%s %-12s %s\n", mark, label, detail)
+	fmt.Printf("%s %-14s %s\n", mark, label, detail)
+}
+
+// steps prints a harness's checks under its name, and says whether they all passed.
+func steps(h harness.Harness, checks []protocol.Check) bool {
+	fmt.Println("  " + h.Title())
+	ok := true
+	for _, c := range checks {
+		step(c.OK, "  "+c.Name, c.Detail)
+		ok = ok && c.OK
+	}
+	return ok
 }
 
 func openBrowser(url string) {
@@ -158,8 +169,9 @@ func signIn(cfg config.Config, noBrowser bool) (config.Config, error) {
 	}
 }
 
-// Join signs this laptop in to its team's hub and connects Claude Code. hub names the hub the first time, or a new
-// one; after that the laptop remembers it. Without one, it asks for it on the terminal.
+// Join signs this laptop in to its team's hub and connects the coding tools installed on it, leaving the others alone.
+// hub names the hub the first time, or a new one; after that the laptop remembers it. Without one, it asks for it on
+// the terminal.
 func Join(hub string, relogin, noBrowser bool) error {
 	cfg := config.Load()
 	if hub == "" && cfg.Hub == "" {
@@ -192,10 +204,15 @@ func Join(hub string, relogin, noBrowser bool) error {
 	}
 	step(true, "Signed in", fmt.Sprintf("%s (%s)", cfg.Handle, cfg.Email))
 
-	for _, h := range Harnesses {
-		for _, c := range h.Connect(exe, ask) {
-			step(c.OK, c.Name, c.Detail)
+	found := false
+	for _, h := range Harnesses { // each one installed here; the others are left alone
+		if h.Installed() {
+			found = true
+			steps(h, h.Connect(exe, ask))
 		}
+	}
+	if !found {
+		step(false, "Coding tools", "none found: install one of "+titles()+", then run murmur join again")
 	}
 
 	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
@@ -213,7 +230,7 @@ func Join(hub string, relogin, noBrowser bool) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	step(st.State == "online", "Daemon", st.State+", "+st.Text)
-	fmt.Println("\nSessions that were already open receive messages now; restart them to give them the tools.")
+	fmt.Println("\nSessions that were already open receive messages now; restart them to give them the tools and hooks.")
 	if m, _ := filepath.Glob(filepath.Join(config.Home(), ".vscode*", "extensions", "anthropic.claude-code-*")); len(m) > 0 {
 		fmt.Println("VS Code: new Claude conversations are connected; for open ones, run Developer: Reload Window.")
 	}
@@ -286,31 +303,71 @@ func Doctor() bool {
 	} else {
 		checks = append(checks, protocol.Check{Name: "Daemon", Detail: st.State + "; see " + config.Tildify(filepath.Join(config.Dir(), "daemon.log"))})
 	}
-	_, more := Checks()
 	ok := true
-	for _, c := range append(checks, more...) {
+	for _, c := range checks {
 		step(c.OK, c.Name, c.Detail)
 		ok = ok && c.OK
+	}
+	found := false
+	for _, h := range Harnesses {
+		switch {
+		case h.Connected():
+			ok = steps(h, h.Checks()) && ok
+		case h.Installed():
+			step(false, h.Title(), "installed, not connected: run murmur join")
+			ok = false
+		default:
+			continue
+		}
+		found = true
+	}
+	if !found {
+		step(false, "Coding tools", "none found: install one of "+titles()+", then run murmur join")
+		ok = false
 	}
 	return ok
 }
 
-// Checks looks at what join set up in each harness, and returns Claude Code's version too. Each failed check says
-// how to fix it. The daemon sends these to the hub on the team's schedule, for its admins.
-func Checks() (claudeCode string, checks []protocol.Check) {
+// titles lists the harnesses murmur connects, for people.
+func titles() string {
+	var t []string
 	for _, h := range Harnesses {
-		checks = append(checks, h.Checks()...)
+		t = append(t, h.Title())
 	}
-	return claude.Version(), checks
+	return strings.Join(t[:len(t)-1], ", ") + " or " + t[len(t)-1]
 }
 
-// Reapply sets the harnesses up again once after an update, so the hooks and MCP server name what this version needs.
+// Checks looks at what join set up in each harness, and returns Claude Code's version too. Each failed check says
+// how to fix it, and names its harness. The daemon sends these to the hub on the team's schedule, for its admins.
+func Checks() (claudeCode string, checks []protocol.Check) {
+	for _, h := range Harnesses {
+		switch {
+		case h.Connected():
+			for _, c := range h.Checks() {
+				c.Name = h.Title() + ": " + c.Name
+				checks = append(checks, c)
+			}
+		case h.Installed():
+			checks = append(checks, protocol.Check{Name: h.Title(), Detail: "installed, not connected: run murmur join"})
+		}
+	}
+	if (claude.Claude{}).Installed() {
+		claudeCode = claude.Version()
+	}
+	return claudeCode, checks
+}
+
+// Reapply sets the connected harnesses up again once after an update, so their hooks and MCP servers are what this
+// version needs.
 func Reapply() {
 	if b, _ := os.ReadFile(setupMarker()); release.Version == "dev" || string(b) == release.Version || config.Load().Token == "" {
 		return
 	}
 	exe := config.Exe()
 	for _, h := range Harnesses {
+		if !h.Connected() {
+			continue
+		}
 		for _, c := range h.Connect(exe, nil) {
 			if !c.OK {
 				log.Printf("setup for %s: %s %s: %s", release.Version, h.Title(), c.Name, c.Detail)
@@ -326,11 +383,16 @@ func Uninstall() error {
 		return err
 	}
 	cfg := config.Load()
-	for _, h := range Harnesses {
-		if err := h.Disconnect(config.Exe()); err != nil {
-			return err
+	for _, h := range Harnesses { // each removes only its own entries, so this undoes join wherever it went
+		was := h.Connected()
+		switch err := h.Disconnect(config.Exe()); {
+		case errors.Is(err, harness.ErrDev):
+			step(false, h.Title(), err.Error())
+		case err != nil:
+			return fmt.Errorf("%s: %w", h.Title(), err)
+		case was:
+			step(true, h.Title(), "hooks and MCP server removed")
 		}
-		step(true, h.Title(), "hooks and MCP server removed")
 	}
 	if c, err := ipc.Dial(); err == nil {
 		_ = json.NewEncoder(c).Encode(ipc.Request{Op: "stop"})
@@ -374,12 +436,12 @@ func hook(h harness.Harness, event string, stdin io.Reader) []byte {
 	out := make(chan []byte, 1)
 	go func() {
 		var r ipc.Reply
-		call := ipc.CallRunning // an edit never starts the daemon: without one, it goes ahead
-		if ev.Kind == harness.Start {
+		call := ipc.CallRunning // a tool call never starts the daemon: without one, it goes ahead
+		if ev.Kind == harness.Start || ev.Kind == harness.Prompt {
 			call = ipc.Call
 		}
 		if call(req, &r, hookWait) != nil {
-			out <- nil
+			out <- h.Answer(ev, "") // what a harness answers without murmur's word
 			return
 		}
 		out <- h.Answer(ev, r.Text)
@@ -388,7 +450,7 @@ func hook(h harness.Harness, event string, stdin io.Reader) []byte {
 	case b := <-out:
 		return b
 	case <-time.After(hookWait):
-		return nil
+		return h.Answer(ev, "")
 	}
 }
 
@@ -401,6 +463,9 @@ func hookEvent(h harness.Harness, event string, stdin io.Reader) (harness.Event,
 	ev, err := h.Parse(event, data)
 	if err != nil || ev.Kind == "" || ev.SessionID == "" {
 		return ev, false
+	}
+	if _, listed := h.(harness.Lister); !listed && ev.PID == 0 {
+		ev.PID = harness.Process(os.Getppid()) // how the daemon tells when the session is gone
 	}
 	if ev.Kind == harness.Start {
 		for _, k := range terminalVars {
@@ -424,15 +489,15 @@ func hostname() string {
 	return h
 }
 
-// guardDev keeps a build from source off a developer's own Claude Code: join writes the running binary's path into
-// Claude Code's settings, and `go run` builds into a folder Go deletes afterwards. Developers set CLAUDE_CONFIG_DIR
-// and MURMUR_HOME to folders of their own (make laptop does), and then anything goes.
+// guardDev keeps a build from source off a developer's own murmur: it would sign in over their laptop's. Developers
+// set MURMUR_HOME to a folder of their own (make laptop does). Each harness has the same guard on its own folder (see
+// harness.Guard).
 func guardDev() error {
-	if !release.Dev() || (os.Getenv("CLAUDE_CONFIG_DIR") != "" && os.Getenv("MURMUR_HOME") != "") {
+	if !release.Dev() || os.Getenv("MURMUR_HOME") != "" {
 		return nil
 	}
-	return errors.New("this is a development build: it would point your own Claude Code at it. " +
-		"Set CLAUDE_CONFIG_DIR and MURMUR_HOME to other folders first (make laptop does), or install a release")
+	return errors.New("this is a development build: set MURMUR_HOME, and the folder variable of each coding tool, " +
+		"to folders of your own first (make laptop does), or install a release")
 }
 
 // terminal is the person's terminal, or nil without one. Their answers come from it, not from stdin: the install

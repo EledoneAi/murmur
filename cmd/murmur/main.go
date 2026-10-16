@@ -20,13 +20,14 @@ import (
 	"github.com/EledoneAi/murmur/internal/update"
 )
 
-const usage = `murmur: your team's Claude Code agents, in one console.
+const usage = `murmur: your team's coding agents, in one console.
 
   murmur                open the console (--plain: in sentences, for screen readers, with commands)
   murmur demo           open the console on a made-up team, no hub needed
   murmur watch          print what changes in the team, in sentences
-  murmur join HUB       join your team's hub (murmur.example.com): sign in and connect Claude Code, once per
-                        laptop; --relogin signs in again, --no-browser signs in with a code, as over SSH
+  murmur join HUB       join your team's hub (murmur.example.com): sign in and connect the coding tools on this
+                        laptop (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI), once per laptop;
+                        --relogin signs in again, --no-browser signs in with a code, as over SSH
   murmur who            list people and their agents
   murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
   murmur mute WHO [30m|2h|tomorrow]
@@ -48,9 +49,18 @@ const usage = `murmur: your team's Claude Code agents, in one console.
 
 // options lists what each command accepts. send, hook, mute and unmute take free text, so they are not checked.
 var options = map[string][]string{
-	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": nil,
+	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
 	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "mutes": nil,
+}
+
+// harnesses are the names of the coding tools murmur connects: the MCP server is started for one of them.
+func harnesses() []string {
+	var names []string
+	for _, h := range setup.Harnesses {
+		names = append(names, h.Name())
+	}
+	return names
 }
 
 // hubArg takes the hub out of join's arguments: the one that isn't an option, wherever it comes.
@@ -123,7 +133,11 @@ func main() {
 			setup.Hook(args[1], args[2])
 		}
 	case "mcp":
-		err = mcp.Serve()
+		name := ""
+		if len(args) > 1 {
+			name = args[1]
+		}
+		err = mcp.Serve(name)
 	case "who":
 		var text string
 		var online bool
@@ -213,7 +227,7 @@ func confirm() bool {
 		fmt.Fprintln(os.Stderr, "murmur: uninstall needs a yes; run murmur uninstall --yes")
 		return false
 	}
-	fmt.Printf("This removes murmur's hooks and MCP server from Claude Code, signs this laptop out and deletes %s.\nContinue? [y/N] ", config.Dir())
+	fmt.Printf("This removes murmur's hooks and MCP server from your coding tools, signs this laptop out and deletes %s.\nContinue? [y/N] ", config.Dir())
 	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes"

@@ -17,8 +17,9 @@ const Name = "claude"
 
 type Claude struct{}
 
-func (Claude) Name() string  { return Name }
-func (Claude) Title() string { return "Claude Code" }
+func (Claude) Name() string       { return Name }
+func (Claude) Title() string      { return "Claude Code" }
+func (Claude) SessionVar() string { return "CLAUDE_CODE_SESSION_ID" }
 
 func settings() string { return filepath.Join(Dir(), "settings.json") }
 
@@ -30,14 +31,18 @@ func (Claude) Installed() bool {
 	return err == nil
 }
 
+// Connected says whether settings.json holds any of murmur's hooks, as this version or an older one wrote them.
 func (Claude) Connected() bool {
-	hooks, _, _ := SetupState(settings())
-	return hooks
+	o, _, err := harness.ReadObject(settings())
+	return err == nil && harness.HasOurs(o.Sub("hooks"))
 }
 
 // Connect adds murmur's hooks and tool permissions to settings.json and registers the MCP server. When Claude Code's
 // own settings would keep murmur's messages from agents, it asks whether to let them through.
 func (Claude) Connect(exe string, ask func(string) bool) []protocol.Check {
+	if err := harness.Guard("CLAUDE_CONFIG_DIR"); err != nil {
+		return harness.Guarded(err)
+	}
 	path := settings()
 	if err := EditSettings(path, exe, true); err != nil {
 		return []protocol.Check{{Name: "Hooks", Detail: err.Error()}}
@@ -59,16 +64,19 @@ func (Claude) Connect(exe string, ask func(string) bool) []protocol.Check {
 	}
 	claude, err := exec.LookPath("claude")
 	if err != nil {
-		return append(checks, protocol.Check{Name: "MCP server", Detail: "claude not found on PATH; run: claude mcp add --scope user murmur -- " + exe + " mcp"})
+		return append(checks, protocol.Check{Name: "MCP server", Detail: "claude not found on PATH; run: claude mcp add --scope user murmur -- " + exe + " mcp claude"})
 	}
 	_ = exec.Command(claude, "mcp", "remove", "--scope", "user", "murmur").Run()
-	if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "murmur", "--", exe, "mcp").CombinedOutput(); err != nil {
+	if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "murmur", "--", exe, "mcp", Name).CombinedOutput(); err != nil {
 		return append(checks, protocol.Check{Name: "MCP server", Detail: strings.TrimSpace(string(out))})
 	}
 	return append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur (user scope): who, send"})
 }
 
 func (Claude) Disconnect(exe string) error {
+	if err := harness.Guard("CLAUDE_CONFIG_DIR"); err != nil {
+		return err
+	}
 	if err := EditSettings(settings(), exe, false); err != nil {
 		return err
 	}
@@ -101,10 +109,10 @@ func (Claude) Checks() []protocol.Check {
 	}
 	claude, err := exec.LookPath("claude")
 	if err != nil {
-		return append(checks, harness.Check(false, "Claude Code", "", "claude is not on PATH"))
+		return append(checks, harness.Check(false, "Version", "", "claude is not on PATH"))
 	}
 	v := Version()
 	return append(checks,
-		harness.Check(!TooOld(v), "Claude Code", v, v+": messages between sessions need "+MinVersion+" or later; run claude update"),
+		harness.Check(!TooOld(v), "Version", v, v+": messages between sessions need "+MinVersion+" or later; run claude update"),
 		harness.Check(exec.Command(claude, "mcp", "get", "murmur").Run() == nil, "MCP server", "murmur: who, send", "missing: run murmur join"))
 }

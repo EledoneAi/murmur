@@ -151,3 +151,36 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// OurGroup says whether a group of hooks in a Claude-style settings file, {matcher, hooks: [{command}]}, holds one of
+// murmur's.
+func OurGroup(group json.RawMessage) bool {
+	var g struct {
+		Hooks []struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	_ = json.Unmarshal(group, &g)
+	return slices.ContainsFunc(g.Hooks, func(h struct {
+		Command string `json:"command"`
+	}) bool {
+		return Ours(h.Command)
+	})
+}
+
+// HasOurs says whether any event in a hooks object holds one of murmur's hooks, in a Claude-style group or as a
+// flat entry {command}.
+func HasOurs(hooks Object) bool {
+	for _, f := range hooks {
+		var entries []json.RawMessage
+		_ = json.Unmarshal(f.v, &entries)
+		for _, e := range entries {
+			var flat struct{ Command, Bash string }
+			_ = json.Unmarshal(e, &flat)
+			if OurGroup(e) || Ours(flat.Command) || Ours(flat.Bash) {
+				return true
+			}
+		}
+	}
+	return false
+}

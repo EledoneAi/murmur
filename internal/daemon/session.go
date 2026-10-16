@@ -26,7 +26,9 @@ type session struct {
 	status  string
 	since   int64
 	sock    string
-	started string // the process start time the harness records, to tell a reused pid apart
+	started string    // the process start time the harness records, to tell a reused pid apart
+	hooked  bool      // learned from its hooks, for a harness that keeps no registry of its sessions
+	heard   time.Time // its last hook
 
 	act        harness.Activity
 	transcript string                       // its path, once found

@@ -43,9 +43,10 @@ type Snapshot struct {
 
 type Request struct {
 	Op      string         `json:"op"`
-	Hook    *harness.Event `json:"hook,omitempty"` // what a harness's hook reports
-	PID     int            `json:"pid,omitempty"`  // the harness process of the agent that sends, from the MCP server
-	Session string         `json:"session,omitempty"`
+	Hook    *harness.Event `json:"hook,omitempty"`    // what a harness's hook reports
+	Harness string         `json:"harness,omitempty"` // the harness of the agent that sends, from the MCP server
+	PID     int            `json:"pid,omitempty"`     // its process
+	Session string         `json:"session,omitempty"` // and its session id, when the harness gives the MCP server one
 	To      string         `json:"to,omitempty"`
 	Text    string         `json:"text,omitempty"`
 	ID      string         `json:"id,omitempty"`
