@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,20 +177,41 @@ func countNumstat(out string) (added, deleted, files int) {
 // often data or build output. Binary files, as git tells them (a NUL near the start), count none.
 func untrackedLines(top string, paths []string) int {
 	budget, n := int64(4<<20), 0
+	buf := make([]byte, 32<<10)
 	for _, p := range paths[:min(len(paths), 500)] {
 		st, err := os.Lstat(filepath.Join(top, p))
 		if err != nil || !st.Mode().IsRegular() || st.Size() > budget {
 			continue
 		}
 		budget -= st.Size()
-		b, err := os.ReadFile(filepath.Join(top, p))
-		if err != nil || bytes.IndexByte(b[:min(len(b), 8000)], 0) >= 0 {
-			continue
+		n += linesOf(filepath.Join(top, p), buf)
+	}
+	return n
+}
+
+// linesOf counts a file's lines, reading it through buf, and none for a binary file.
+func linesOf(path string, buf []byte) int {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	n, last := 0, byte('\n')
+	for first := true; ; first = false {
+		k, err := io.ReadFull(f, buf)
+		if first && bytes.IndexByte(buf[:min(k, 8000)], 0) >= 0 {
+			return 0
 		}
-		n += bytes.Count(b, []byte{'\n'})
-		if len(b) > 0 && b[len(b)-1] != '\n' {
-			n++
+		n += bytes.Count(buf[:k], []byte{'\n'})
+		if k > 0 {
+			last = buf[k-1]
 		}
+		if err != nil {
+			break
+		}
+	}
+	if last != '\n' {
+		n++
 	}
 	return n
 }
