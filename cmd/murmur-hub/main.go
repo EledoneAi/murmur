@@ -109,9 +109,11 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// No read or write timeout: laptops keep one WebSocket open for hours, and team pages a stream.
-	srv := &http.Server{Addr: ":" + port, Handler: h.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute,
-		MaxHeaderBytes: 64 << 10}
+	// A request is read within ReadTimeout, so a client that trickles one can't hold a connection; net/http lifts the
+	// deadline once the request is read, so WebSockets and the team page's stream stay open. No write timeout:
+	// laptops keep one WebSocket open for hours, team pages a stream, and downloads take as long as they take.
+	srv := &http.Server{Addr: ":" + port, Handler: h.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 	stopped := make(chan struct{})
 	go func() {
 		defer close(stopped)

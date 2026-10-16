@@ -134,6 +134,24 @@ func eventually(t *testing.T, what string, ok func() bool) {
 
 // Signed-out visitors get the sign-in page, which brings them back to the team page; the page's stream, its
 // pull requests and its form refuse them.
+// The stream outlives the server's deadline for reading a request: net/http lifts it once the request is read.
+func TestTeamStreamOutlivesReadTimeout(t *testing.T) {
+	tm := newTeam(t, Config{}, nil)
+	srv := httptest.NewUnstartedServer(tm.h.Handler())
+	srv.Config.ReadTimeout = 200 * time.Millisecond
+	srv.Start()
+	t.Cleanup(srv.Close)
+	alice, _ := signedIn(t, srv.URL, "alice@x.com")
+	s := openStream(t, alice, srv.URL)
+	s.expect(func(teamView) bool { return true })
+	time.Sleep(500 * time.Millisecond)
+	connect(t, srv.URL, "tok-bob", protocol.Agent{Name: "b1", Status: protocol.StatusBusy})
+	s.expect(func(v teamView) bool {
+		_, ok := agentIn(v, "bob/b1")
+		return ok
+	})
+}
+
 func TestTeamPageIsForMembers(t *testing.T) {
 	tm := newTeam(t, Config{}, nil)
 	visitor, _ := signedIn(t, tm.url, "")
