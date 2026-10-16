@@ -54,10 +54,16 @@ func spread(left, right string, w int) string {
 	return pad(left, max(0, w-rw)) + right
 }
 
-// tinted lays a background colour under a styled line, through the resets inside it: the selection.
-func tinted(s string, c color.Color) string {
-	on, _, _ := strings.Cut(lipgloss.NewStyle().Background(c).Render("x"), "x")
+// tinted lays a background under a styled line, through the resets inside it: the selection. on is the code that
+// sets the background, from tint.
+func tinted(s, on string) string {
 	return on + strings.ReplaceAll(s, "\x1b[m", "\x1b[m"+on) + "\x1b[m"
+}
+
+// tint is the code that sets a background colour.
+func tint(c color.Color) string {
+	on, _, _ := strings.Cut(lipgloss.NewStyle().Background(c).Render("x"), "x")
+	return on
 }
 
 // layout is where the columns of a row go at the screen's width. Columns drop in a fixed order as the screen
@@ -154,7 +160,7 @@ func (m *model) header(b *board) []string {
 	tabs := ""
 	for _, sc := range m.tabs(b) {
 		if sc == m.currentScope() {
-			tabs += tinted(" "+st.hot(scopeNames[sc], scopeHot[sc], st.name)+" ", st.t.tab) + "  "
+			tabs += tinted(" "+st.hot(scopeNames[sc], scopeHot[sc], st.name)+" ", st.tabBg) + "  "
 		} else {
 			tabs += " " + st.hot(scopeNames[sc], scopeHot[sc], st.tab) + "   "
 		}
@@ -575,7 +581,7 @@ func plural(n int, one, many string) string {
 	return many
 }
 
-func (m *model) lampStyle(s state) lipgloss.Style {
+func (m *model) lampStyle(s state) ink {
 	switch s {
 	case working:
 		return m.st.fg

@@ -161,7 +161,7 @@ func (m *model) sheetBox(maxH int) (string, int) {
 		}
 		row := "  " + spread(text, hint, inner-2)
 		if i == s.sel {
-			row = tinted(st.bold.Render(g.sel)+" "+spread(text, hint, inner-2), st.t.sel)
+			row = tinted(st.bold.Render(g.sel)+" "+spread(text, hint, inner-2), st.selBg)
 		}
 		rows = append(rows, row)
 		shown++

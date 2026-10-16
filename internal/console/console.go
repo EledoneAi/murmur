@@ -712,7 +712,7 @@ func (m *model) screen() (string, []line) {
 		text := l.text
 		if l.key != "" && l.key == m.selected {
 			text = m.st.bold.Render(m.g.sel) + ansi.TruncateLeft(text, 1, "")
-			text = tinted(text, m.st.t.sel)
+			text = tinted(text, m.st.selBg)
 		}
 		out.WriteString(text)
 		if i < len(lines)-1 {

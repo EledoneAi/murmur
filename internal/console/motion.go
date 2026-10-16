@@ -231,7 +231,7 @@ func (m *model) glowing(key string, text string, owner int) string {
 		return text // the row carries "new" instead; see needLine
 	}
 	steps := lipgloss.Blend1D(5, m.st.t.people[owner%len(m.st.t.people)], m.background())
-	return tinted(text, steps[min(4, 1+int(p*4))])
+	return tinted(text, tint(steps[min(4, 1+int(p*4))]))
 }
 
 // background is the terminal's background as it told us, or the theme's own guess.

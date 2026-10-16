@@ -169,6 +169,24 @@ func TestConstellations(t *testing.T) {
 	}
 }
 
+// A style draws exactly what lipgloss draws, whatever the text.
+func TestInkIsLipgloss(t *testing.T) {
+	for _, th := range []theme{dark, light, ansi16, contrast(dark)} {
+		st := newStyles(th)
+		inks := []ink{st.fg, st.dim, st.bold, st.hotkey, st.italic, st.label, st.person(3), st.tealBold}
+		for _, k := range inks {
+			for _, text := range []string{"", " ", "x", "esc", "a b", "é", "⏎", "x\ty", "one\ntwo", "\xff", " ", "r\r\nn"} {
+				if got, want := k.Render(text), k.Style.Render(text); got != want {
+					t.Errorf("%s: %q drew %q, lipgloss %q", th.name, text, got, want)
+				}
+			}
+			if got, want := k.Render("a", "b"), k.Style.Render("a", "b"); got != want {
+				t.Errorf("%s: two strings drew %q, lipgloss %q", th.name, got, want)
+			}
+		}
+	}
+}
+
 // The fuse burns half a cell at a time and is full at ten minutes; the clock says the same.
 func TestFuse(t *testing.T) {
 	st := newStyles(dark)
