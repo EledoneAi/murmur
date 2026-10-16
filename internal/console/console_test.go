@@ -22,7 +22,7 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 func demo(w, h int, t theme) *model {
 	m := newModel()
 	m.demo, m.have, m.w, m.h = true, true, w, h
-	m.snap = demoSnapshot(demoNow)
+	m.setSnap(demoSnapshot(demoNow))
 	m.clock = func() time.Time { return demoNow }
 	m.st, m.g = newStyles(t), unicodeGlyphs
 	m.outcome, m.motion = outcome{}, false
@@ -276,12 +276,10 @@ func TestMotion(t *testing.T) {
 		t.Fatal("the m kept drawing")
 	}
 
-	old := demoSnapshot(demoNow)
 	next := demoSnapshot(demoNow)
 	next.Msgs = append(next.Msgs, protocol.Msg{ID: "new", From: "carol/billing-2", To: "alice/api-9b", Text: "pushed", At: now.UnixMilli()})
 	next.Asks = append(next.Asks, protocol.Msg{ID: "h2", From: "bob/main-1", To: "alice/api-1a", Text: "rebase?", At: now.UnixMilli()})
-	m.noticeChanges(old, next)
-	m.snap = next
+	m.Update(snapMsg(next))
 	if m.progress(animLight, "") < 0 || m.progress(animBold, "alice/api-9b") < 0 || m.progress(animGlow, "need:held:h2") < 0 {
 		t.Fatalf("a message and a new need played nothing: %+v", m.anims)
 	}
@@ -289,8 +287,7 @@ func TestMotion(t *testing.T) {
 	m = demo(110, 30, dark) // motion off: the new need says so
 	m.clock = func() time.Time { return now }
 	m.have = true
-	m.noticeChanges(old, next)
-	m.snap = next
+	m.Update(snapMsg(next))
 	if text, _ := m.screen(); !strings.Contains(ansi.Strip(text), "new held “rebase?”") {
 		t.Fatal("without motion, a new need isn't marked new")
 	}
@@ -323,7 +320,7 @@ func bigTeam() ipc.Snapshot {
 // A large team folds what is far from you into Elsewhere, near you first; All unfolds it.
 func TestLargeTeam(t *testing.T) {
 	m := demo(110, 40, dark)
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	b := m.board()
 	if !b.large || m.currentScope() != scopeNear {
 		t.Fatalf("large %v, scope %v", b.large, m.currentScope())
@@ -339,7 +336,7 @@ func TestLargeTeam(t *testing.T) {
 		t.Fatalf("All folds %d away", len(b.elsewhere))
 	}
 	m = demo(110, 40, dark)
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	text, _ := m.screen()
 	golden(t, "screen-large.txt", ansi.Strip(text))
 }
@@ -489,7 +486,7 @@ func TestScopeKeys(t *testing.T) {
 			t.Fatalf("%s chose %s", c.key, scopeNames[m.currentScope()])
 		}
 	}
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	if head := m.header(m.board())[1]; !strings.Contains(ansi.Strip(head), " Near me ") || !strings.Contains(head, m.st.hotkey.Render("m")) {
 		t.Fatal("Near me doesn't draw the m of me as its key")
 	}
@@ -531,7 +528,7 @@ func TestHeaderShowsYou(t *testing.T) {
 		t.Fatalf("alone, the header says %q", got)
 	}
 	for _, snap := range []ipc.Snapshot{demoSnapshot(demoNow), bigTeam()} { // the tabs and you fit at every width
-		m.snap = snap
+		m.setSnap(snap)
 		for m.w = 64; m.w <= 140; m.w++ {
 			if got := ansi.Strip(m.header(m.board())[1]); !strings.Contains(got, " All ") || !strings.HasSuffix(got, "A   ● live  ") &&
 				!strings.HasSuffix(got, "alice   ● live  ") && !strings.HasSuffix(got, "agents   ● live  ") {
@@ -565,7 +562,7 @@ func TestFooterLeavesOutShownKeys(t *testing.T) {
 			for _, big := range []bool{false, true} {
 				m := demo(size[0], size[1], dark)
 				if big {
-					m.snap = bigTeam()
+					m.setSnap(bigTeam())
 				}
 				m.screen()
 				m.inspect = inspect

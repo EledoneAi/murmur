@@ -260,8 +260,13 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 		}
 	}
 
+	pairs := map[string][]pair{} // each constellation's links
+	for k := range counts {
+		root := find(k.a)
+		pairs[root] = append(pairs[root], k)
+	}
 	for root, ms := range members {
-		g := b.group(root, ms, counts, held, latest)
+		g := b.group(root, ms, pairs[root], counts, held, latest)
 		g.tune = groupTune[root]
 		b.groups = append(b.groups, g)
 	}
@@ -398,7 +403,7 @@ func rankMine(ms []*agentRef) int {
 // pair is two agents' addresses, the smaller first.
 type pair struct{ a, b string }
 
-func (b *board) group(root string, ms []*agentRef, counts map[pair]int, held map[pair]bool, latest map[string]int64) *group {
+func (b *board) group(root string, ms []*agentRef, pairs []pair, counts map[pair]int, held map[pair]bool, latest map[string]int64) *group {
 	slices.SortFunc(ms, func(x, y *agentRef) int { // yours first, then by person, so one person's agents sit together
 		return cmp.Or(boolRank(y.mine)-boolRank(x.mine), cmp.Compare(b.colours[x.person], b.colours[y.person]),
 			cmp.Compare(x.person, y.person), cmp.Compare(x.a.Name, y.a.Name))
@@ -420,13 +425,9 @@ func (b *board) group(root string, ms []*agentRef, counts map[pair]int, held map
 		}
 		g.latest = max(g.latest, latest[r.addr])
 	}
-	for k, n := range counts {
-		i, ok1 := idx[k.a]
-		j, ok2 := idx[k.b]
-		if !ok1 || !ok2 {
-			continue
-		}
-		g.links = append(g.links, link{a: min(i, j), b: max(i, j), between: ms[i].person != ms[j].person, held: held[k], count: n})
+	for _, k := range pairs {
+		i, j := idx[k.a], idx[k.b]
+		g.links = append(g.links, link{a: min(i, j), b: max(i, j), between: ms[i].person != ms[j].person, held: held[k], count: counts[k]})
 	}
 	slices.SortFunc(g.links, func(x, y link) int { return cmp.Or(cmp.Compare(x.a, y.a), cmp.Compare(x.b, y.b)) })
 	g.people = len(people)

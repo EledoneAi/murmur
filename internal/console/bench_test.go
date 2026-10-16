@@ -55,7 +55,7 @@ func teamOf(n int) ipc.Snapshot {
 // benchModel is the console on that team at 160×50, the first screen drawn.
 func benchModel(s ipc.Snapshot) *model {
 	m := demo(160, 50, dark)
-	m.snap = s
+	m.setSnap(s)
 	m.screen()
 	return m
 }

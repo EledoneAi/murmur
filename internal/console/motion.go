@@ -94,12 +94,13 @@ func (m *model) onFrame() tea.Cmd {
 	return m.frame()
 }
 
-// noticeChanges plays what a new snapshot changed: messages sent, messages received, new needs. In the background
-// it also tells the terminal, which can show a notification.
-func (m *model) noticeChanges(old, now ipc.Snapshot) tea.Cmd {
+// noticeChanges plays what the new snapshot changed since old, whose needs were before: messages sent, messages
+// received, new needs. In the background it also tells the terminal, which can show a notification.
+func (m *model) noticeChanges(old ipc.Snapshot, before []need) tea.Cmd {
 	if !m.have {
 		return nil
 	}
+	now := m.snap
 	seen := map[string]bool{}
 	for _, x := range old.Msgs {
 		seen[x.ID] = true
@@ -119,12 +120,12 @@ func (m *model) noticeChanges(old, now ipc.Snapshot) tea.Cmd {
 	if sent {
 		cmds = append(cmds, m.play(animLight, ""))
 	}
-	before := map[string]bool{}
-	for _, n := range buildBoard(old, m.now(), m.currentScope()).needs {
-		before[n.key] = true
+	had := map[string]bool{}
+	for _, n := range before {
+		had[n.key] = true
 	}
-	for _, n := range buildBoard(now, m.now(), m.currentScope()).needs {
-		if before[n.key] {
+	for _, n := range m.board().needs {
+		if had[n.key] {
 			continue
 		}
 		cmds = append(cmds, m.play(animGlow, n.key))
