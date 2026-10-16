@@ -29,13 +29,14 @@ import (
 	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/harness/claude"
 	"github.com/EledoneAi/murmur/internal/harness/hookish"
+	"github.com/EledoneAi/murmur/internal/harness/opencode"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 )
 
 // Harnesses are the AI coding tools murmur connects, in the order join sets them up.
-var Harnesses = []harness.Harness{claude.Claude{}, hookish.Codex, hookish.Cursor, hookish.Copilot, hookish.Gemini}
+var Harnesses = []harness.Harness{claude.Claude{}, hookish.Codex, hookish.Cursor, opencode.OpenCode{}, hookish.Copilot, hookish.Gemini}
 
 // Harness is the harness called name, or nil.
 func Harness(name string) harness.Harness {

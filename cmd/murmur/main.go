@@ -47,7 +47,7 @@ const usage = `murmur: your team's coding agents, in one console.
   murmur uninstall      undo join and sign this laptop out (asks first; --yes skips the question)
 `
 
-// options lists what each command accepts. send, hook, mute and unmute take free text, so they are not checked.
+// options lists what each command accepts. send, hook, tool, mute and unmute take free text, so they are not checked.
 var options = map[string][]string{
 	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
@@ -138,6 +138,10 @@ func main() {
 			name = args[1]
 		}
 		err = mcp.Serve(name)
+	case "tool":
+		if len(args) > 2 {
+			mcp.Tool(args[1], args[2], os.Stdin)
+		}
 	case "who":
 		var text string
 		var online bool

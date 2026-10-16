@@ -4,6 +4,8 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -116,6 +118,21 @@ func call(tool string, req ipc.Request) (string, bool) {
 		return res.Err, true
 	}
 	return res.Text, false
+}
+
+// Tool runs one of the tools for a harness that gives agents its own tools rather than an MCP server's (OpenCode's
+// plugin): `murmur tool <harness> who|send`, with the session and its arguments as JSON on stdin. It prints what the
+// agent reads.
+func Tool(name, tool string, stdin io.Reader) {
+	var in struct {
+		SessionID string `json:"session_id"`
+		PID       int    `json:"pid"`
+		To        string `json:"to"`
+		Text      string `json:"text"`
+	}
+	_ = json.NewDecoder(io.LimitReader(stdin, 1<<20)).Decode(&in)
+	text, _ := call(tool, ipc.Request{Harness: name, PID: in.PID, Session: in.SessionID, To: in.To, Text: in.Text})
+	fmt.Println(text)
 }
 
 // Serve answers the harness called name, which started this server: `murmur mcp <harness>`.
