@@ -385,7 +385,7 @@ func (h *Hub) rosterLoop(ctx context.Context) {
 // ponytail: the whole team each time makes the rosters' cost grow with the square of the team. Rosters that carry
 // only who changed would make it linear: a protocol change, for teams of thousands.
 const (
-	rosterRate  = 64 << 20
+	rosterRate  = 128 << 20
 	rosterBurst = rosterGap
 )
 
