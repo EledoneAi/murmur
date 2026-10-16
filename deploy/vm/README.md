@@ -15,7 +15,8 @@ instead.
 Then follow [One server](../compose#one-server) in the Compose recipe.
 
 The VM's disk holds everything that matters, so back it up: the Compose recipe shows how to copy the sqlite file,
-and most providers also offer snapshots of the whole disk.
+most providers also offer snapshots of the whole disk, and the `-litestream` image copies the file to object
+storage as it changes ([deploy/litestream](../litestream)).
 
 ## Hetzner Cloud
 

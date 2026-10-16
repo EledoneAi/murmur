@@ -93,6 +93,9 @@ docker run --rm -v murmur_hub-data:/data -v "$PWD":/backup alpine \
   sh -c 'apk add -q sqlite && sqlite3 /data/murmur.db ".backup /backup/murmur-$(date +%F).db"'
 ```
 
+For a copy that keeps up as the file changes, run the `-litestream` image, which copies it to object storage about
+once a second: see [deploy/litestream](../litestream).
+
 With `compose.ha.yml`, back up Postgres:
 
 ```sh

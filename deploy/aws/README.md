@@ -13,7 +13,8 @@ set up your identity provider.
 ## Things to know first
 
 - **No lasting disk.** A Fargate task's storage goes away with the task, and EFS is a network file system, where
-  sqlite isn't safe. Use RDS for PostgreSQL as the store.
+  sqlite isn't safe. Use RDS for PostgreSQL as the store, or, on the manual path only, sqlite copied to S3 by the
+  Litestream image ([below](#sqlite-and-s3-instead-of-rds)).
 - **Give the hub a bus too.** Express Mode deploys with canaries: for a few minutes, old and new tasks run side by
   side. With `BUS` set to the same Postgres URL as the store, both see the whole team.
 - **Connections.** The load balancer's default idle timeout of 60 seconds works: laptops and the hub ping each
@@ -241,6 +242,14 @@ Steps 1 to 4 are the same, without the infrastructure role.
 
 To upgrade, register the task definition again with the new image and run
 `aws ecs update-service --cluster default --service murmur-hub --task-definition murmur-hub`.
+
+## sqlite and S3 instead of RDS
+
+One task can keep sqlite with the `-litestream` image, which copies the file to S3 as it changes and restores it
+when a new task starts. There is then no database to pay for. It allows one writer only, so never use it with
+Express Mode, whose canary deployments run old and new tasks side by side. On the manual path, deploy one task with
+`minimumHealthyPercent=0` and `maximumPercent=100`: [deploy/litestream](../litestream#ecs-on-fargate) gives the
+details.
 
 ## More than one task
 

@@ -157,3 +157,26 @@ jobs:
           done
           docker logs hub
           exit 1
+      # The variant with Litestream (deploy/litestream), from the same build stage.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          target: litestream
+          build-args: GO_VERSION=${{ steps.go.outputs.version }}
+          load: true
+          tags: murmur-hub:ci-litestream
+          cache-from: type=gha
+      # A folder in the container stands in for the bucket. The hub must answer, and Litestream must write the replica.
+      - name: The Litestream image starts, answers /healthz and replicates
+        run: |
+          docker run -d --name hub-litestream -p 8081:8080 -e DEV_LOGIN=1 -e PUBLIC_URL=http://localhost:8081 \
+            -e LITESTREAM_REPLICA_URL=file:///data/replica murmur-hub:ci-litestream
+          for _ in $(seq 1 30); do
+            if curl -fs http://localhost:8081/healthz && docker cp hub-litestream:/data/replica/ltx replica 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs hub-litestream
+          exit 1

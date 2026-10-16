@@ -15,6 +15,7 @@ is one way to run the hub, with a README you can follow from start to finish:
 | [aws](aws) | AWS: ECS Express Mode, or ECS on Fargate behind your own load balancer, with RDS for PostgreSQL |
 | [azure](azure) | Azure Container Apps or App Service, with Azure Database for PostgreSQL |
 | [systemd](systemd) | The release binary as a hardened systemd service |
+| [litestream](litestream) | The hub image with Litestream: one instance keeps sqlite, copied to object storage as it changes |
 
 The other folders are for building and releasing murmur itself: [docker](docker) holds the hub's Dockerfiles,
 and [sign](sign) signs a release's checksums (see [docs/development.md](../docs/development.md)).

@@ -74,6 +74,9 @@ The data lives in the PersistentVolumeClaim the chart creates. `helm uninstall` 
 data survives a reinstall; delete it yourself when you mean to. Give it a block storage class (the default on most
 clusters), not NFS or another network file system: sqlite isn't safe there.
 
+On a cluster without block storage, or to keep a copy off the cluster, use the `-litestream` image: it copies the
+sqlite file to object storage and restores it when a new pod starts ([deploy/litestream](../../litestream#kubernetes)).
+
 With sqlite, the chart uses the `Recreate` strategy, whatever `replicaCount` says: during an upgrade the old pod
 stops, letting go of the sqlite file and its ReadWriteOnce volume, before the new one starts. Laptops reconnect a few
 seconds later. It does the same with the local bus, where two pods would each hold part of the team. Rolling

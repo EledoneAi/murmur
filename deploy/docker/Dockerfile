@@ -12,7 +12,8 @@
 #   MURMUR_RELEASE_KEY=<private key> docker build --secret id=release_key,env=MURMUR_RELEASE_KEY \
 #     --build-arg RELEASE_PUBKEY=<public key> -f deploy/docker/Dockerfile -t murmur-hub .
 #
-# Releases don't use this file: GoReleaser builds the published image from its own binaries with Dockerfile.release.
+# Releases don't use this file: GoReleaser builds the published image from its own binaries with Dockerfile.release,
+# and its -litestream variant with Dockerfile.litestream. Here, --target litestream builds that variant.
 
 ARG GO_VERSION=1.27.2
 
@@ -50,7 +51,7 @@ if [ -s /run/secrets/release_key ]; then
 fi
 EOF
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS hub
 LABEL org.opencontainers.image.title="murmur-hub" \
       org.opencontainers.image.description="The hub that links a team's murmur laptops" \
       org.opencontainers.image.source="https://github.com/EledoneAi/murmur" \
@@ -65,3 +66,15 @@ ENV PORT=8080 \
     DIST_DIR=/usr/share/murmur/dist
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/murmur-hub"]
+
+# The same hub with Litestream, which copies the sqlite file to object storage as it changes and restores it when a
+# new container starts without one (deploy/litestream). Build it with --target litestream. Litestream's image is a
+# static binary; keep the version in step with Dockerfile.litestream.
+FROM hub AS litestream
+COPY --from=docker.io/litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a \
+     /usr/local/bin/litestream /usr/local/bin/litestream
+COPY deploy/litestream/litestream.yml /etc/litestream.yml
+ENTRYPOINT ["/usr/local/bin/litestream", "replicate", "-restore-if-db-not-exists", "-exec", "/usr/local/bin/murmur-hub"]
+
+# Without --target, the build ends here: the plain hub.
+FROM hub

@@ -59,3 +59,7 @@ and follow the new version as your team's update policy says
 
 Fly takes daily snapshots of volumes; `fly volumes snapshots list <volume id>` shows them, and
 `fly volumes list` shows the volume id.
+
+A volume lives on one server and isn't replicated, so a daily snapshot can be a day behind. For a copy that keeps
+up, use the `-litestream` image, which copies the sqlite file to object storage about once a second: see
+[deploy/litestream](../litestream#flyio-compose-and-vms).

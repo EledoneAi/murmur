@@ -108,6 +108,11 @@ image: ## Build the hub image from source, tagged IMAGE (default murmur-hub:dev)
 	docker build -f deploy/docker/Dockerfile --build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
 		-t $(IMAGE) .
 
+.PHONY: image-litestream
+image-litestream: ## Build the hub image with Litestream from source, tagged IMAGE-litestream (deploy/litestream)
+	docker build -f deploy/docker/Dockerfile --target litestream --build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg VERSION=$(VERSION) -t $(IMAGE)-litestream .
+
 snapshot: ## Build a whole release into dist/ with GoReleaser, without publishing anything
 	@[ -n "$$MURMUR_RELEASE_KEY" ] || echo "snapshot: signing with a throwaway key; set MURMUR_RELEASE_KEY to use yours"
 	MURMUR_RELEASE_KEY="$${MURMUR_RELEASE_KEY:-$$($(GO) run ./deploy/sign -keygen | sed -n 's/^private key[^:]*: //p')}" \

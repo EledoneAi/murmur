@@ -14,8 +14,8 @@ Replace the example values with yours. Sign-in with Microsoft Entra ID is set up
   files on a network share; sqlite isn't safe on either
   ([Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/storage-mounts),
   [App Service](https://learn.microsoft.com/en-us/troubleshoot/azure/app-service/faqs-app-service-linux-new)). Use
-  Postgres. Nor sqlite copied by Litestream: during an update the old revision or container keeps running next to
-  the new one, and Litestream allows only one writer.
+  Postgres. Nor sqlite copied by the [Litestream image](../litestream): during an update the old revision or
+  container keeps running next to the new one, and Litestream allows only one writer.
 - **Keep one replica running.** `--min-replicas 1` keeps the hub up when nobody is connected, so its background jobs
   run and laptops find it at once.
 - **Give the hub a bus too.** With `BUS` set to the same Postgres URL as the store, the old and the new revision

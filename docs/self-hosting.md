@@ -71,11 +71,14 @@ memory (`local://`).
 | Looking around | `memory://` | `local://` |
 | One instance on a server or a VM with a disk (most teams) | `sqlite:///data/murmur.db` (the image's default) | `local://` (the default) |
 | One instance on a platform without a lasting disk, such as Cloud Run | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `local://` |
+| One instance without a lasting disk, on a platform that never runs two at once (ECS with your own deployment settings, Kubernetes) | `sqlite:///data/murmur.db` with the [Litestream image](../deploy/litestream) | `local://` |
 | More than one instance | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `postgres://...`, `redis://...` or `rediss://...` |
 
 - **memory** loses everything when the hub stops: everyone signs in again.
 - **sqlite** is one file. It needs a disk that outlives the container, and only one instance may use it. Don't
-  put it on a network file system such as NFS, EFS or Azure Files.
+  put it on a network file system such as NFS, EFS or Azure Files. The image tagged `<version>-litestream` copies
+  it to object storage as it changes, and restores it into a new container: see
+  [deploy/litestream](../deploy/litestream).
 - **Postgres** can be both the store and the bus, so a two-instance hub needs nothing else. Any recent version
   works, managed or not. The bus needs a direct connection or a session pooler, not a transaction pooler.
 - **Redis** works as the bus only. It keeps nothing, so it needs no persistence or backups.
@@ -297,7 +300,8 @@ api.github.com and to that server.
 Back up the store. The bus holds nothing worth keeping.
 
 - **sqlite**: copy the file while the hub runs with `sqlite3 murmur.db ".backup copy.db"`. Each recipe shows
-  where the file is.
+  where the file is. For a copy that keeps up as the file changes, run the
+  [Litestream image](../deploy/litestream).
 - **Postgres**: `pg_dump`, or your provider's automated backups.
 - **Firestore**: scheduled backups or point-in-time recovery, which Google Cloud offers for each database.
 
