@@ -135,8 +135,8 @@ to install first.
 
 `make bench` measures what the laptop side costs: a frame, a key and a new snapshot in the console on the demo team
 and on teams of 10, 100 and 500 people, a 300-message thread, a snapshot's decoding, what the daemon pays to send a
-console one change, and a read of a checkout, with the git processes it starts and their CPU. Compare a change with
-the code before it, a few runs each:
+console one change, a read of a checkout, with the git processes it starts and their CPU, and a Claude Code
+transcript read whole and as it grows. Compare a change with the code before it, a few runs each:
 
 ```sh
 make bench > new.txt                     # and, on the code before the change, > old.txt

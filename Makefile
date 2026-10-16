@@ -56,7 +56,7 @@ race: ## Run the tests with the race detector, as CI does
 	$(GO) test -race ./...
 
 bench: ## Run the laptop's benchmarks: the console's frames and keys, the daemon's snapshots, git reads
-	$(GO) test -run '^$$' -bench . -benchmem ./internal/console ./internal/daemon ./internal/gitscan
+	$(GO) test -run '^$$' -bench . -benchmem ./internal/console ./internal/daemon ./internal/gitscan ./internal/harness/claude
 
 lint: ## Run golangci-lint (go vet, staticcheck, errcheck, formatting and more; see .golangci.yml)
 	$(GOLANGCI_LINT) run ./...

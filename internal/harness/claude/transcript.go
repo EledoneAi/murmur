@@ -24,6 +24,11 @@ var assistantLine = []byte(`"type":"assistant"`)
 var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"custom-title"`), []byte(`"type":"pr-link"`),
 	[]byte(`"type":"model"`), []byte(`"subtype":"compact_boundary"`)}
 
+// recentCalls is how much of a long transcript's end its tool calls are read from, when it is read from its start.
+// ponytail: Kinds keeps 30 calls and the loop hint 12, which 4 MB holds unless the answers are huge; the folders
+// the calls named (Dirs, for the repos a session touched) lose what came before.
+const recentCalls = 4 << 20
+
 // Transcript reads one conversation's transcript as it grows.
 type Transcript struct {
 	Path   string
@@ -56,11 +61,18 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		return false
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err != nil || st.Size() < t.Offset {
+	st, err := f.Stat()
+	if err != nil || st.Size() < t.Offset {
 		t.Offset = 0 // rewritten from scratch
 	}
 	if _, err := f.Seek(t.Offset, io.SeekStart); err != nil {
 		return false
+	}
+	// read from its start, a long conversation's tool calls and context sizes are read from its last recentCalls
+	// bytes only: decoding its answers was most of the cost, and the newest calls are what Kinds and Doing keep
+	callsFrom := int64(0)
+	if t.Offset == 0 && st != nil {
+		callsFrom = st.Size() - recentCalls
 	}
 	r := bufio.NewReaderSize(f, 64<<10)
 	changed := false
@@ -84,7 +96,9 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		}
 		pos += int64(len(line))
 		if bytes.Contains(line, assistantLine) {
-			changed = t.assistant(line, a) || changed
+			if pos > callsFrom {
+				changed = t.assistant(line, a) || changed
+			}
 			continue
 		}
 		head := line[:min(len(line), 200)]

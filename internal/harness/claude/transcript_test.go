@@ -200,6 +200,32 @@ func TestDirs(t *testing.T) {
 	}
 }
 
+// A long transcript read from its start keeps its title and pull request from anywhere, and takes its tool calls and
+// context from its last recentCalls bytes; read as it grows, every call counts.
+func TestLongTranscriptFromItsStart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	early := answerLine(toolBlock("Read", `{"file_path":"/work/old/a.go","pad":"`+strings.Repeat("p", 50_000)+`"}`), 900_000)
+	lines := []string{`{"type":"ai-title","aiTitle":"Rerun billing on staging","sessionId":"s"}` + "\n",
+		`{"type":"pr-link","sessionId":"s","prNumber":1822,"prUrl":"https://github.com/acme/api/pull/1822"}` + "\n"}
+	for range recentCalls/len(early) + 10 {
+		lines = append(lines, early)
+	}
+	lines = append(lines, answerLine(toolBlock("Bash", `{"command":"go test ./..."}`), 300_000))
+	appendLines(t, path, lines...)
+	s := &reading{Transcript: &Transcript{Path: path}}
+	s.Read()
+	if s.Title != "Rerun billing on staging" || s.PR != 1822 || s.Doing != "Running go" || s.Context != 30 {
+		t.Fatalf("title %q pr %d doing %q context %d", s.Title, s.PR, s.Doing, s.Context)
+	}
+	if len(s.Kinds) != 30 || !strings.HasSuffix(s.Kinds, "rx") || !slices.Contains(s.Dirs, "/work/old") {
+		t.Fatalf("kinds %q, dirs %v", s.Kinds, s.Dirs)
+	}
+	appendLines(t, path, early, early)
+	if s.Read(); !strings.HasSuffix(s.Kinds, "xrr") {
+		t.Fatalf("calls added later: kinds %q", s.Kinds)
+	}
+}
+
 func TestWindowOf(t *testing.T) {
 	for model, want := range map[string]int{"claude-opus-5-5": 1_000_000, "claude-fable-5-1": 1_000_000, "": 1_000_000,
 		"claude-haiku-5-5": 200_000, "claude-sonnet-4-5": 200_000, "claude-sonnet-4-5[1m]": 1_000_000, "claude-3-7-sonnet": 200_000,
