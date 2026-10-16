@@ -1,4 +1,4 @@
-// Package setup connects a laptop: sign-in, Claude Code's hooks and MCP server, and the checks of doctor.
+// Package setup connects a laptop: sign-in, the hooks and MCP server in each harness, and the checks of doctor.
 package setup
 
 import (
@@ -25,12 +25,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/internal/harness/claude"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 )
+
+// Harnesses are the AI coding tools murmur connects, in the order join sets them up.
+var Harnesses = []harness.Harness{claude.Claude{}}
+
+// Harness is the harness called name, or nil.
+func Harness(name string) harness.Harness {
+	for _, h := range Harnesses {
+		if h.Name() == name {
+			return h
+		}
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------- join
 
@@ -178,32 +192,10 @@ func Join(hub string, relogin, noBrowser bool) error {
 	}
 	step(true, "Signed in", fmt.Sprintf("%s (%s)", cfg.Handle, cfg.Email))
 
-	settings := filepath.Join(claudecode.Dir(), "settings.json")
-	if err := claudecode.EditSettings(settings, exe, true); err != nil {
-		return err
-	}
-	step(true, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(settings))
-	step(true, "Permissions", "who, send allowed without a prompt")
-	if note := claudecode.InboundNote(settings); note != "" {
-		step(false, "Messages", note)
-		if ask("  Let your sessions take messages from other sessions (crossSessionInbound: accept)?") {
-			if err := claudecode.AcceptMessages(settings); err != nil {
-				step(false, "Messages", err.Error())
-			} else {
-				step(true, "Messages", "agents take messages from other sessions")
-			}
+	for _, h := range Harnesses {
+		for _, c := range h.Connect(exe, ask) {
+			step(c.OK, c.Name, c.Detail)
 		}
-	}
-
-	if claude, err := exec.LookPath("claude"); err == nil {
-		_ = exec.Command(claude, "mcp", "remove", "--scope", "user", "murmur").Run()
-		if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "murmur", "--", exe, "mcp").CombinedOutput(); err != nil {
-			step(false, "MCP server", strings.TrimSpace(string(out)))
-		} else {
-			step(true, "MCP server", "murmur (user scope): who, send")
-		}
-	} else {
-		step(false, "MCP server", "claude not found on PATH; run: claude mcp add --scope user murmur -- "+exe+" mcp")
 	}
 
 	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
@@ -303,45 +295,26 @@ func Doctor() bool {
 	return ok
 }
 
-// Checks looks at what join set up in Claude Code, and returns Claude Code's version too. Each failed check says
+// Checks looks at what join set up in each harness, and returns Claude Code's version too. Each failed check says
 // how to fix it. The daemon sends these to the hub on the team's schedule, for its admins.
 func Checks() (claudeCode string, checks []protocol.Check) {
-	check := func(good bool, name, detail, fix string) {
-		if !good {
-			detail = fix
-		}
-		checks = append(checks, protocol.Check{Name: name, OK: good, Detail: detail})
+	for _, h := range Harnesses {
+		checks = append(checks, h.Checks()...)
 	}
-	settings := filepath.Join(claudecode.Dir(), "settings.json")
-	hooks, perms, _ := claudecode.SetupState(settings)
-	check(hooks, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(settings), "missing: run murmur join")
-	check(perms, "Permissions", "who, send allowed", "missing: run murmur join")
-	note := claudecode.InboundNote(settings)
-	check(note == "", "Messages", "agents take messages from other sessions", note)
-	claude, err := exec.LookPath("claude")
-	if err != nil {
-		check(false, "Claude Code", "", "claude is not on PATH")
-		return "", checks
-	}
-	out, _ := exec.Command(claude, "--version").Output()
-	v, _, _ := strings.Cut(strings.TrimSpace(string(out)), " ")
-	check(!claudecode.TooOld(v), "Claude Code", v, v+": messages between sessions need "+claudecode.MinVersion+" or later; run claude update")
-	check(exec.Command(claude, "mcp", "get", "murmur").Run() == nil, "MCP server", "murmur: who, send", "missing: run murmur join")
-	return v, checks
+	return claude.Version(), checks
 }
 
+// Reapply sets the harnesses up again once after an update, so the hooks and MCP server name what this version needs.
 func Reapply() {
 	if b, _ := os.ReadFile(setupMarker()); release.Version == "dev" || string(b) == release.Version || config.Load().Token == "" {
 		return
 	}
 	exe := config.Exe()
-	if err := claudecode.EditSettings(filepath.Join(claudecode.Dir(), "settings.json"), exe, true); err != nil {
-		log.Printf("setup for %s: %v", release.Version, err)
-		return
-	}
-	if claude, err := exec.LookPath("claude"); err == nil && exec.Command(claude, "mcp", "get", "murmur").Run() != nil {
-		if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "murmur", "--", exe, "mcp").CombinedOutput(); err != nil {
-			log.Printf("setup for %s: mcp add: %s", release.Version, out)
+	for _, h := range Harnesses {
+		for _, c := range h.Connect(exe, nil) {
+			if !c.OK {
+				log.Printf("setup for %s: %s %s: %s", release.Version, h.Title(), c.Name, c.Detail)
+			}
 		}
 	}
 	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
@@ -353,13 +326,11 @@ func Uninstall() error {
 		return err
 	}
 	cfg := config.Load()
-	if err := claudecode.EditSettings(filepath.Join(claudecode.Dir(), "settings.json"), config.Exe(), false); err != nil {
-		return err
-	}
-	step(true, "Hooks", "removed")
-	if claude, err := exec.LookPath("claude"); err == nil {
-		_ = exec.Command(claude, "mcp", "remove", "--scope", "user", "murmur").Run()
-		step(true, "MCP server", "removed")
+	for _, h := range Harnesses {
+		if err := h.Disconnect(config.Exe()); err != nil {
+			return err
+		}
+		step(true, h.Title(), "hooks and MCP server removed")
 	}
 	if c, err := ipc.Dial(); err == nil {
 		_ = json.NewEncoder(c).Encode(ipc.Request{Op: "stop"})
@@ -379,23 +350,40 @@ func Uninstall() error {
 	return nil
 }
 
-// hookWait bounds the hooks Claude Code waits for. Past it they print nothing, and the session or the edit goes on.
+// hookWait bounds the hooks a harness waits for. Past it they print nothing, and the session or the edit goes on.
 const hookWait = 800 * time.Millisecond
 
-// Hook is what Claude Code runs on SessionStart, before an agent edits a file (PreToolUse), and on Notification.
-// What it prints reaches the agent: the team brief as the session's context, an overlap as the reason an edit is
-// turned back. It never holds a session up: on any failure, and after hookWait, it prints nothing.
-func Hook(event string) {
-	_, _ = os.Stdout.Write(hook(event, os.Stdin))
+// Hook is what a harness runs as `murmur hook <harness> <event>`: when a session starts, before an agent edits a
+// file, and when it waits for its person. What it prints reaches the agent: the team brief as the session's context,
+// an overlap as the reason an edit is turned back. It never holds a session up: on any failure, and after hookWait,
+// it prints nothing.
+func Hook(name, event string) {
+	_, _ = os.Stdout.Write(hook(Harness(name), event, os.Stdin))
 }
 
-func hook(event string, stdin io.Reader) []byte {
-	if event == "notify" { // Claude Code doesn't wait for this one
-		_ = ipc.Call(hookRequest(event, stdin), nil, 2*time.Second)
+func hook(h harness.Harness, event string, stdin io.Reader) []byte {
+	ev, ok := hookEvent(h, event, stdin)
+	if !ok {
+		return nil
+	}
+	req := ipc.Request{Op: "hook", Hook: &ev}
+	if ev.Kind == harness.Needs { // the harness doesn't wait for this one
+		_ = ipc.Call(req, nil, 2*time.Second)
 		return nil
 	}
 	out := make(chan []byte, 1)
-	go func() { out <- askDaemon(event, stdin) }()
+	go func() {
+		var r ipc.Reply
+		call := ipc.CallRunning // an edit never starts the daemon: without one, it goes ahead
+		if ev.Kind == harness.Start {
+			call = ipc.Call
+		}
+		if call(req, &r, hookWait) != nil {
+			out <- nil
+			return
+		}
+		out <- h.Answer(ev, r.Text)
+	}()
 	select {
 	case b := <-out:
 		return b
@@ -404,41 +392,31 @@ func hook(event string, stdin io.Reader) []byte {
 	}
 }
 
-// askDaemon hands a hook's input to the daemon and turns its answer into what the hook prints.
-func askDaemon(event string, stdin io.Reader) []byte {
-	req, r := hookRequest(event, stdin), ipc.Reply{}
-	switch event {
-	case "start":
-		if ipc.Call(req, &r, hookWait) == nil && r.Text != "" {
-			return claudecode.StartContext(r.Text)
-		}
-	case "edit":
-		// an edit never starts the daemon: without one, it goes ahead
-		if ipc.CallRunning(req, &r, hookWait) == nil && r.Text != "" {
-			return claudecode.Deny(r.Text)
-		}
+// hookEvent reads a hook's input, and says whether it is one murmur acts on.
+func hookEvent(h harness.Harness, event string, stdin io.Reader) (harness.Event, bool) {
+	if h == nil {
+		return harness.Event{}, false
 	}
-	return nil
-}
-
-func hookRequest(event string, stdin io.Reader) ipc.Request {
 	data, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
-	// Claude Code documents this variable for hooks: the session's inbox, where murmur hands it messages
-	req := ipc.Request{Op: "hook", Event: event, Data: data, Socket: os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET")}
-	if event == "start" {
+	ev, err := h.Parse(event, data)
+	if err != nil || ev.Kind == "" || ev.SessionID == "" {
+		return ev, false
+	}
+	if ev.Kind == harness.Start {
 		for _, k := range terminalVars {
 			if v := os.Getenv(k); v != "" {
-				if req.Term == nil {
-					req.Term = map[string]string{}
+				if ev.Term == nil {
+					ev.Term = map[string]string{}
 				}
-				req.Term[k] = v
+				ev.Term[k] = v
 			}
 		}
 	}
-	return req
+	return ev, true
 }
 
-// terminalVars say where a session runs, for the console's jump to it. The hook inherits them from the session.
+// terminalVars say where a session runs, for the console's jump to it: its tmux pane, iTerm2 session, WezTerm pane or
+// kitty window, and the terminal program. The hook inherits them from the session.
 var terminalVars = []string{"TMUX", "TMUX_PANE", "ITERM_SESSION_ID", "WEZTERM_PANE", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON", "TERM_PROGRAM"}
 
 func hostname() string {

@@ -119,8 +119,8 @@ func main() {
 	case "daemon":
 		err = daemon.Run()
 	case "hook":
-		if len(args) > 1 {
-			setup.Hook(args[1])
+		if len(args) > 2 {
+			setup.Hook(args[1], args[2])
 		}
 	case "mcp":
 		err = mcp.Serve()

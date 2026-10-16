@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 )
@@ -41,19 +42,14 @@ type Snapshot struct {
 // ---------------------------------------------------------------- talking to the daemon
 
 type Request struct {
-	Op      string          `json:"op"`
-	Event   string          `json:"event,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	PID     int             `json:"pid,omitempty"`
-	Session string          `json:"session,omitempty"`
-	To      string          `json:"to,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	ID      string          `json:"id,omitempty"`
-	IDs     []string        `json:"ids,omitempty"`
-	Socket  string          `json:"socket,omitempty"` // a session's inbox, from its SessionStart hook
-	// Term is where a session runs, from its SessionStart hook's environment: its tmux pane, iTerm2 session, WezTerm
-	// pane or kitty window, and the terminal program, so the console can switch to it.
-	Term map[string]string `json:"term,omitempty"`
+	Op      string         `json:"op"`
+	Hook    *harness.Event `json:"hook,omitempty"` // what a harness's hook reports
+	PID     int            `json:"pid,omitempty"`  // the harness process of the agent that sends, from the MCP server
+	Session string         `json:"session,omitempty"`
+	To      string         `json:"to,omitempty"`
+	Text    string         `json:"text,omitempty"`
+	ID      string         `json:"id,omitempty"`
+	IDs     []string       `json:"ids,omitempty"`
 }
 
 type Reply struct {

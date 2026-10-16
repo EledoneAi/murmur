@@ -4,32 +4,35 @@ import (
 	"slices"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/gitscan"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/protocol"
 )
 
-// A session is one running Claude Code process, read from what Claude Code writes anyway:
-//   - ~/.claude/sessions/<pid>.json: name, folder, busy/idle/waiting, and the session's inbox socket
+// A session is one agent session in a harness, read from what the harness writes anyway and from its hooks:
+//   - Claude Code's ~/.claude/sessions/<pid>.json: name, folder, busy/idle/waiting, and the session's inbox socket
 //   - the session's transcript: the title Claude Code gives the conversation, the PRs it opened, its tool calls and
 //     how full its context is
 //   - git, in the session's folder: repo, branch, files changed on the branch, the size of the change and where the
 //     checkout stands
 type session struct {
-	pid     int
+	harness string
 	id      string
+	pid     int
 	name    string
 	cwd     string
 	app     string
-	cc      string // Claude Code's version
+	version string // the harness's version
 	status  string
 	since   int64
 	sock    string
-	started string // the process start time Claude Code records, to tell a reused pid apart
+	started string // the process start time the harness records, to tell a reused pid apart
 
-	tr     claudecode.Transcript
-	needs  string
-	warned map[string]bool // files whose first edit in this conversation was turned back for an overlap
+	act        harness.Activity
+	transcript string                       // its path, once found
+	read       func(*harness.Activity) bool // reads what the transcript added since
+	needs      string
+	warned     map[string]bool // files whose first edit in this conversation was turned back for an overlap
 
 	top, repo, branch, tree string
 	files                   []string
@@ -39,10 +42,18 @@ type session struct {
 	gitBusy                 bool
 }
 
+func (s *session) key() string { return harness.Key(s.harness, s.id) }
+
+// listed is the session as its harness knows it, for the harness to push a message to.
+func (s *session) listed() harness.Session {
+	return harness.Session{Harness: s.harness, ID: s.id, PID: s.pid, Name: s.name, Cwd: s.cwd, Status: s.status, App: s.app,
+		Version: s.version, Socket: s.sock, Transcript: s.transcript}
+}
+
 func (s *session) agent(withFiles bool) protocol.Agent {
-	a := protocol.Agent{Name: s.name, Repo: s.repo, Branch: s.branch, Title: s.tr.Title(), PR: s.tr.PR, PRURL: s.tr.PRURL,
-		App: s.app, Status: s.status, Needs: s.needs, Since: s.since, Doing: s.tr.Doing,
-		Kinds: s.tr.Kinds, Loop: s.tr.Loop, Context: s.tr.Context,
+	a := protocol.Agent{Name: s.name, Repo: s.repo, Branch: s.branch, Title: s.act.Title, PR: s.act.PR, PRURL: s.act.PRURL,
+		App: s.app, Status: s.status, Needs: s.needs, Since: s.since, Doing: s.act.Doing,
+		Kinds: s.act.Kinds, Loop: s.act.Loop, Context: s.act.Context,
 		Added: s.st.Added, Deleted: s.st.Deleted, Changed: s.st.Changed,
 		Base: s.st.Base, Detached: s.st.Detached, Op: s.st.Op, Dir: s.st.Dir, Also: slices.Clone(s.also)}
 	if withFiles {

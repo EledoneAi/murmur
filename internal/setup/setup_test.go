@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness/claude"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/release"
 )
@@ -24,7 +24,7 @@ func TestReinstallOncePerVersion(t *testing.T) {
 	t.Setenv("PATH", "") // no claude on PATH: the MCP step is skipped
 	defer func(v string) { release.Version = v }(release.Version)
 	release.Version = "v2"
-	settings := filepath.Join(claudecode.Dir(), "settings.json")
+	settings := filepath.Join(claude.Dir(), "settings.json")
 	exists := func() bool { _, err := os.Stat(settings); return err == nil }
 	if Reapply(); exists() {
 		t.Fatal("signed out, yet set up")
@@ -102,18 +102,18 @@ func TestStartHook(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())
 	input := `{"session_id":"s1","hook_event_name":"SessionStart","source":"startup","cwd":"/work/app"}`
 	stop := fakeDaemon(t, &ipc.Reply{OK: true, Text: "Murmur: other agents working in acme/api:"})
-	if out := hook("start", strings.NewReader(input)); string(out) != string(claudecode.StartContext("Murmur: other agents working in acme/api:")) {
+	if out := hook(claude.Claude{}, "start", strings.NewReader(input)); string(out) != string(claude.StartContext("Murmur: other agents working in acme/api:")) {
 		t.Fatalf("brief: %s", out)
 	}
 	stop()
 	stop = fakeDaemon(t, &ipc.Reply{OK: true})
-	if out := hook("start", strings.NewReader(input)); out != nil {
+	if out := hook(claude.Claude{}, "start", strings.NewReader(input)); out != nil {
 		t.Fatalf("nothing to say: %s", out)
 	}
 	stop()
 	fakeDaemon(t, nil)
 	start := time.Now()
-	if out := hook("start", strings.NewReader(input)); out != nil || time.Since(start) > hookWait+200*time.Millisecond {
+	if out := hook(claude.Claude{}, "start", strings.NewReader(input)); out != nil || time.Since(start) > hookWait+200*time.Millisecond {
 		t.Fatalf("a daemon that doesn't answer: %q after %s", out, time.Since(start))
 	}
 }
@@ -123,20 +123,20 @@ func TestStartHook(t *testing.T) {
 func TestEditHook(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())
 	input := `{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/work/app/x.go"}}`
-	if out := hook("edit", strings.NewReader(input)); out != nil {
+	if out := hook(claude.Claude{}, "edit", strings.NewReader(input)); out != nil {
 		t.Fatalf("no daemon: %s", out)
 	}
 	if _, err := os.Stat(config.SockPath()); err == nil {
 		t.Fatal("the edit hook started the daemon")
 	}
 	stop := fakeDaemon(t, &ipc.Reply{OK: true, Text: "bob/b1 is also changing x.go"})
-	if out := hook("edit", strings.NewReader(input)); string(out) != string(claudecode.Deny("bob/b1 is also changing x.go")) {
+	if out := hook(claude.Claude{}, "edit", strings.NewReader(input)); string(out) != string(claude.Deny("bob/b1 is also changing x.go")) {
 		t.Fatalf("overlap: %s", out)
 	}
 	stop()
 	fakeDaemon(t, nil)
 	start := time.Now()
-	if out := hook("edit", strings.NewReader(input)); out != nil || time.Since(start) > hookWait+200*time.Millisecond {
+	if out := hook(claude.Claude{}, "edit", strings.NewReader(input)); out != nil || time.Since(start) > hookWait+200*time.Millisecond {
 		t.Fatalf("a daemon that doesn't answer: %q after %s", out, time.Since(start))
 	}
 }
@@ -182,10 +182,10 @@ func TestHookTerminal(t *testing.T) {
 	}
 	t.Setenv("TMUX_PANE", "%7")
 	t.Setenv("TERM_PROGRAM", "iTerm.app")
-	if req := hookRequest("start", strings.NewReader("{}")); req.Term["TMUX_PANE"] != "%7" || req.Term["TERM_PROGRAM"] != "iTerm.app" || len(req.Term) != 2 {
-		t.Fatalf("start: %v", req.Term)
+	if ev, _ := hookEvent(claude.Claude{}, "start", strings.NewReader(`{"session_id":"s1"}`)); ev.Term["TMUX_PANE"] != "%7" || ev.Term["TERM_PROGRAM"] != "iTerm.app" || len(ev.Term) != 2 {
+		t.Fatalf("start: %v", ev.Term)
 	}
-	if req := hookRequest("edit", strings.NewReader("{}")); req.Term != nil {
-		t.Fatalf("edit: %v", req.Term)
+	if ev, _ := hookEvent(claude.Claude{}, "edit", strings.NewReader(`{"session_id":"s1"}`)); ev.Term != nil {
+		t.Fatalf("edit: %v", ev.Term)
 	}
 }

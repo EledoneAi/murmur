@@ -1,4 +1,4 @@
-package claudecode
+package claude
 
 import (
 	"encoding/json"
@@ -47,7 +47,7 @@ func TestEditSettingsRoundTrip(t *testing.T) {
 	}
 	b, _ := os.ReadFile(path)
 	s := string(b)
-	for _, want := range []string{"other-tool start", `"/home/me/.local/bin/murmur hook start"`, `"/home/me/.local/bin/murmur hook notify"`, "mcp__murmur__send", `"async": true`} {
+	for _, want := range []string{"other-tool start", `"/home/me/.local/bin/murmur hook claude start"`, `"/home/me/.local/bin/murmur hook claude notify"`, "mcp__murmur__send", `"async": true`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in\n%s", want, s)
 		}
@@ -100,9 +100,9 @@ func TestHookEntries(t *testing.T) {
 		cmd, matcher string
 		async        bool
 	}{
-		"SessionStart": {"hook start", "", false},
-		"PreToolUse":   {"hook edit", "Edit|MultiEdit|Write|NotebookEdit", false},
-		"Notification": {"hook notify", "", true},
+		"SessionStart": {"hook claude start", "", false},
+		"PreToolUse":   {"hook claude edit", "Edit|MultiEdit|Write|NotebookEdit", false},
+		"Notification": {"hook claude notify", "", true},
 	} {
 		g := s.Hooks[ev]
 		if len(g) != 1 || len(g[0].Hooks) != 1 {

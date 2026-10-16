@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/internal/setup"
 	"github.com/EledoneAi/murmur/internal/update"
 )
 
@@ -33,7 +34,11 @@ func (d *Daemon) serve(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Op {
 	case "hook":
-		_ = enc.Encode(ipc.Reply{OK: true, Text: d.onHook(req)})
+		var text string
+		if req.Hook != nil {
+			text = d.onHook(*req.Hook)
+		}
+		_ = enc.Encode(ipc.Reply{OK: true, Text: text})
 	case "who":
 		d.mu.Lock()
 		snap := d.snapshotLocked()
@@ -97,9 +102,9 @@ func (d *Daemon) serve(c net.Conn) {
 	case "terminal": // where one of this laptop's agents runs, for the console to switch to it
 		d.mu.Lock()
 		var term map[string]string
-		for _, s := range d.sessions {
+		for k, s := range d.sessions {
 			if s.name == req.To {
-				term = d.terms[s.id]
+				term = d.terms[k]
 			}
 		}
 		d.mu.Unlock()
@@ -115,19 +120,18 @@ func (d *Daemon) serve(c net.Conn) {
 	}
 }
 
-// onHook takes what a Claude Code hook reports, and returns what the hook prints for the agent: the brief when a
-// session starts, a reason to turn an edit back, or nothing.
-func (d *Daemon) onHook(req ipc.Request) string {
-	var in claudecode.HookInput
-	_ = json.Unmarshal(req.Data, &in)
-	switch req.Event {
-	case "start":
+// onHook takes what a harness's hook reports, and returns murmur's text for the agent: the brief when a session
+// starts, a reason to turn an edit back, or nothing.
+func (d *Daemon) onHook(ev harness.Event) string {
+	key := harness.Key(ev.Harness, ev.SessionID)
+	switch ev.Kind {
+	case harness.Start:
 		d.mu.Lock()
 		if len(d.hints) > 500 {
 			clear(d.hints)
 		}
-		if in.SessionID != "" && in.Transcript != "" {
-			d.hints[in.SessionID] = in.Transcript
+		if ev.SessionID != "" && ev.Transcript != "" {
+			d.hints[key] = ev.Transcript
 		}
 		if len(d.sockets) > 500 {
 			clear(d.sockets)
@@ -135,26 +139,27 @@ func (d *Daemon) onHook(req ipc.Request) string {
 		if len(d.terms) > 500 {
 			clear(d.terms)
 		}
-		if in.SessionID != "" && len(req.Term) > 0 {
-			d.terms[in.SessionID] = req.Term
+		if ev.SessionID != "" && len(ev.Term) > 0 {
+			d.terms[key] = ev.Term
 		}
-		if in.SessionID != "" && req.Socket != "" {
-			d.sockets[in.SessionID] = req.Socket
-			if s := d.byIDLocked(in.SessionID); s != nil {
-				s.sock = req.Socket
+		if ev.SessionID != "" && ev.Socket != "" {
+			d.sockets[key] = ev.Socket
+			if s := d.sessions[key]; s != nil {
+				s.sock = ev.Socket
 			}
 		}
 		d.lastUse = time.Now()
 		d.mu.Unlock()
-		d.scanRegistry()
-		return d.brief(in)
-	case "edit":
-		return d.editCheck(in)
-	case "notify":
-		needs := map[string]string{"permission_prompt": "permission", "agent_needs_input": "input", "elicitation_dialog": "input", "elicitation_url_dialog": "input"}[in.Type]
+		if l, ok := setup.Harness(ev.Harness).(harness.Lister); ok {
+			d.scan(ev.Harness, l)
+		}
+		return d.brief(ev)
+	case harness.BeforeTool:
+		return d.editCheck(ev)
+	case harness.Needs:
 		d.mu.Lock()
-		if s := d.byIDLocked(in.SessionID); s != nil && needs != "" && s.needs != needs {
-			s.needs = needs
+		if s := d.sessions[key]; s != nil && ev.Needs != "" && s.needs != ev.Needs {
+			s.needs = ev.Needs
 			d.changed()
 		}
 		d.mu.Unlock()
@@ -202,13 +207,16 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 	d.mu.Lock()
 	from := ""
 	if req.PID != 0 || req.Session != "" {
-		s := d.sessions[req.PID]
+		var s *session
+		if req.PID != 0 {
+			s = d.byPIDLocked(req.PID)
+		}
 		if s == nil && req.Session != "" {
 			s = d.byIDLocked(req.Session)
 		}
 		if s == nil {
 			d.mu.Unlock()
-			return ipc.Reply{Err: "this Claude Code session is not on murmur yet; try again in a few seconds"}
+			return ipc.Reply{Err: "this session is not on murmur yet; try again in a few seconds"}
 		}
 		from = s.name
 	}

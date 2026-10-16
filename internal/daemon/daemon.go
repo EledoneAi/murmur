@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"log"
 	"maps"
 	"net"
@@ -24,9 +23,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/gitscan"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
@@ -38,7 +37,7 @@ import (
 )
 
 // The daemon is the one long-lived murmur process on a laptop. It sleeps on file events and on its hub
-// connection, and exits on its own ten minutes after the last Claude Code session and console are gone.
+// connection, and exits on its own ten minutes after the last agent session and console are gone.
 
 const (
 	idleExit   = 10 * time.Minute
@@ -52,11 +51,11 @@ var errUnauthorized = errors.New("unauthorized")
 
 type Daemon struct {
 	mu         sync.Mutex
-	sessions   map[int]*session
-	hints      map[string]string            // Claude session id -> transcript path, from the SessionStart hook
-	sockets    map[string]string            // Claude session id -> inbox socket, from the hook's CLAUDE_CODE_MESSAGING_SOCKET
-	terms      map[string]map[string]string // Claude session id -> where it runs, from the hook's environment
-	watched    map[string]int               // transcript path -> pid
+	sessions   map[string]*session          // by harness.Key
+	hints      map[string]string            // session key -> transcript path, from its start hook
+	sockets    map[string]string            // session key -> where murmur pushes messages to it, from its start hook
+	terms      map[string]map[string]string // session key -> where it runs, from its start hook's environment
+	watched    map[string]string            // transcript path -> session key
 	people     []protocol.Person
 	pairs      []protocol.Overlap // this person's agents' overlaps, from the roster
 	me         protocol.Person
@@ -121,11 +120,13 @@ func Run() error {
 	if d.w, err = fsnotify.NewWatcher(); err != nil {
 		return err
 	}
-	_ = os.MkdirAll(claudecode.RegistryDir(), 0o700)
-	if err := d.w.Add(claudecode.RegistryDir()); err != nil {
-		return err
+	for _, l := range listers() {
+		_ = os.MkdirAll(l.Watch(), 0o700)
+		if err := d.w.Add(l.Watch()); err != nil {
+			return err
+		}
 	}
-	d.scanRegistry()
+	d.scanAll()
 	go d.watchLoop()
 	go d.publishLoop()
 	go d.tickLoop()
@@ -143,7 +144,7 @@ func Run() error {
 
 func newDaemon(handle string) *Daemon {
 	return &Daemon{
-		sessions: map[int]*session{}, hints: map[string]string{}, sockets: map[string]string{}, terms: map[string]map[string]string{}, watched: map[string]int{},
+		sessions: map[string]*session{}, hints: map[string]string{}, sockets: map[string]string{}, terms: map[string]map[string]string{}, watched: map[string]string{},
 		seen: map[string]bool{}, handed: map[string]bool{}, held: map[string][]heldMsg{}, outbox: map[string]outMsg{},
 		failed: map[string]failure{}, repos: map[string]string{}, asks: map[string]protocol.Msg{},
 		answers: map[string]string{}, done: map[string]bool{}, subs: map[chan struct{}]bool{}, acks: map[string]chan protocol.Frame{},
@@ -167,76 +168,66 @@ func (d *Daemon) changed() {
 
 // ---------------------------------------------------------------- sessions
 
-func (d *Daemon) scanRegistry() {
-	files, _ := filepath.Glob(filepath.Join(claudecode.RegistryDir(), "*.json"))
-	live := map[int]bool{}
-	for _, f := range files {
-		if pid, ok := claudecode.PIDOf(f); ok {
-			live[pid] = true
-			d.onRegistry(f)
+// listers are the harnesses that list their own live sessions, which the daemon watches.
+func listers() map[string]harness.Lister {
+	out := map[string]harness.Lister{}
+	for _, h := range setup.Harnesses {
+		if l, ok := h.(harness.Lister); ok {
+			out[h.Name()] = l
 		}
 	}
-	d.mu.Lock()
-	for pid := range d.sessions {
-		if !live[pid] {
-			d.removeLocked(pid)
-		}
-	}
-	d.mu.Unlock()
+	return out
 }
 
-func (d *Daemon) onRegistry(path string) {
-	pid, ok := claudecode.PIDOf(path)
-	if !ok {
-		return
+func (d *Daemon) scanAll() {
+	for name, l := range listers() {
+		d.scan(name, l)
 	}
-	e, err := claudecode.ReadEntry(path)
+}
+
+// scan reads the sessions a harness lists, and lets go of its sessions it no longer lists.
+func (d *Daemon) scan(name string, l harness.Lister) {
+	list := l.Sessions()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			d.removeLocked(pid)
+	live, writing := map[string]bool{}, map[int]bool{}
+	for _, e := range list {
+		if e.ID == "" {
+			writing[e.PID] = true // half-written: the next event reads it again
+			continue
 		}
-		return // half-written: the next event reads it again
+		live[harness.Key(e.Harness, e.ID)] = true
+		d.listedLocked(e)
 	}
-	if !claudecode.Alive(e.PID) || e.Kind == "daemon" {
-		d.removeLocked(pid)
-		return
+	for k, s := range d.sessions {
+		if s.harness == name && !live[k] && !writing[s.pid] {
+			d.removeLocked(k)
+		}
 	}
-	s := d.sessions[pid]
-	fresh := s == nil || s.started != e.ProcStart
+}
+
+// listedLocked takes in a session as its harness lists it.
+func (d *Daemon) listedLocked(e harness.Session) {
+	key := harness.Key(e.Harness, e.ID)
+	s := d.sessions[key]
+	fresh := s == nil || s.started != e.Started || s.pid != e.PID
 	if fresh {
 		if s != nil {
-			d.removeLocked(pid)
+			d.removeLocked(key)
 		}
-		s = &session{pid: pid, started: e.ProcStart}
-		d.sessions[pid] = s
-	}
-	if s.id != e.SessionID { // a new, resumed or cleared conversation
-		d.unwatchLocked(s)
-		s.id, s.tr, s.warned = e.SessionID, claudecode.Transcript{}, nil
+		s = &session{harness: e.Harness, id: e.ID, pid: e.PID, started: e.Started}
+		d.sessions[key] = s
 	}
 	statusChanged := s.status != e.Status
 	// the name is cleaned as the hub cleans it, so this laptop, the hub and every message use the same one
-	s.name, s.cwd, s.sock, s.app, s.cc = protocol.Clean(e.Name, false), e.Cwd, e.Socket, claudecode.AppOf(e.Entry), e.Version
-	if sock := d.sockets[e.SessionID]; sock != "" { // what Claude Code documents wins over its session file
+	s.name, s.cwd, s.sock, s.app, s.version = protocol.Clean(e.Name, false), e.Cwd, e.Socket, e.App, e.Version
+	if sock := d.sockets[key]; sock != "" { // what the harness documents wins over its registry
 		s.sock = sock
 	}
 	if statusChanged {
-		s.status, s.since = e.Status, e.StatusAt
-		if e.Status != protocol.StatusWaiting {
-			s.needs = ""
-		}
-		if e.Status == protocol.StatusBusy && len(d.held[s.name]) > 0 { // working again: the notes it was spared while idle
-			held, name := d.unholdLocked(s.name), s.name
-			go func() {
-				for _, m := range held {
-					d.handOver(m, name)
-				}
-			}()
-		}
+		d.statusLocked(s, e.Status, e.Since)
 	}
-	if s.tr.Path == "" {
+	if s.transcript == "" {
 		d.attachLocked(s)
 	}
 	if fresh || statusChanged {
@@ -245,33 +236,51 @@ func (d *Daemon) onRegistry(path string) {
 	d.changed()
 }
 
-func (d *Daemon) removeLocked(pid int) {
-	if s := d.sessions[pid]; s != nil {
+// statusLocked records a session's new status. One that works again gets the notes it was spared while idle.
+func (d *Daemon) statusLocked(s *session, status string, since int64) {
+	s.status, s.since = status, since
+	if status != protocol.StatusWaiting {
+		s.needs = ""
+	}
+	if status == protocol.StatusBusy && len(d.held[s.name]) > 0 {
+		held, name := d.unholdLocked(s.name), s.name
+		go func() {
+			for _, m := range held {
+				d.handOver(m, name)
+			}
+		}()
+	}
+}
+
+func (d *Daemon) removeLocked(key string) {
+	if s := d.sessions[key]; s != nil {
 		d.unwatchLocked(s)
-		delete(d.hints, s.id)
-		delete(d.sessions, pid)
+		delete(d.hints, key)
+		delete(d.sessions, key)
 		d.changed()
 	}
 }
 
+// attachLocked finds the session's transcript, for a harness whose transcripts murmur reads.
 func (d *Daemon) attachLocked(s *session) {
-	p := d.hints[s.id]
-	if p == "" {
-		p = claudecode.FindTranscript(s.id)
+	r, ok := setup.Harness(s.harness).(harness.Reader)
+	if !ok {
+		return
 	}
-	if _, err := os.Stat(p); p == "" || err != nil {
-		return // Claude Code writes it with the first message, after the start hook named it; the tick tries again
+	path, read := r.Open(harness.Session{Harness: s.harness, ID: s.id, Transcript: d.hints[s.key()]})
+	if path == "" {
+		return // the harness writes it with the first message, after the start hook named it; the tick tries again
 	}
-	s.tr = claudecode.Transcript{Path: p}
-	d.watched[p] = s.pid
-	_ = d.w.Add(p)
-	s.tr.Read()
+	s.transcript, s.read = path, read
+	d.watched[path] = s.key()
+	_ = d.w.Add(path)
+	s.read(&s.act)
 }
 
 func (d *Daemon) unwatchLocked(s *session) {
-	if s.tr.Path != "" {
-		_ = d.w.Remove(s.tr.Path)
-		delete(d.watched, s.tr.Path)
+	if s.transcript != "" {
+		_ = d.w.Remove(s.transcript)
+		delete(d.watched, s.transcript)
 	}
 }
 
@@ -279,7 +288,7 @@ func (d *Daemon) onTranscript(path string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	s := d.sessions[d.watched[path]]
-	if s != nil && s.tr.Path == path && s.tr.Read() {
+	if s != nil && s.transcript == path && s.read(&s.act) {
 		d.changed()
 	}
 }
@@ -289,7 +298,7 @@ func (d *Daemon) gitLocked(s *session) {
 		return
 	}
 	s.gitBusy = true
-	cwd, dirs := s.cwd, slices.Clone(s.tr.Dirs)
+	cwd, dirs := s.cwd, slices.Clone(s.act.Dirs)
 	go func() {
 		r := gitscan.Read(cwd)
 		also := d.alsoOf(dirs, r.Top, r.Repo)
@@ -337,17 +346,18 @@ func (d *Daemon) alsoOf(dirs []string, top, repo string) []string {
 }
 
 func (d *Daemon) watchLoop() {
-	reg := filepath.Clean(claudecode.RegistryDir())
+	dirs := map[string]string{} // a folder a harness lists its sessions in -> the harness
+	for name, l := range listers() {
+		dirs[filepath.Clean(l.Watch())] = name
+	}
 	for {
 		select {
 		case ev, ok := <-d.w.Events:
 			if !ok {
 				return
 			}
-			if filepath.Dir(ev.Name) == reg {
-				if strings.HasSuffix(ev.Name, ".json") {
-					d.onRegistry(ev.Name)
-				}
+			if name, ok := dirs[filepath.Dir(ev.Name)]; ok {
+				d.scan(name, listers()[name])
 			} else if ev.Has(fsnotify.Write) {
 				d.onTranscript(ev.Name)
 			}
@@ -366,7 +376,7 @@ func (d *Daemon) tickLoop() {
 	for range tick.C {
 		n++
 		if n%12 == 0 {
-			d.scanRegistry() // safety net for a missed file event
+			d.scanAll() // safety net for a missed file event
 			go d.maybeUpdate()
 			go d.maybeReport()
 		}
@@ -380,12 +390,12 @@ func (d *Daemon) tickLoop() {
 			}
 		}
 		d.mu.Lock()
-		for pid, s := range d.sessions {
-			if !claudecode.Alive(pid) {
-				d.removeLocked(pid)
+		for k, s := range d.sessions {
+			if !harness.Alive(s.pid) {
+				d.removeLocked(k)
 				continue
 			}
-			if s.tr.Path == "" {
+			if s.transcript == "" {
 				d.attachLocked(s)
 			}
 			if (s.status == protocol.StatusBusy || s.status == protocol.StatusWaiting) && time.Since(s.gitAt) > gitEvery {
@@ -395,7 +405,7 @@ func (d *Daemon) tickLoop() {
 		if len(d.sessions) > 0 || len(d.subs) > 0 {
 			d.lastUse = time.Now()
 		} else if time.Since(d.lastUse) > idleExit {
-			log.Print("no Claude Code session or console for a while: exiting")
+			log.Print("no agent session or console for a while: exiting")
 			d.shutdown()
 		}
 		d.mu.Unlock()
@@ -413,9 +423,20 @@ func (d *Daemon) localAgentsLocked(withFiles bool) []protocol.Agent {
 	return out
 }
 
+// byIDLocked finds a session by its id, in any harness.
 func (d *Daemon) byIDLocked(id string) *session {
 	for _, s := range d.sessions {
 		if s.id == id {
+			return s
+		}
+	}
+	return nil
+}
+
+// byPIDLocked finds a session that the harness process pid runs.
+func (d *Daemon) byPIDLocked(pid int) *session {
+	for _, s := range d.sessions {
+		if s.pid == pid {
 			return s
 		}
 	}
@@ -1001,11 +1022,11 @@ func (d *Daemon) answer(op, id string) error {
 	return nil
 }
 
-// handOver gives a message to its agent's Claude Code session once, even when a copy comes again after the agent
-// started a new conversation (an outbox sends a message again when its answer was lost). Murmur's notices go to
-// each conversation once: one that comes again under the same id doesn't prompt a conversation that has it, while
-// one started since gets it. Only a delivery the session took counts: one that failed is tried again when the
-// message comes back, and an echo meant for the console never counts.
+// handOver gives a message to its agent's session once, even when a copy comes again after the agent started a new
+// conversation (an outbox sends a message again when its answer was lost). Murmur's notices go to each conversation
+// once: one that comes again under the same id doesn't prompt a conversation that has it, while one started since
+// gets it. Only a delivery the session took counts: one that failed is tried again when the message comes back, and
+// an echo meant for the console never counts.
 func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 	d.mu.Lock()
 	var target *session
@@ -1014,15 +1035,15 @@ func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 			target = s
 		}
 	}
-	if target == nil || target.sock == "" {
+	var p harness.Pusher
+	if target != nil {
+		p, _ = setup.Harness(target.harness).(harness.Pusher)
+	}
+	if target == nil || p == nil || target.sock == "" {
 		d.mu.Unlock()
 		return false, m.To + " is no longer running"
 	}
-	if target.cc != "" && claudecode.TooOld(target.cc) {
-		d.mu.Unlock()
-		return false, m.To + " runs Claude Code " + target.cc + ", which can't take messages from other sessions; 2.1.224 or later can"
-	}
-	sock, key := target.sock, m.ID
+	to, key := target.listed(), m.ID
 	if m.From == protocol.System {
 		key += "/" + target.id
 	}
@@ -1038,7 +1059,7 @@ func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 		return true, ""
 	}
 	d.mu.Unlock()
-	if err := claudecode.Inject(sock, protocol.Prompt(m)); err != nil {
+	if err := p.Push(to, protocol.Prompt(m)); err != nil {
 		return false, "could not reach " + m.To + ": " + err.Error()
 	}
 	d.mu.Lock()

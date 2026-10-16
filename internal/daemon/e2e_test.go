@@ -23,9 +23,10 @@ import (
 	"time"
 
 	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/gitscan"
+	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/internal/harness/claude"
 	"github.com/EledoneAi/murmur/internal/hub"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
@@ -108,7 +109,7 @@ func (tm *team) laptop(handle string, sessions ...*session) *Daemon {
 	d := newDaemon(handle)
 	for i, s := range sessions {
 		s.pid = 1000*len(handle) + i + 1
-		d.sessions[s.pid] = s
+		d.add(s)
 	}
 	go d.publishLoop()
 	go func() {
@@ -205,7 +206,8 @@ func agentSession(name, id string, in *inbox, files ...string) *session {
 func (d *Daemon) edit(id, path string) string {
 	data, _ := json.Marshal(map[string]any{"session_id": id, "cwd": filepath.Dir(path), "hook_event_name": "PreToolUse", "tool_name": "Edit",
 		"tool_input": map[string]string{"file_path": path, "old_string": "a", "new_string": "b"}})
-	return d.onHook(ipc.Request{Op: "hook", Event: "edit", Data: data})
+	ev, _ := claude.Claude{}.Parse("edit", data)
+	return d.onHook(ev)
 }
 
 // Two people change the same file: their consoles show the overlap, as a pair and as the line the console showed
@@ -257,9 +259,8 @@ func TestE2EEditCheck(t *testing.T) {
 	}
 	tm.pause() // no hub: the edit goes ahead
 	tm.until("alice offline", func() bool { alice.mu.Lock(); defer alice.mu.Unlock(); return alice.out == nil })
-	pid := alice.pidOfAgent("a1")
 	alice.mu.Lock()
-	alice.sessions[pid].warned = nil // as in a new conversation
+	alice.byPIDLocked(alice.pidOfAgentLocked("a1")).warned = nil // as in a new conversation
 	alice.mu.Unlock()
 	if why := alice.edit("conv-a", "/work/a1/api/routes.go"); why != "" {
 		t.Fatalf("without a hub: %q", why)
@@ -284,7 +285,7 @@ func TestE2EBrief(t *testing.T) {
 	tm.laptop("bob", b1)
 	tm.until("alice sees bob/b1", func() bool { return strings.Contains(whoOf(alice), "bob/b1") })
 	tm.until("alice read a1's checkout", func() bool { alice.mu.Lock(); defer alice.mu.Unlock(); return !a1.gitAt.IsZero() })
-	got := alice.brief(claudecode.HookInput{SessionID: "conv-new", Cwd: "/elsewhere"})
+	got := alice.brief(harness.Event{Kind: harness.Start, Harness: claude.Name, SessionID: "conv-new", Cwd: "/elsewhere"})
 	for _, want := range []string{"Other agents working in Org/App:\n- \"bob/b1\", working, on branch \"feat/x\"\n",
 		"first: \"bob/b1 (feat/x)\" is also changing \"api/routes.go\".\n", "agreements, which murmur gives every agent:\nKeep pull requests small."} {
 		if !strings.Contains(got, want) {
@@ -347,7 +348,7 @@ func TestE2EMessageBetweenAgents(t *testing.T) {
 func TestE2EAgentDetailsReachTheTeam(t *testing.T) {
 	tm := newTeam(t, "alice", "bob")
 	a1 := agentSession("a1", "conv-a", newInbox(t))
-	a1.tr.Kinds, a1.tr.Loop, a1.tr.Context = "rrexm", true, 37
+	a1.act.Kinds, a1.act.Loop, a1.act.Context = "rrexm", true, 37
 	a1.st = gitscan.State{Added: 120, Deleted: 30, Changed: 4, Base: "feat/auth", Detached: "9ac2c89", Op: "rebasing 3/7", Dir: "services/api"}
 	a1.also = []string{"Org/Web"}
 	tm.laptop("alice", a1)
@@ -382,9 +383,13 @@ func whoOf(d *Daemon) string {
 func (d *Daemon) pidOfAgent(name string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	for pid, s := range d.sessions {
+	return d.pidOfAgentLocked(name)
+}
+
+func (d *Daemon) pidOfAgentLocked(name string) int {
+	for _, s := range d.sessions {
 		if s.name == name {
-			return pid
+			return s.pid
 		}
 	}
 	return 0

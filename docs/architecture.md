@@ -25,7 +25,8 @@ Murmur links a team's Claude Code agents. Each person runs a small program on th
 | `internal/protocol` | What crosses the WebSocket: frames, typed constants, the protocol version, addresses, `Clean` |
 | `internal/release` | Versions (semver), the release key and signature check, and `Repo`, where hubs look for new releases |
 | `internal/transport` | The hub's side of one WebSocket connection: read loop, writer, pings. The daemon keeps its own connection |
-| `internal/claudecode` | Everything murmur reads or writes in Claude Code: session registry, transcripts, inbox socket, settings.json, hook payloads |
+| `internal/harness` | What murmur needs from an AI coding tool (a harness): the `Harness` interface, with the optional `Lister`, `Pusher` and `Reader`; hook events; a session's activity; the order-preserving editor for settings files |
+| `internal/harness/claude` | Everything murmur reads or writes in Claude Code: session registry, transcripts, inbox socket, settings.json, hook payloads |
 | `internal/gitscan` | Repo, branch and changed files of a checkout, the size of its change and where it stands (base branch, rebase or merge, folder) |
 | `internal/ipc` | The local socket between the daemon and its clients: requests, replies, snapshots, and a client |
 | `internal/daemon` | The laptop process: sessions, hub link, messages, mutes, outbox, history, ipc server |

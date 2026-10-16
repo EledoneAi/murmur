@@ -98,7 +98,7 @@ demo: ## Open the console with made-up teammates and agents, no hub needed
 	$(GO) run ./cmd/murmur demo
 
 compat: ## Check murmur against the Claude Code installed on this machine
-	MURMUR_COMPAT=1 $(GO) test ./internal/claudecode/ -run Compat -count=1 -v
+	MURMUR_COMPAT=1 $(GO) test ./internal/harness/claude/ -run Compat -count=1 -v
 
 image: ## Build the hub image from source, tagged IMAGE (default murmur-hub:dev)
 	docker build -f deploy/docker/Dockerfile --build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
