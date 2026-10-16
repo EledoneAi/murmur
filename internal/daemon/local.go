@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -76,7 +77,7 @@ func (d *Daemon) serve(c net.Conn) {
 		d.mu.Unlock()
 		_ = enc.Encode(snap)
 	case "sub":
-		d.subscribe(c, enc)
+		d.subscribe(c)
 	case "status":
 		d.mu.Lock()
 		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d agent sessions", len(d.sessions)), Version: release.Version,
@@ -194,7 +195,10 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 	return "", ""
 }
 
-func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
+// subscribe sends a console the state whenever it changes. A change that leaves the snapshot as the console has it
+// sends nothing: the hub's next roster mostly echoes this laptop's own change, and the console would decode and draw
+// it again for nothing.
+func (d *Daemon) subscribe(c net.Conn) {
 	ch := make(chan struct{}, 1)
 	ch <- struct{}{}
 	d.mu.Lock()
@@ -211,6 +215,7 @@ func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
 		_, _ = io.Copy(io.Discard, c)
 		close(closed)
 	}()
+	var last []byte
 	for {
 		select {
 		case <-closed:
@@ -219,8 +224,13 @@ func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
 			d.mu.Lock()
 			snap := d.snapshotLocked()
 			d.mu.Unlock()
+			b, err := json.Marshal(snap)
+			if err != nil || bytes.Equal(b, last) {
+				continue
+			}
+			last = b
 			_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if enc.Encode(snap) != nil {
+			if _, err := c.Write(append(b, '\n')); err != nil {
 				return
 			}
 		}
