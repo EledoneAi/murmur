@@ -143,7 +143,7 @@ func TestOpOf(t *testing.T) {
 }
 
 // newRepo makes an empty git repo and returns it with a function that runs git in it.
-func newRepo(t *testing.T) (string, func(args ...string) string) {
+func newRepo(t testing.TB) (string, func(args ...string) string) {
 	t.Helper()
 	dir := t.TempDir()
 	git := func(args ...string) string {
@@ -159,7 +159,7 @@ func newRepo(t *testing.T) (string, func(args ...string) string) {
 	return dir, git
 }
 
-func write(t *testing.T, dir string, files map[string]string) {
+func write(t testing.TB, dir string, files map[string]string) {
 	t.Helper()
 	for p, c := range files {
 		_ = os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o755)
