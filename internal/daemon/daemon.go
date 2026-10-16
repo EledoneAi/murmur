@@ -54,8 +54,8 @@ type Daemon struct {
 	mu         sync.Mutex
 	sessions   map[string]*session          // by harness.Key
 	hints      map[string]string            // session key -> transcript path, from its start hook
-	sockets    map[string]string            // session key -> where murmur pushes messages to it, from its start hook
-	terms      map[string]map[string]string // session key -> where it runs, from its start hook's environment
+	sockets    map[string]string            // procKey -> where murmur pushes messages to the session, from its start hook
+	terms      map[string]map[string]string // procKey -> where the session runs, from its start hook's environment
 	watched    map[string]string            // transcript path -> session key
 	people     []protocol.Person
 	pairs      []protocol.Overlap // this person's agents' overlaps, from the roster
@@ -89,6 +89,9 @@ type Daemon struct {
 
 	// notify shows a desktop notification. Tests leave it nil, which shows none.
 	notify func(title, text string)
+	// notices are what senders hear when a session closes before it read their messages, sent once the daemon runs
+	notices []ipc.Request
+	running bool // past the start: notices go out as they come
 	// reapply sets the laptop's harnesses up again after an update, once the daemon has reached the hub: an update
 	// that never gets there is rolled back, and the older version must find the setup it knows. Tests leave it nil.
 	reapply   func()
@@ -127,6 +130,10 @@ func Run() error {
 	d := newDaemon(cfg.Handle)
 	d.me.Name, d.ln, d.team.Agreements, d.notify, d.reapply, d.lock = cfg.Name, ln, cfg.Agreements, desktop, setup.Reapply, lock
 	d.loadHistory()
+	d.mu.Lock()
+	d.running = true
+	d.mu.Unlock()
+	go d.sendNotices()
 	if d.w, err = fsnotify.NewWatcher(); err != nil {
 		return err
 	}
@@ -200,27 +207,36 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 	list := l.Sessions()
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	live, writing, byKey := map[string]bool{}, map[int]bool{}, map[string][]harness.Session{}
+	live, writing := map[string]bool{}, map[int]bool{}
+	known := map[string]string{} // procKey -> key, of the sessions this harness already has
+	for k, s := range d.sessions {
+		if s.harness == name {
+			known[procKey(s.harness, s.id, s.pid)] = k
+		}
+	}
+	var listed []harness.Session
 	for _, e := range list {
 		if e.ID == "" {
-			writing[e.PID] = true // half-written: the next event reads it again
+			writing[e.PID] = true // half-written: what the daemon has for it stays, and the next event reads it again
 			continue
 		}
-		k := harness.Key(e.Harness, e.ID)
-		byKey[k] = append(byKey[k], e)
+		listed = append(listed, e)
 	}
-	for k, es := range byKey {
-		// the same conversation open in two processes (claude --resume while it runs) shows as two agents, each kept
-		// under its own key so neither replaces the other on every scan
-		slices.SortFunc(es, func(a, b harness.Session) int { return a.PID - b.PID })
-		for i, e := range es {
-			key := k
-			if i > 0 {
+	slices.SortFunc(listed, func(a, b harness.Session) int { return a.PID - b.PID })
+	for _, e := range listed {
+		// the same conversation open in two processes (claude --resume while it runs) shows as two agents. Each
+		// keeps the key it has, so neither replaces the other, and a new one takes the plain key only when no
+		// running process holds it
+		key, ok := known[procKey(e.Harness, e.ID, e.PID)]
+		if !ok {
+			key = harness.Key(e.Harness, e.ID)
+			if s := d.sessions[key]; live[key] || (s != nil && s.pid != e.PID && (writing[s.pid] || slices.ContainsFunc(listed,
+				func(o harness.Session) bool { return o.PID == s.pid && o.ID == e.ID }))) {
 				key += "@" + strconv.Itoa(e.PID)
 			}
-			live[key] = true
-			d.listedLocked(e, key)
 		}
+		live[key] = true
+		d.listedLocked(e, key)
 	}
 	for k, s := range d.sessions {
 		if s.harness == name && !live[k] && !writing[s.pid] {
@@ -228,6 +244,9 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 		}
 	}
 }
+
+// procKey names a session in one process: two processes may hold the same conversation.
+func procKey(harness, id string, pid int) string { return harness + "/" + id + "@" + strconv.Itoa(pid) }
 
 // listedLocked takes in a session as its harness lists it, under key.
 func (d *Daemon) listedLocked(e harness.Session, key string) {
@@ -246,7 +265,7 @@ func (d *Daemon) listedLocked(e harness.Session, key string) {
 	statusChanged := s.status != e.Status
 	// the name is cleaned as the hub cleans it, so this laptop, the hub and every message use the same one
 	s.name, s.cwd, s.sock, s.app, s.version = protocol.Clean(e.Name, false), e.Cwd, e.Socket, e.App, e.Version
-	if sock := d.sockets[key]; sock != "" { // what the harness documents wins over its registry
+	if sock := d.sockets[procKey(e.Harness, e.ID, e.PID)]; sock != "" { // what the harness documents wins over its registry
 		s.sock = sock
 	}
 	if statusChanged {
@@ -1196,7 +1215,7 @@ func (d *Daemon) maybeUpdate() {
 		policy = cfg.Updates
 	}
 	ok := d.available != "" && (policy == "auto" || (d.forced && cfg.Updates != "off")) &&
-		time.Since(d.updating) > time.Hour && !update.Skipped(d.available) && update.Managed(exe) == ""
+		time.Since(d.updating) > time.Hour && !config.UpdateSkipped(d.available) && update.Managed(exe) == ""
 	for _, s := range d.sessions {
 		ok = ok && s.status != protocol.StatusBusy
 	}

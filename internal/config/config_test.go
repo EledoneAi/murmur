@@ -3,7 +3,25 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
+
+// A version that failed is skipped, and named for status, for an hour.
+func TestUpdateSkipped(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	if UpdateSkipped("1.3.0") || FailedUpdate() != "" {
+		t.Fatal("skipped with no failure")
+	}
+	SkipUpdate("1.3.0")
+	if !UpdateSkipped("1.3.0") || UpdateSkipped("1.4.0") || UpdateSkipped("") || FailedUpdate() != "1.3.0" {
+		t.Fatal("a failure an instant ago")
+	}
+	old := time.Now().Add(-2 * skipFor)
+	_ = os.Chtimes(updateSkipped(), old, old)
+	if UpdateSkipped("1.3.0") || FailedUpdate() != "" {
+		t.Fatal("a failure two hours ago")
+	}
+}
 
 // The daemon finds the coding tools' folders as join saw them, whatever environment the process that started it had.
 func TestUseDirs(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 type Config struct {
@@ -89,6 +90,28 @@ func private(dir string) bool {
 	sys, ok := st.Sys().(*syscall.Stat_t)
 	return ok && int(sys.Uid) == os.Getuid()
 }
+
+// updateSkipped names a version that failed to update on this laptop: the daemon doesn't try it again for an hour,
+// and a newer binary doesn't replace the daemon that came back from it.
+func updateSkipped() string { return filepath.Join(Dir(), "update-skipped") }
+
+const skipFor = time.Hour
+
+// SkipUpdate records that version v failed on this laptop.
+func SkipUpdate(v string) { _ = os.WriteFile(updateSkipped(), []byte(v), 0o600) }
+
+// FailedUpdate names a version that failed on this laptop in the last hour, for status and the console, or "".
+func FailedUpdate() string {
+	st, err := os.Stat(updateSkipped())
+	if err != nil || time.Since(st.ModTime()) > skipFor {
+		return ""
+	}
+	b, _ := os.ReadFile(updateSkipped())
+	return string(b)
+}
+
+// UpdateSkipped says whether version v failed on this laptop lately.
+func UpdateSkipped(v string) bool { return v != "" && FailedUpdate() == v }
 
 // ErrNoHub is returned when this laptop doesn't know its team's hub yet.
 var ErrNoHub = errors.New("not in a team yet: run murmur join with your team's hub, such as murmur join murmur.example.com")

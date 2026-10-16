@@ -125,7 +125,7 @@ func (d *Daemon) loadHistory() {
 		d.history = d.history[len(d.history)-keepMsgs:]
 	}
 	if d.sessions != nil {
-		d.restoreLocked(hooked)
+		d.restoreLocked(hooked) // before the history is compacted, which keeps the sessions it knows
 	}
 	d.pruneLocked()
 	if st, err := os.Stat(path); err == nil && st.Size() > historyMax { // compact
@@ -171,6 +171,13 @@ func (d *Daemon) loadHistory() {
 		_ = os.Rename(path+".tmp", path)
 	}
 	d.hist, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if d.sessions != nil { // what waited for a session that is gone leaves the queue in the history, once
+		for key := range d.queued {
+			if d.sessions[key] == nil {
+				d.unreadLocked(key)
+			}
+		}
+	}
 }
 
 // pruneLocked keeps what the daemon remembers about messages to those the history keeps: which it has seen, which

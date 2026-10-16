@@ -51,6 +51,7 @@ type Request struct {
 	Text    string         `json:"text,omitempty"`
 	ID      string         `json:"id,omitempty"`
 	IDs     []string       `json:"ids,omitempty"`
+	Version string         `json:"version,omitempty"` // on stop: the version of the daemon meant, which refuses if it isn't
 }
 
 type Reply struct {
@@ -71,9 +72,14 @@ func Dial() (net.Conn, error) { return net.DialTimeout("unix", config.SockPath()
 // it aside to murmur.prev, os.Executable names the old version, which must not start again.
 var self = config.Exe()
 
+// replaced says this process already replaced an older daemon once: after an update that rolled back, the binary on
+// disk is the older one again, and replacing its daemon again would only start it again.
+var replaced bool
+
 // EnsureDaemon starts the background process unless it already runs. It returns once the daemon answers. A daemon
 // older than this binary, still running after an upgrade the daemon didn't make itself (Homebrew's), is stopped,
-// and this version's starts and sets the laptop up again.
+// and this version's starts and sets the laptop up again: once per process, and never for a version that failed to
+// update on this laptop lately.
 func EnsureDaemon() error {
 	var r Reply
 	err := CallRunning(Request{Op: "status"}, &r, time.Second)
@@ -83,10 +89,13 @@ func EnsureDaemon() error {
 			c.Close()
 			return nil
 		}
-	case release.Dev() || r.Version == "" || !release.Older(r.Version, release.Version):
+	case release.Dev() || r.Version == "" || !release.Older(r.Version, release.Version) || replaced ||
+		config.UpdateSkipped(release.Version):
 		return nil
 	default:
-		_ = CallRunning(Request{Op: "stop"}, &Reply{}, 2*time.Second)
+		replaced = true
+		// the stop names the version seen: a daemon another process started meanwhile stays
+		_ = CallRunning(Request{Op: "stop", Version: r.Version}, &Reply{}, 2*time.Second)
 		for range 100 { // until it has let go of its socket
 			c, err := Dial()
 			if err != nil {

@@ -141,8 +141,7 @@ func (s *session) running() bool {
 	return harness.Alive(s.pid) && (s.started == "" || harness.StartTime(s.pid) == s.started)
 }
 
-// restoreLocked takes back the sessions the history learned from hooks whose processes still run. What waited for a
-// session that is gone, its senders hear of.
+// restoreLocked takes back the sessions the history learned from hooks whose processes still run.
 func (d *Daemon) restoreLocked(sessions map[string]hookedSession) {
 	for key, h := range sessions {
 		s := &session{harness: h.Harness, id: h.ID, pid: h.PID, started: h.Started, name: h.Name, cwd: h.Cwd, app: h.Harness,
@@ -152,11 +151,6 @@ func (d *Daemon) restoreLocked(sessions map[string]hookedSession) {
 		}
 		d.sessions[key] = s
 		d.gitLocked(s)
-	}
-	for key := range d.queued {
-		if d.sessions[key] == nil {
-			d.unreadLocked(key)
-		}
 	}
 }
 
@@ -218,8 +212,9 @@ func (d *Daemon) settle(token string, printed bool) {
 		return
 	}
 	delete(d.inflight, token)
-	if !printed {
+	if !printed { // back in the order they came, among those queued or printed since
 		d.queued[f.key] = append(f.msgs, d.queued[f.key]...)
+		slices.SortStableFunc(d.queued[f.key], func(a, b heldMsg) int { return a.At.Compare(b.At) })
 		if d.sessions[f.key] == nil { // it ended meanwhile
 			d.unreadLocked(f.key)
 		}
@@ -230,14 +225,29 @@ func (d *Daemon) settle(token string, printed bool) {
 	}
 }
 
-// unreadLocked drops what waits for a session that is gone, and tells each sender their message wasn't read.
+// unreadLocked drops what waits for a session that is gone, for good, and tells each sender their message wasn't
+// read: once the daemon runs, so a start, which may find several, is over first.
 func (d *Daemon) unreadLocked(key string) {
 	for _, h := range d.queued[key] {
 		d.appendHistory(histLine{Took: &took{key, h.Msg.ID}})
 		if m := h.Msg; m.From != protocol.System {
 			first, _, _ := strings.Cut(strings.TrimSpace(m.Text), "\n")
-			go d.send(ipc.Request{To: m.From, Text: fmt.Sprintf("%s closed before it read your message (%q).", m.To, protocol.Cut(first, 80))})
+			d.notices = append(d.notices, ipc.Request{To: m.From, Text: fmt.Sprintf("%s closed before it read your message (%q).", m.To, protocol.Cut(first, 80))})
 		}
 	}
 	delete(d.queued, key)
+	if d.running && len(d.notices) > 0 {
+		go d.sendNotices()
+	}
+}
+
+// sendNotices sends the notices waiting, as this person.
+func (d *Daemon) sendNotices() {
+	d.mu.Lock()
+	notices := d.notices
+	d.notices = nil
+	d.mu.Unlock()
+	for _, n := range notices {
+		d.send(n)
+	}
 }

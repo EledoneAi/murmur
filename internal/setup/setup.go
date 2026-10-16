@@ -528,8 +528,8 @@ func hookEvent(h harness.Harness, event string, data []byte) (harness.Event, boo
 	if err != nil || ev.Kind == "" || ev.SessionID == "" {
 		return ev, false
 	}
-	if _, listed := h.(harness.Lister); !listed && ev.PID == 0 {
-		ev.PID = harness.Process(os.Getppid()) // how the daemon tells when the session is gone
+	if ev.PID == 0 { // how the daemon tells when the session is gone, and which process's session it is
+		ev.PID = harness.Process(os.Getppid())
 	}
 	if ev.Kind == harness.Start {
 		for _, k := range terminalVars {

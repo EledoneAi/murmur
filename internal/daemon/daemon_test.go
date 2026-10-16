@@ -655,7 +655,7 @@ func TestDocumentedInboxWins(t *testing.T) {
 		return &Daemon{sessions: map[string]*session{}, hints: map[string]string{}, sockets: map[string]string{}, terms: map[string]map[string]string{},
 			watched: map[string]string{}, kick: make(chan struct{}, 1)}
 	}
-	hook := harness.Event{Kind: harness.Start, Harness: claude.Name, SessionID: "s1", Socket: "/documented.sock"}
+	hook := harness.Event{Kind: harness.Start, Harness: claude.Name, SessionID: "s1", PID: pid, Socket: "/documented.sock"}
 
 	d := newDaemon() // the hook first, then the session file
 	d.onHook(hook)
@@ -859,7 +859,7 @@ func TestAgentDetails(t *testing.T) {
 func TestTerminal(t *testing.T) {
 	d := newDaemon("alice")
 	d.add(&session{id: "conv-a", name: "a1"})
-	d.terms["claude/conv-a"] = map[string]string{"TMUX_PANE": "%3"} // as its start hook said
+	d.terms[procKey("claude", "conv-a", 0)] = map[string]string{"TMUX_PANE": "%3"} // as its start hook said
 	ask := func(name string) ipc.Reply {
 		c, them := net.Pipe()
 		defer them.Close()
@@ -938,10 +938,11 @@ func TestHookedSessions(t *testing.T) {
 	// an MCP server started by that process speaks for its session at work
 	hook(harness.Prompt, "t2", nil)
 	d.mu.Lock()
-	sender := d.senderLocked(ipc.Request{Harness: "codex", PID: pid})
+	sender := d.senderLocked(ipc.Request{Harness: "codex", PID: pid, Session: "t2"})
+	unnamed := d.senderLocked(ipc.Request{Harness: "codex", PID: pid}) // two sessions there, and none named
 	d.mu.Unlock()
-	if sender == nil || sender.name != "codex-2" {
-		t.Fatalf("sender: %+v", sender)
+	if sender == nil || sender.name != "codex-2" || unnamed != nil {
+		t.Fatalf("sender: %+v, unnamed %+v", sender, unnamed)
 	}
 
 	d.handOver(protocol.Msg{ID: "m4", From: "bob/b1", To: "alice/codex-1", Text: "after the restart"}, "codex-1")
@@ -967,6 +968,7 @@ func TestHookDelivery(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())
 	d := newDaemon("alice")
 	d.loadHistory()
+	d.running = true
 	defer d.hist.Close()
 	ev := func(kind string, carries bool) harness.Event {
 		return harness.Event{Kind: kind, Harness: "cursor", SessionID: "c1", PID: os.Getpid(), Cwd: t.TempDir(), Carries: carries}
@@ -1069,7 +1071,9 @@ func TestSender(t *testing.T) {
 		{ipc.Request{Harness: "claude", PID: 99}, ""},                  // not on murmur yet, as before
 		{ipc.Request{Harness: "claude", PID: 99, Session: "c1"}, "a1"}, // its process unknown, its session id known
 		{ipc.Request{Harness: "codex", PID: 20, Session: "t2"}, "codex-2"},
-		{ipc.Request{Harness: "codex", PID: 20}, "codex-1"}, // the one at work
+		{ipc.Request{Harness: "codex", PID: 20}, ""},                       // two sessions in that process, none named
+		{ipc.Request{Harness: "codex", PID: 20, Session: "nope"}, ""},      // the one named isn't there: not its neighbour
+		{ipc.Request{Harness: "codex", PID: 21, Session: "t1"}, "codex-1"}, // named, in another process
 		{ipc.Request{Harness: "cursor", PID: 77}, "cursor-1"},
 	} {
 		d.mu.Lock()
@@ -1133,5 +1137,110 @@ func TestReapplyOnceOnline(t *testing.T) {
 	case <-ran:
 		t.Fatal("set up again twice")
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// A session gone while the daemon was down, with a message waiting: its sender hears it once, however many times the
+// daemon starts again.
+func TestUnreadOnceAcrossRestarts(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	gone := 1<<22 + 12345 // a pid no process has
+	line := func(h histLine) string { b, _ := json.Marshal(h); return string(b) + "\n" }
+	history := line(histLine{Hooked: &hookedSession{Harness: "codex", ID: "t9", PID: gone, Name: "codex-1"}}) +
+		line(histLine{Queued: &heldMsg{Agent: "codex/t9", Msg: protocol.Msg{ID: "m1", From: "bob/b1", To: "alice/codex-1", Text: "hi"}, At: time.Now()}})
+	_ = os.WriteFile(filepath.Join(config.Dir(), "history.jsonl"), []byte(history), 0o600)
+	for start := range 3 {
+		d := newDaemon("alice")
+		d.state = "reconnecting"
+		d.loadHistory()
+		d.running = true
+		d.sendNotices()
+		d.mu.Lock()
+		n, queued := len(d.outbox), len(d.queued)
+		d.mu.Unlock()
+		d.hist.Close()
+		if n != 1 || queued != 0 {
+			t.Fatalf("start %d: %d notices waiting to go, %d queues", start+1, n, queued)
+		}
+	}
+}
+
+// When one of two processes holding the same conversation is caught writing its session file, both agents stay as
+// they are; each agent's start hook names its own inbox and terminal.
+func TestTwoProcessesKeepTheirOwn(t *testing.T) {
+	ccDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", ccDir)
+	_ = os.MkdirAll(filepath.Join(ccDir, "sessions"), 0o700)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill() }()
+	pids := []int{os.Getpid(), cmd.Process.Pid}
+	slices.Sort(pids)
+	file := func(pid int) string { return filepath.Join(ccDir, "sessions", fmt.Sprintf("%d.json", pid)) }
+	for _, pid := range pids {
+		entry := fmt.Sprintf(`{"pid":%d,"sessionId":"s1","cwd":%q,"name":"a%d","status":"busy","procStart":"%d"}`, pid, ccDir, pid, pid)
+		_ = os.WriteFile(file(pid), []byte(entry), 0o600)
+	}
+	d := newDaemon("alice")
+	d.scan(claude.Name, claude.Claude{})
+	for i, pid := range pids {
+		d.onHook(harness.Event{Kind: harness.Start, Harness: claude.Name, SessionID: "s1", PID: pid,
+			Socket: fmt.Sprintf("/inbox-%d.sock", i), Term: map[string]string{"TMUX_PANE": fmt.Sprintf("%%%d", i)}})
+	}
+	d.mu.Lock()
+	before := maps.Clone(d.sessions)
+	for _, s := range d.sessions {
+		if want := fmt.Sprintf("/inbox-%d.sock", slices.Index(pids, s.pid)); s.sock != want {
+			t.Errorf("%s (pid %d) has inbox %s, want %s", s.name, s.pid, s.sock, want)
+		}
+	}
+	d.mu.Unlock()
+	_ = os.WriteFile(file(pids[0]), []byte(`{"pid":`), 0o600) // caught mid-write
+	d.scan(claude.Name, claude.Claude{})
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for k, s := range before {
+		if d.sessions[k] != s {
+			t.Fatalf("%s was replaced while its file was being written", k)
+		}
+	}
+}
+
+// A message that goes back to the queue goes back in its place among the others.
+func TestRequeueInOrder(t *testing.T) {
+	d := newDaemon("alice")
+	d.add(&session{harness: "codex", id: "t1", pid: os.Getpid(), name: "codex-1", status: protocol.StatusBusy, hooked: true})
+	for i := range 3 {
+		d.handOver(protocol.Msg{ID: fmt.Sprintf("m%d", i), From: "bob/b1", To: "alice/codex-1", Text: strings.Repeat(fmt.Sprint(i), 5000)}, "codex-1")
+		time.Sleep(2 * time.Millisecond)
+	}
+	_, first := d.take("codex/t1")  // m0, alone: it is big
+	_, second := d.take("codex/t1") // m1
+	d.settle(second, true)
+	d.settle(first, false) // m0 back, before m2
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var ids []string
+	for _, h := range d.queued["codex/t1"] {
+		ids = append(ids, h.Msg.ID)
+	}
+	if strings.Join(ids, ",") != "m0,m2" {
+		t.Fatalf("queue %v", ids)
+	}
+}
+
+// A stop meant for a daemon of another version is refused: it was for one that has gone since.
+func TestStopNamesItsDaemon(t *testing.T) {
+	d := newDaemon("alice")
+	c, them := net.Pipe()
+	defer them.Close()
+	go d.serve(c)
+	var r ipc.Reply
+	_ = json.NewEncoder(them).Encode(ipc.Request{Op: "stop", Version: "0.0.1"})
+	_ = json.NewDecoder(them).Decode(&r)
+	if r.OK || r.Err == "" {
+		t.Fatalf("stopped by a stop meant for 0.0.1: %+v", r)
 	}
 }

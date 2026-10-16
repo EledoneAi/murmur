@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 	"github.com/EledoneAi/murmur/internal/setup"
-	"github.com/EledoneAi/murmur/internal/update"
 )
 
 // ---------------------------------------------------------------- local requests
@@ -81,7 +81,7 @@ func (d *Daemon) serve(c net.Conn) {
 		d.mu.Lock()
 		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d agent sessions", len(d.sessions)), Version: release.Version,
 			Update: d.available}
-		if v := update.Failed(); v != "" {
+		if v := config.FailedUpdate(); v != "" {
 			r.Text += "; the update to " + v + " failed and was undone (see daemon.log)"
 		} else if d.available != "" {
 			r.Text += "; " + d.available + " is available: murmur update"
@@ -110,9 +110,9 @@ func (d *Daemon) serve(c net.Conn) {
 	case "terminal": // where one of this laptop's agents runs, for the console to switch to it
 		d.mu.Lock()
 		var term map[string]string
-		for k, s := range d.sessions {
+		for _, s := range d.sessions {
 			if s.name == req.To {
-				term = d.terms[k]
+				term = d.terms[procKey(s.harness, s.id, s.pid)]
 			}
 		}
 		d.mu.Unlock()
@@ -123,6 +123,10 @@ func (d *Daemon) serve(c net.Conn) {
 		b, _ := json.Marshal(term)
 		_ = enc.Encode(ipc.Reply{OK: true, Text: string(b)})
 	case "stop":
+		if req.Version != "" && req.Version != release.Version { // meant for a daemon that has gone since
+			_ = enc.Encode(ipc.Reply{Err: "this daemon runs " + release.Version})
+			break
+		}
 		_ = enc.Encode(ipc.Reply{OK: true})
 		d.shutdown()
 	}
@@ -148,13 +152,16 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 		if len(d.terms) > 500 {
 			clear(d.terms)
 		}
+		pk := procKey(ev.Harness, ev.SessionID, ev.PID)
 		if ev.SessionID != "" && len(ev.Term) > 0 {
-			d.terms[key] = ev.Term
+			d.terms[pk] = ev.Term
 		}
 		if ev.SessionID != "" && ev.Socket != "" {
-			d.sockets[key] = ev.Socket
-			if s := d.sessions[key]; s != nil {
-				s.sock = ev.Socket
+			d.sockets[pk] = ev.Socket
+			for _, s := range d.sessions {
+				if procKey(s.harness, s.id, s.pid) == pk {
+					s.sock = ev.Socket
+				}
 			}
 		}
 		d.lastUse = time.Now()
@@ -341,10 +348,10 @@ func appWords(app string) string {
 	return " · in " + h.Title()
 }
 
-// senderLocked finds the session an MCP server speaks for: by the harness process that started it, and among its
-// sessions by the session id the harness gives it; else by that id alone. A process that runs several sessions sends
-// for the one at work, the most recent. A harness whose MCP servers run apart from its sessions (Cursor) sends for
-// its agent at work.
+// senderLocked finds the session an MCP server speaks for: the session its harness names, in the harness process
+// that started the server or elsewhere; else the one session that process runs. Codex runs every session in one
+// process, so a process with several sessions and no name for the one at hand is no answer. Only a harness whose MCP
+// servers run apart from its sessions (Cursor) sends for its agent at work.
 func (d *Daemon) senderLocked(req ipc.Request) *session {
 	var found []*session
 	for _, s := range d.sessions {
@@ -355,15 +362,20 @@ func (d *Daemon) senderLocked(req ipc.Request) *session {
 			found = append(found, s)
 		}
 	}
-	if len(found) == 0 && req.Session != "" {
+	if req.Session != "" {
 		if s := d.sessions[harness.Key(req.Harness, req.Session)]; s != nil {
 			return s
 		}
 		if s := d.byIDLocked(req.Session); s != nil {
 			return s
 		}
+		found = nil // the process runs other sessions than the one named
 	}
-	if a, ok := setup.Harness(req.Harness).(harness.Apart); ok && a.MCPApart() && len(found) == 0 {
+	if len(found) == 1 {
+		return found[0]
+	}
+	found = nil
+	if a, ok := setup.Harness(req.Harness).(harness.Apart); ok && a.MCPApart() {
 		for _, s := range d.sessions {
 			if s.harness == req.Harness && s.status == protocol.StatusBusy {
 				found = append(found, s)

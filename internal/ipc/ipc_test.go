@@ -21,7 +21,7 @@ func TestEnsureDaemonReplacesAnOlderOne(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 	t.Setenv("MURMUR_HOME", dir)
-	defer func(v string, s func(string) error) { release.Version, start = v, s }(release.Version, start)
+	defer func(v string, s func(string) error) { release.Version, start, replaced = v, s, false }(release.Version, start)
 	release.Version = "1.1.0"
 	started := 0
 	start = func(string) error { started++; return nil }
@@ -44,6 +44,9 @@ func TestEnsureDaemonReplacesAnOlderOne(t *testing.T) {
 				_ = json.NewEncoder(c).Encode(Reply{OK: true, Version: version})
 				c.Close()
 				if req.Op == "stop" {
+					if req.Version != version {
+						t.Errorf("a stop for %q reached a daemon of %s", req.Version, version)
+					}
 					ln.Close() // as a daemon lets go of its socket when it stops
 					stopped <- true
 					return
@@ -57,13 +60,31 @@ func TestEnsureDaemonReplacesAnOlderOne(t *testing.T) {
 		if err := EnsureDaemon(); err != nil || started != 0 || len(stopped) != 0 {
 			t.Fatalf("a daemon of %s: %v, started %d", v, err, started)
 		}
-		_ = CallRunning(Request{Op: "stop"}, &Reply{}, time.Second)
+		_ = CallRunning(Request{Op: "stop", Version: v}, &Reply{}, time.Second)
 		<-stopped
 	}
 	stopped := daemon("1.0.1")
-	if err := EnsureDaemon(); err != nil || started != 1 || len(stopped) != 1 {
-		t.Fatalf("a daemon of 1.0.1: %v, started %d, stopped %d", err, started, len(stopped))
+	if err := EnsureDaemon(); err != nil || started != 1 {
+		t.Fatalf("a daemon of 1.0.1: %v, started %d", err, started)
 	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the daemon of 1.0.1 was never stopped")
+	}
+	// an update that rolled back left 1.0.1 again: this process replaced one already, and leaves it be
+	stopped = daemon("1.0.1")
+	if err := EnsureDaemon(); err != nil || started != 1 || len(stopped) != 0 {
+		t.Fatalf("a second time: started %d, stopped %d", started, len(stopped))
+	}
+	// nor does another process, while this version counts as one that failed to update
+	replaced = false
+	config.SkipUpdate(release.Version)
+	if err := EnsureDaemon(); err != nil || started != 1 || len(stopped) != 0 {
+		t.Fatalf("after a failed update: started %d, stopped %d", started, len(stopped))
+	}
+	_ = CallRunning(Request{Op: "stop", Version: "1.0.1"}, &Reply{}, time.Second)
+	<-stopped
 }
 
 func TestSettledWaitsForTheHub(t *testing.T) {
