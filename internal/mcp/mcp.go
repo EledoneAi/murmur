@@ -143,6 +143,10 @@ func Serve(name string) error {
 	if h := setup.Harness(name); h != nil && h.SessionVar() != "" {
 		session = os.Getenv(h.SessionVar())
 	}
+	// A session's MCP server starts the daemon, as the session's start hook does: so a session whose hooks don't run
+	// (hooks an update rewrites, or Codex's before its person trusts them) still brings the daemon up, and the
+	// daemon sets the laptop up again after an update.
+	go func() { _ = ipc.EnsureDaemon() }()
 	for {
 		line, err := in.ReadBytes('\n')
 		if err != nil {

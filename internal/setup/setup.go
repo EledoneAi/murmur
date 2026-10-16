@@ -359,25 +359,41 @@ func Checks() (claudeCode string, checks []protocol.Check) {
 	return claudeCode, checks
 }
 
-// Reapply sets the connected harnesses up again once after an update, so their hooks and MCP servers are what this
-// version needs.
-func Reapply() {
-	if b, _ := os.ReadFile(setupMarker()); release.Version == "dev" || string(b) == release.Version || config.Load().Token == "" {
+// Reapply sets the connected harnesses up again, once, when the daemon starts on a version other than the one that
+// last set this laptop up: their hooks and MCP servers become what this version needs, as a fresh join writes them.
+// A harness counts as connected when its settings hold murmur's hooks, whichever version wrote them, so a laptop
+// that joined with an older version is set up again, and a harness its person disconnected stays as it is. It runs
+// only on a laptop that joined a hub, and a development build only where its guards let it (guardDev, harness.Guard).
+func Reapply() { reapply(config.Exe()) }
+
+func reapply(exe string) {
+	if b, _ := os.ReadFile(setupMarker()); string(b) == release.Version || config.Load().Token == "" || guardDev() != nil {
 		return
 	}
-	exe := config.Exe()
+	var again, failed []string
 	for _, h := range Harnesses {
 		if !h.Connected() {
 			continue
 		}
-		for _, c := range h.Connect(exe, nil) {
+		checks := h.Connect(exe, nil)
+		if len(checks) == 1 && checks[0].Name == harness.Skipped {
+			continue
+		}
+		again = append(again, h.Title())
+		for _, c := range checks {
 			if !c.OK {
-				log.Printf("setup for %s: %s %s: %s", release.Version, h.Title(), c.Name, c.Detail)
+				failed = append(failed, h.Title()+" "+strings.ToLower(c.Name)+": "+c.Detail)
 			}
 		}
 	}
+	if len(again) > 0 {
+		line := "set up again for " + release.Version + ": " + strings.Join(again, ", ")
+		if len(failed) > 0 {
+			line += "; " + strings.Join(failed, "; ")
+		}
+		log.Print(line)
+	}
 	_ = os.WriteFile(setupMarker(), []byte(release.Version), 0o600)
-	log.Printf("setup applied for %s", release.Version)
 }
 
 func Uninstall() error {

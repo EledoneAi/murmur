@@ -2,7 +2,9 @@ package setup
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -224,5 +226,172 @@ func TestCursorRunsClaudeHooks(t *testing.T) {
 	}
 	if out := hook(claude.Claude{}, "edit", strings.NewReader(input)); out != nil {
 		t.Fatalf("with them: %s", out)
+	}
+}
+
+// What murmur 1.0.1's join wrote in a settings.json that held the person's own (pre101), as its code writes it: hook
+// commands without the harness, which this version no longer runs. Its MCP server was registered with
+// `claude mcp add --scope user murmur -- <murmur> mcp`.
+const (
+	pre101 = `{
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [
+      "Bash(ls:*)"
+    ]
+  },
+  "model": "opus",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "other-tool start"
+          }
+        ]
+      }
+    ]
+  },
+  "theme": "auto"
+}
+`
+	joined101 = `{
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [
+      "Bash(ls:*)",
+      "mcp__murmur__who",
+      "mcp__murmur__send"
+    ]
+  },
+  "model": "opus",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "other-tool start"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "/opt/homebrew/bin/murmur hook start",
+            "timeout": 5,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/homebrew/bin/murmur hook edit",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit"
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "/opt/homebrew/bin/murmur hook notify",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  },
+  "theme": "auto"
+}
+`
+	mcp101 = "--scope user murmur -- /opt/homebrew/bin/murmur mcp\n"
+)
+
+// A laptop that joined with 1.0.1 and updates: the first daemon of this version sets Claude Code up as a fresh join
+// would, settings and MCP server alike, and logs it once; the next start on the same version changes nothing.
+func TestUpdateFrom101(t *testing.T) {
+	bin := t.TempDir()
+	// claude, as far as join uses it: the MCP server it registers is kept in mcp, and every call in calls
+	fake := `#!/bin/sh
+echo "$*" >> "$CLAUDE_CONFIG_DIR/calls"
+case "$1 $2" in
+"mcp add") shift 2; echo "$*" > "$CLAUDE_CONFIG_DIR/mcp" ;;
+"mcp remove") rm -f "$CLAUDE_CONFIG_DIR/mcp" ;;
+"mcp get") test -f "$CLAUDE_CONFIG_DIR/mcp" ;;
+esac
+`
+	_ = os.WriteFile(filepath.Join(bin, "claude"), []byte(fake), 0o755)
+	t.Setenv("PATH", bin+":/bin:/usr/bin")
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	defer func(v string) { release.Version = v }(release.Version)
+	const exe = "/opt/homebrew/bin/murmur"
+	read := func(dir, f string) string { b, _ := os.ReadFile(filepath.Join(dir, f)); return string(b) }
+
+	fresh := t.TempDir() // a fresh join of this version, on the person's own settings
+	_ = os.WriteFile(filepath.Join(fresh, "settings.json"), []byte(pre101), 0o644)
+	t.Setenv("CLAUDE_CONFIG_DIR", fresh)
+	for _, c := range (claude.Claude{}).Connect(exe, nil) {
+		if !c.OK {
+			t.Fatalf("fresh join: %+v", c)
+		}
+	}
+
+	old := t.TempDir() // the laptop as 1.0.1 left it
+	_ = os.WriteFile(filepath.Join(old, "settings.json"), []byte(joined101), 0o644)
+	_ = os.WriteFile(filepath.Join(old, "settings.json.before-murmur"), []byte(pre101), 0o600)
+	_ = os.WriteFile(filepath.Join(old, "mcp"), []byte(mcp101), 0o644)
+	t.Setenv("CLAUDE_CONFIG_DIR", old)
+	_ = config.Save(config.Config{Hub: "https://hub", Token: "t"})
+	_ = os.WriteFile(setupMarker(), []byte("1.0.1"), 0o600)
+	release.Version = "1.1.0"
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+
+	reapply(exe) // the daemon of 1.1.0 starts
+	for _, f := range []string{"settings.json", "settings.json.before-murmur", "mcp"} {
+		if got, want := read(old, f), read(fresh, f); got != want {
+			t.Errorf("%s after the update:\n%s\nafter a fresh join:\n%s", f, got, want)
+		}
+	}
+	if !strings.Contains(read(old, "mcp"), exe+" mcp claude") || strings.Count(logged.String(), "set up again for 1.1.0: Claude Code") != 1 {
+		t.Fatalf("mcp %q, log %q", read(old, "mcp"), logged.String())
+	}
+
+	settings, calls := read(old, "settings.json"), read(old, "calls")
+	logged.Reset()
+	reapply(exe) // started again, on the same version
+	if read(old, "settings.json") != settings || read(old, "calls") != calls || logged.Len() != 0 {
+		t.Fatalf("a second start changed something: calls %q, log %q", strings.TrimPrefix(read(old, "calls"), calls), logged.String())
+	}
+}
+
+// A development build's daemon leaves a harness alone unless the harness's folder variable says where it is.
+func TestUpdateDevBuild(t *testing.T) {
+	home := t.TempDir() // even if the guard failed, nothing outside the test would change
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("PATH", "")
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	defer func(v string) { release.Version = v }(release.Version)
+	release.Version = "dev"
+	settings := filepath.Join(home, ".claude", "settings.json")
+	_ = os.MkdirAll(filepath.Dir(settings), 0o755)
+	_ = os.WriteFile(settings, []byte(joined101), 0o644)
+	_ = config.Save(config.Config{Hub: "https://hub", Token: "t"})
+	_ = os.WriteFile(setupMarker(), []byte("1.0.1"), 0o600)
+	reapply("/opt/homebrew/bin/murmur")
+	if b, _ := os.ReadFile(settings); string(b) != joined101 {
+		t.Fatalf("a development build rewrote ~/.claude/settings.json:\n%s", b)
 	}
 }

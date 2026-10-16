@@ -239,6 +239,8 @@ console, MCP server (who, send) <--(local socket)----------------------- daemon
   own laptop to `ask` or `off`. A refused laptop updates itself anyway, unless its person chose `off`. A laptop
   checks the release signature and the download's checksum, never moves to an older version, and goes back to its
   previous version if the new one doesn't reach the hub within a minute. Homebrew and Nix installs update through
-  their package manager.
+  their package manager. The first time murmur's background process starts on a new version, it sets up again the
+  coding tools join connected, so their hooks and MCP server are what that version needs, and leaves the others
+  alone. A session already running keeps the hooks it loaded when it started: restart it to give it the new ones.
 
 [architecture.md](architecture.md) goes further.
