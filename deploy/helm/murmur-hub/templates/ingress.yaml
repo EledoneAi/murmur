@@ -1,0 +1,32 @@
+{{- if .Values.ingress.enabled }}
+{{- $host := .Values.ingress.host | default (urlParse .Values.publicURL).host }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "murmur-hub.fullname" . }}
+  labels:
+    {{- include "murmur-hub.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "murmur-hub.fullname" . }}
+                port:
+                  name: http
+{{- end }}

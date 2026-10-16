@@ -1,0 +1,76 @@
+name: Bug report
+description: Something in murmur doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting this. If it is a security problem, don't file it here: report it privately, as
+        [SECURITY.md](https://github.com/EledoneAi/murmur/blob/main/SECURITY.md) explains.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The smallest set of steps you know of. Say if it happens every time or only sometimes.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `murmur doctor`
+      description: |
+        Run `murmur doctor` on the laptop where it went wrong and paste what it prints. It holds no tokens,
+        but it does name your handle and your hub's address: replace them if you'd rather not share them.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: murmur-version
+    attributes:
+      label: murmur version on the laptop
+      description: "`murmur version`"
+    validations:
+      required: true
+
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      description: "`claude --version`, and whether you use it in a terminal or in VS Code"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: For example macOS 26.1 on Apple silicon, or Ubuntu 24.04 in WSL.
+    validations:
+      required: true
+
+  - type: textarea
+    id: hub
+    attributes:
+      label: The hub
+      description: |
+        Its version, where it runs (docker run, Docker Compose, Kubernetes, Cloud Run, Fly.io…), how many instances,
+        the kind of STORE and BUS (sqlite, postgres, redis, firestore…) and the identity provider.
+        Don't paste URLs that hold passwords.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The laptop's daemon log is `~/.murmur/daemon.log`. The hub logs one line per event to its standard
+        output. Paste the lines around the problem, and check them for anything you'd rather not share.
+      render: text

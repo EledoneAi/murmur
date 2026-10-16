@@ -1,0 +1,20 @@
+{{- if and (include "murmur-hub.pvc" .) (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "murmur-hub.fullname" . }}
+  labels:
+    {{- include "murmur-hub.labels" . | nindent 4 }}
+  annotations:
+    # uninstalling the chart keeps the team's data
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

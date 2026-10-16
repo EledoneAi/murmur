@@ -1,0 +1,58 @@
+# One server: the hub keeps its data in a sqlite file on a Docker volume, and Caddy in front gets an HTTPS
+# certificate for PUBLIC_URL on its own. Settings come from .env next to this file (start from env.example).
+# README.md in this folder walks through it.
+name: murmur
+
+services:
+  hub:
+    image: ${MURMUR_IMAGE:-ghcr.io/eledoneai/murmur-hub:latest}
+    restart: unless-stopped
+    # A name without a value is passed through from .env when it is set there, and left unset otherwise.
+    environment:
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL in .env}
+      - TRUST_PROXY=1 # Caddy, in front, appends the client's address to X-Forwarded-For
+      - SESSION_SECRET
+      - DEV_LOGIN
+      - STORE
+      - BUS
+      - OIDC_ISSUER
+      - OIDC_CLIENT_ID
+      - OIDC_CLIENT_SECRET
+      - OIDC_NAME
+      - OIDC_TRUST_EMAIL
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - GITHUB_URL
+      - ALLOWED_DOMAINS
+      - ALLOWED_EMAILS
+      - ALLOWED_GITHUB_ORGS
+      - ADMINS
+      - TOKEN_DAYS
+      - INSTANCE_ID
+      - LOG_FORMAT
+    volumes:
+      # the image's default STORE is sqlite:///data/murmur.db
+      - hub-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - hub
+
+volumes:
+  hub-data:
+  caddy-data:
+  caddy-config:

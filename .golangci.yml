@@ -1,0 +1,53 @@
+# golangci-lint v2. Run it with make lint; CI runs the same version (see .github/workflows/ci.yml).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      # Closing, flushing and printing on the way out rarely has anything useful to report. Where an error matters,
+      # the code checks it; where it doesn't, the code says so with `_ =`.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*net/http.Response).Body.Close
+        - (io.ReadCloser).Close
+        - (*github.com/coder/websocket.Conn).CloseNow
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.Remove
+        - os.RemoveAll
+    govet:
+      enable-all: true
+      disable:
+        # Reordering struct fields to save a few bytes makes them harder to read.
+        - fieldalignment
+        # Shadowing err in a nested block is idiomatic Go.
+        - shadow
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Tests may ignore errors from setup steps whose failure would show up as a failed assertion anyway.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true

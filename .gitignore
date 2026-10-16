@@ -1,0 +1,20 @@
+.DS_Store
+.claude/settings.local.json
+.claude/*.lock
+.claude/worktrees/
+.serena/
+
+# make build, make dev and make laptop
+bin/
+.dev/
+
+# make snapshot and GoReleaser
+dist/
+
+# laptop binaries a build may still place next to the hub's embedded files
+internal/hub/dist/murmur-*
+
+# a Compose recipe's settings, which hold secrets
+deploy/compose/.env
+web/node_modules/
+web/.astro/

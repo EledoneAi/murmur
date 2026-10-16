@@ -1,0 +1,14 @@
+apiVersion: v2
+name: murmur-hub
+description: The hub that links a team's murmur laptops
+type: application
+version: 0.1.0
+# The image tag used when image.tag is empty. Pin image.tag to a release in production.
+appVersion: "latest"
+home: https://github.com/EledoneAi/murmur
+sources:
+  - https://github.com/EledoneAi/murmur
+keywords:
+  - claude-code
+  - agents
+  - websocket

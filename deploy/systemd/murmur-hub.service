@@ -1,0 +1,58 @@
+# The murmur hub as a systemd service. README.md in this folder walks through the install.
+#
+#   sudo install -m 0644 murmur-hub.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now murmur-hub
+
+[Unit]
+Description=murmur hub
+Documentation=https://github.com/EledoneAi/murmur/blob/main/docs/self-hosting.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/murmur-hub
+EnvironmentFile=/etc/murmur/hub.env
+# A system user made up for the service, whose only writable folder is /var/lib/murmur.
+DynamicUser=yes
+StateDirectory=murmur
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/murmur
+Restart=on-failure
+RestartSec=5s
+# Every connected laptop holds one connection open.
+LimitNOFILE=65536
+
+# Hardening: the hub needs the network and its state folder, nothing else.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateUsers=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# A refused system call fails with an error instead of killing the hub.
+SystemCallErrorNumber=EPERM
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+ ╭─┬─╮
+ ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live
+
+ ◆ Needs you  3    ╭──────────────────────────────────────────────────────────────────────╮
+▌  A api-1a        │ › ▏                                                             keys │   ━━╸───── 3:12   
+   D dave          │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:05
+   B main-1 ┄⇢ 9b  │   MOVE                                                               │…” ╸─────── 0:40
+                   │ ▌ previous or next row                                        ↑↓ j k │
+ Billing   api · 3 │   fold or unfold                                             ← → h l │e on certifier.go
+   ╭────◆ A api-1a │   previous or next constellation                                 [ ] │   ━━╸───── 3:12
+ ╭─┴─┬┄┄● A api-9b │   top, bottom                                               home end │   ›▪·›››⇢›·▪››
+ │   ╰┄┄● B main-1 │   next thing that needs you, from anywhere                         n │   ·▪···∿······
+ ╰──────◇ C billing│                                                                      │   ━━━━━━━─ 8:40
+                   │   ACT                                                                │
+ Search   web · 2 p│   open the thread                                                  ⏎ │                ≈
+ ╭──────● A web-4c │   inspector on or off                                              ␣ │   ·▪▪▪▪··▪▪▪·▪
+ ╰──────● C web-2  │   write to the selected agent                                      w │   ››▪▪▪··▪▪››▪
+                   │   reply to the selected question                                   r │
+ Not in touch      │   let a held message through, or drop it                         y x │  × 1 out of tune
+        ● A infra-3│   mark a question or a failed message done                         x │   ··▪›··▪››··›
+        ● A notes  │   introduce two agents that are out of tune                        i │   ···▪··▪∿···▪
+        ○ A api-2f │   open the pull request                                            o │   idle 40m
+        ● D ingest-│   copy the address                                                 c │   ››››·›››››››
+        ○ D infra-1│   mute for an hour, a day, until unmuted                           z │   idle 1h
+            × main.│   go to your agent's terminal (tmux, iTerm2, WezTerm, kitty)       g │
+                   │   pin a constellation to the top                                   * │
+ · 1 quiet agent, f│   nudge a teammate whose agent waits for them                      N │
+                   │   in a thread: mark it done                                        x │
+                   │                                                                      │
+                   │   VIEWS                                                              │
+                   │   Team: everyone's agents                                          t │
+ g terminal  ⏎ thre│                                                                      │           ? keys
+                   │ type to search   esc close                                           │
+                   ╰──────────────────────────────────────────────────────────────────────╯

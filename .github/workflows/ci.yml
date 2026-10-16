@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format, vet and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(go list -f '{{.Dir}}' ./... | xargs gofmt -s -l)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need make fmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          # Keep in step with GOLANGCI_LINT_VERSION in the Makefile.
+          version: v2.14.0
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -race ./...
+
+  web:
+    name: Web pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+          version: 11
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: make web
+      - run: cd web && pnpm check
+      - name: The committed build matches the sources
+        run: |
+          if [ -n "$(git status --porcelain internal/hub/webdist)" ]; then
+            echo "internal/hub/webdist is out of date: run make web and commit it."
+            git status --short internal/hub/webdist
+            exit 1
+          fi
+
+  vuln:
+    name: Known vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make vuln
+
+  # The store and bus tests that need real services. Each one skips itself unless its variable is set.
+  integration:
+    name: Store and bus (Postgres, Redis, Firestore emulator)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      STORE_TEST_POSTGRES: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      BUS_TEST_POSTGRES: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+      BUS_TEST_REDIS: redis://localhost:6379
+      FIRESTORE_EMULATOR_HOST: localhost:8086
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Service containers can't be given a command, and the emulator needs one, so it starts here.
+      - name: Start the Firestore emulator
+        run: |
+          docker run -d --name firestore -p 8086:8086 gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud emulators firestore start --host-port=0.0.0.0:8086
+          for _ in $(seq 1 90); do
+            if curl -fs -o /dev/null http://localhost:8086/; then exit 0; fi
+            sleep 2
+          done
+          docker logs firestore
+          exit 1
+      - run: go test -race -count=1 ./internal/store/... ./internal/bus/...
+
+  image:
+    name: Hub image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Go version from go.mod
+        id: go
+        run: echo "version=$(sed -n 's/^go //p' go.mod)" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          build-args: GO_VERSION=${{ steps.go.outputs.version }}
+          load: true
+          tags: murmur-hub:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # With the image's own defaults (sqlite in /data), as someone trying it with docker run would start it.
+      - name: The hub starts and answers /healthz
+        run: |
+          docker run -d --name hub -p 8080:8080 -e DEV_LOGIN=1 -e PUBLIC_URL=http://localhost:8080 murmur-hub:ci
+          for _ in $(seq 1 30); do
+            if curl -fs http://localhost:8080/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs hub
+          exit 1

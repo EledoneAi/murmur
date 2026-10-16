@@ -1,0 +1,32 @@
+ ╭─┬─╮
+ ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live
+
+ ◆ Needs you  3    ╭──────────────────────────────────────────────────────────────────────╮
+▌  A api-1a        │ › web▏                             agents · people · files · actions │   ━━╸───── 3:12   
+   D dave          │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:05
+   B main-1 ┄⇢ 9b  │   AGENTS                                                             │…” ╸─────── 0:40
+                   │ ▌ ● A web-4c                                          feat/search-ui │
+ Billing   api · 3 │   ● C web-2                                          feat/search-api │e on certifier.go
+   ╭────◆ A api-1a │                                                                      │   ━━╸───── 3:12
+ ╭─┴─┬┄┄● A api-9b │   REPOS                                                              │   ›▪·›››⇢›·▪››
+ │   ╰┄┄● B main-1 │   acme/web                                                  2 agents │   ·▪···∿······
+ ╰──────◇ C billing│                                                                      │   ━━━━━━━─ 8:40
+                   │ ⏎ go   esc close                                                     │
+ Search   web · 2 p╰──────────────────────────────────────────────────────────────────────╯                ≈
+ ╭──────● A web-4c     feat/search-ui          Search filters and empty states                ·▪▪▪▪··▪▪▪·▪
+ ╰──────● C web-2      feat/search-api         Search endpoint pagination                     ››▪▪▪··▪▪››▪
+
+ Not in touch                                                                                × 1 out of tune
+        ● A infra-3    chore/tf-providers      Upgrade the Terraform providers                ··▪›··▪››··›
+        ● A notes      ⌂ notes                 Draft the weekly plan                          ···▪··▪∿···▪
+        ○ A api-2f     feat/billing-v2         Billing fixtures for the rerun                 idle 40m
+        ● D ingest-1   queue-v2                looping? the same command again and again      ››››·›››››››
+        ○ D infra-1    pilot/terraform-6       Pilot Terraform 6                              idle 1h
+            × main.tf  infra-3 and infra-1 both change it, never talked  introduce
+
+ · 1 quiet agent, folded
+
+
+
+
+ g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                                             ? keys

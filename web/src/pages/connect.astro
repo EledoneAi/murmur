@@ -1,0 +1,10 @@
+---
+import Shell from '../layouts/Shell.astro'
+---
+<Shell title="Connect a laptop">
+  <script>
+    import { mount } from 'svelte'
+    import Page from '../components/Connect.svelte'
+    mount(Page, { target: document.getElementById('app')! })
+  </script>
+</Shell>

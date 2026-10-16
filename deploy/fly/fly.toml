@@ -1,0 +1,56 @@
+# Fly.io: the hub on one Machine, with its sqlite store on a volume. README.md in this folder walks through it.
+# Change app, primary_region and the [env] values; secrets go in with fly secrets set.
+
+app = "murmur-hub-example"
+# A region near your team, the same as the volume's: fly platform regions lists them.
+primary_region = "<region>"
+
+[build]
+  # Pin a release in production, for example ghcr.io/eledoneai/murmur-hub:1.0.0
+  image = "ghcr.io/eledoneai/murmur-hub:latest"
+
+[env]
+  PUBLIC_URL = "https://murmur-hub-example.fly.dev"
+  TRUST_PROXY = "1" # Fly's proxy appends the client's address to X-Forwarded-For
+  OIDC_ISSUER = "https://login.example.com"
+  OIDC_CLIENT_ID = "murmur"
+  OIDC_NAME = "Example SSO"
+  ALLOWED_DOMAINS = "example.com"
+  ADMINS = "you@example.com"
+  # Microsoft Entra needs this one (docs/self-hosting.md says why).
+  # OIDC_TRUST_EMAIL = "1"
+  # Days a laptop stays signed in, 90 unless set; 0 for never. Read only when the hub first starts, like the lists.
+  # TOKEN_DAYS = "90"
+  # Optional: this instance's name in the logs and on the bus. Random at each start when unset.
+  # INSTANCE_ID = "hub-1"
+
+# The image's default STORE is sqlite:///data/murmur.db. A volume belongs to one Machine, so this app runs
+# exactly one.
+[[mounts]]
+  source = "murmur_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # A stopped Machine drops every laptop and pauses the hub's background jobs, so it never stops on its own.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Each connected laptop holds one connection.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 800
+    hard_limit = 1000
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

@@ -1,0 +1,32 @@
+ ╭─┬─╮                                                                                                                                      
+ ● ● ●  murmur    Team    Mine    All                                                              A alice · 4 online · 12 agents   ● live  
+                                                                                                                                            
+ ◆ Needs you  3                                                                                                                             
+   A api-1a             approve running go test ./ocr/...                                                                   ━━╸───── 3:12   
+   D dave               asks you “ok to merge #1827 before v2?”                                                             ━─────── 1:05   
+   B main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until Friday.”                          ╸─────── 0:40   
+                                                                                                                                            
+ Billing   api · 3 people                ≈   │   A api-9b                                                                    ● working 12m  
+   ╭────◆ A api-1a          ━━╸───── 3:12    │   Rerun billing on staging                                                                   
+▌╭─┴─┬┄┄● A api-9b          ›▪·›››⇢›·▪››     │                                                                                              
+▌│   ┆        ↳ Running go test ./billing…   │   PLACE      acme/api feat/billing-v2²                                                       
+ │   ╰┄┄● B main-1          ·▪···∿······     │              checkout 2 of this branch                                                       
+ ╰──────◇ C billing-2       ━━━━━━━─ 8:40    │                                                                                              
+                                             │   NOW        Running go test ./billing/ -run Rerun                                           
+ Search   web · 2 people                 ≈   │              ···›▪▪·›››▪›··⇢▪›››▪·›››⇢›·▪››                                                  
+ ╭──────● A web-4c          ·▪▪▪▪··▪▪▪·▪     │              read 26% · edit 20% · run 46% · talk 6%                                         
+ ╰──────● C web-2           ››▪▪▪··▪▪››▪     │                                                                                              
+                                             │   CHANGES    +214 −38 in 6 files · #1822                                                     
+ Not in touch                          × 1   │   CONTEXT    ▆ 78% · compacts soon                                                           
+        ● A infra-3         ··▪›··▪››··›     │                                                                                              
+        ● A notes           ···▪··▪∿···▪     │   IN TOUCH   ─ C billing-2 2                                                                 
+        ○ A api-2f          idle 40m         │              ─ A api-1a 1                                                                    
+        ● D ingest-1        ››››·›››››››     │              ┄ B main-1 held for you                                                         
+        ○ D infra-1         idle 1h          │                                                                                              
+            × main.tf  introduce             │   HARMONY    ≈ certifier.go · talking with billing-2                                         
+                                             │                                                                                              
+ · 1 quiet agent, folded                     │   write  copy  open #1822  go to terminal                                                    
+                                             │                                                                                              
+                                                                                                                                            
+                                                                                                                                            
+ ⏎ thread  ␣ close  z mute                                                                                                          ? keys  

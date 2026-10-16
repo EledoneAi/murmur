@@ -1,0 +1,10 @@
+---
+import Shell from '../../layouts/Shell.astro'
+---
+<Shell title="Events">
+  <script>
+    import { mount } from 'svelte'
+    import Page from '../../components/admin/Events.svelte'
+    mount(Page, { target: document.getElementById('app')! })
+  </script>
+</Shell>

@@ -1,0 +1,13 @@
+# Caddy serves PUBLIC_URL. For an https:// address it gets and renews the certificate itself; that needs ports 80
+# and 443 open and the name pointing at this server. An http:// address is served without TLS (local trials only).
+{$PUBLIC_URL} {
+	reverse_proxy {
+		# Every hub instance Docker knows by the name "hub": one with docker-compose.yml, two with compose.ha.yml.
+		dynamic a hub 8080 {
+			refresh 5s
+		}
+		lb_policy round_robin
+		# Caddy sets no time limit on WebSocket connections, so each laptop's link stays open as long as it lives.
+		lb_try_duration 10s
+	}
+}

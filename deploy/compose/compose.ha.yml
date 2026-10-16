@@ -1,0 +1,84 @@
+# Two hub instances behind Caddy, sharing a Postgres store and bus. More than one instance needs both: the store
+# for what must survive a restart, the bus for events between instances. Set BUS=redis://redis:6379 and start with
+# --profile redis to carry events over Redis instead. README.md in this folder walks through it.
+#
+#   docker compose -f compose.ha.yml up -d
+name: murmur-ha
+
+services:
+  hub:
+    image: ${MURMUR_IMAGE:-ghcr.io/eledoneai/murmur-hub:latest}
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    environment:
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL in .env}
+      - TRUST_PROXY=1 # Caddy, in front, appends the client's address to X-Forwarded-For
+      - STORE=postgres://murmur:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/murmur?sslmode=disable
+      - BUS=${BUS:-postgres://murmur:${POSTGRES_PASSWORD}@postgres:5432/murmur?sslmode=disable}
+      - SESSION_SECRET
+      - DEV_LOGIN
+      - OIDC_ISSUER
+      - OIDC_CLIENT_ID
+      - OIDC_CLIENT_SECRET
+      - OIDC_NAME
+      - OIDC_TRUST_EMAIL
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - GITHUB_URL
+      - ALLOWED_DOMAINS
+      - ALLOWED_EMAILS
+      - ALLOWED_GITHUB_ORGS
+      - ADMINS
+      - TOKEN_DAYS
+      - LOG_FORMAT
+      # no INSTANCE_ID: both instances would get the same one, and each picks a random one without it
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=murmur
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=murmur
+    volumes:
+      # Postgres 18 images keep their data under /var/lib/postgresql/18
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "murmur", "-d", "murmur"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Only with --profile redis. The bus keeps nothing, so Redis needs no disk.
+  redis:
+    image: redis:8
+    restart: unless-stopped
+    profiles: [redis]
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - PUBLIC_URL=${PUBLIC_URL:?set PUBLIC_URL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - hub
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
