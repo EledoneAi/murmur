@@ -364,7 +364,11 @@ func (h *Hub) rosterLoop(ctx context.Context) {
 			if pages {
 				n, pages = h.tellPages(), false
 			} else {
+				first := queue[0].shown == 0 // its console shows no team yet, as after a deploy: twice the rate
 				n, queue = r.hand(queue[0]), queue[1:]
+				if first {
+					n /= 2
+				}
 			}
 			paid = later(paid, now).Add(time.Duration(n) * time.Second / rosterRate)
 		}
@@ -380,7 +384,7 @@ func (h *Hub) rosterLoop(ctx context.Context) {
 }
 
 // rosterRate is how many bytes of rosters a second this instance hands out at most, to its laptops and team pages
-// together, and rosterBurst how far ahead of it it may go at once.
+// together, and twice that to laptops that have none yet; rosterBurst is how far ahead of it it may go at once.
 //
 // ponytail: the whole team each time makes the rosters' cost grow with the square of the team. Rosters that carry
 // only who changed would make it linear: a protocol change, for teams of thousands.
