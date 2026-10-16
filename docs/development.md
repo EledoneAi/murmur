@@ -131,6 +131,18 @@ make fmt        # gofmt -s on every package
 `make lint` and `make vuln` run their tools through `go run` at a pinned or latest version, so there is nothing
 to install first.
 
+### Benchmarks
+
+`make bench` measures what the laptop side costs: a frame, a key and a new snapshot in the console on the demo team
+and on teams of 10, 100 and 500 people, a 300-message thread, a snapshot's decoding, what the daemon pays to send a
+console one change, and a read of a checkout, with the git processes it starts and their CPU. Compare a change with
+the code before it, a few runs each:
+
+```sh
+make bench > new.txt                     # and, on the code before the change, > old.txt
+go run golang.org/x/perf/cmd/benchstat@latest old.txt new.txt
+```
+
 ### Tests that need Postgres, Redis or Firestore
 
 The store and bus tests that need a real service skip themselves unless their variable is set:

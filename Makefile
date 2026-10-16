@@ -39,7 +39,7 @@ COMPOSE_DEV := MURMUR_IMAGE=$(IMAGE) PUBLIC_URL=http://localhost DEV_LOGIN=1 \
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build test race lint vuln fmt dev dev-dist laptop web web-dev demo compat image snapshot \
+.PHONY: help build test race bench lint vuln fmt dev dev-dist laptop web web-dev demo compat image snapshot \
 	compose-up compose-down services services-down integration clean
 
 help: ## List the targets
@@ -54,6 +54,9 @@ test: ## Run the tests
 
 race: ## Run the tests with the race detector, as CI does
 	$(GO) test -race ./...
+
+bench: ## Run the laptop's benchmarks: the console's frames and keys, the daemon's snapshots, git reads
+	$(GO) test -run '^$$' -bench . -benchmem ./internal/console ./internal/daemon ./internal/gitscan
 
 lint: ## Run golangci-lint (go vet, staticcheck, errcheck, formatting and more; see .golangci.yml)
 	$(GOLANGCI_LINT) run ./...
