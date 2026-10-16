@@ -38,7 +38,7 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 | One server, Docker Compose | [deploy/compose](../deploy/compose) | The simplest real setup. Caddy gets the certificate. Also a two-instance variant with Postgres. |
 | One server, binary and systemd | [deploy/systemd](../deploy/systemd) | No Docker. Bring your own reverse proxy for HTTPS. |
 | A VM at Hetzner, Lightsail, DigitalOcean, EC2 or Azure | [deploy/vm](../deploy/vm) | The Compose recipe on the cheapest real setup, from about €5 a month. |
-| Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | Set your ingress controller's timeouts for WebSockets. |
+| Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | An Ingress or a Gateway API HTTPRoute. Check your controller's or gateway's timeouts for WebSockets. |
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
 | Railway | [deploy/railway](../deploy/railway) | One service with a volume for sqlite. A redeploy disconnects laptops for a moment. |
@@ -217,9 +217,12 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
   }
   ```
 
+- **Kubernetes with the Gateway API**: never set a request timeout on the hub's HTTPRoute, as it ends each
+  WebSocket at that age. GKE's Gateway also needs its backend timeout raised from 30 seconds. The
+  [Helm chart's README](../deploy/helm/murmur-hub#websockets-and-timeouts) covers these and the common controllers.
 - **ingress-nginx** on Kubernetes was archived on 24 March 2026
-  ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)) and gets no more fixes. Where it
-  still runs, the Helm chart's annotations set its `proxy-read-timeout` and `proxy-send-timeout` to 3600.
+  ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)) and gets no more fixes. Its
+  60-second timeouts work with the pings; the Helm chart's README shows the annotations that raise them.
 - **AWS Application Load Balancer**: its default idle timeout of 60 seconds works, because WebSocket pings count as
   traffic. Raising it, to 3600 for example, is harmless but not needed
   ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).

@@ -7,10 +7,11 @@ metadata:
     {{- include "murmur-hub.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
-  {{- if not (include "murmur-hub.networkedBus" .) }}
-  # With the local bus, an old and a new pod running side by side during an update would each hold part of the
-  # team, and a sqlite volume can't be shared by two pods. So the old pod stops before the new one starts; laptops
-  # reconnect on their own.
+  {{- if not (include "murmur-hub.rolling" .) }}
+  # A rolling update runs an old and a new pod side by side, which works only when they share a networked store and
+  # bus. With sqlite, one pod at a time may hold the file and its ReadWriteOnce volume (and Litestream allows one
+  # writer); with the local bus, two pods would each hold part of the team. So the old pod stops before the new one
+  # starts, and laptops reconnect on their own.
   strategy:
     type: Recreate
   {{- end }}

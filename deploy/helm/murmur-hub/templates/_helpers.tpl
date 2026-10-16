@@ -58,6 +58,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+"true" when an old and a new pod may run side by side during a rolling update: they share a networked store and a
+networked bus. Otherwise the chart uses the Recreate strategy.
+*/}}
+{{- define "murmur-hub.rolling" -}}
+{{- $store := include "murmur-hub.scheme" .Values.store }}
+{{- if and (include "murmur-hub.networkedBus" .) (has $store (list "postgres" "postgresql" "firestore")) }}true{{ end }}
+{{- end }}
+
+{{/*
 More than one replica needs a store they share and a bus that carries events between them. sqlite and memory://
 live inside one pod, and local:// stays inside one process: replicas using them would each see part of the team.
 */}}

@@ -24,8 +24,8 @@ store: ""
 
 # How hub replicas tell each other about events. Empty: local://, for one replica.
 # Otherwise postgres://..., redis://... or rediss://..., with passwords as $(KEY) like store.
-# Unless it is a Postgres or Redis URL, upgrades use the Recreate strategy: the old pod stops before the new one
-# starts.
+# Unless store is a Postgres or Firestore URL and bus a Postgres or Redis URL, upgrades use the Recreate strategy:
+# the old pod stops before the new one starts.
 bus: ""
 
 # The name of an existing Secret in the release's namespace. Each of its keys becomes an environment variable of the
@@ -62,21 +62,41 @@ service:
   type: ClusterIP
   port: 80
 
+# Each laptop holds one WebSocket open for as long as it is connected. Laptops and the hub ping each other every
+# 25 seconds, so any idle timeout of a minute or more works. What cuts laptops off is a limit on how long a whole
+# request may last: README.md says what to set for each controller and gateway.
+
 ingress:
   enabled: false
+  # Your controller's IngressClass, for example traefik. Empty means the cluster's default class.
   className: ""
-  # Each laptop holds one WebSocket open for as long as it is connected. Laptops and the hub ping each other every
-  # 25 seconds, so an idle timeout of a minute works, but some controllers also cap how long a connection may last.
-  # These are ingress-nginx's settings; other controllers have their own, set them to an hour or more.
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  # Annotations for your controller, for example a cert-manager issuer. ingress-nginx, archived in March 2026, works
+  # with its defaults; these leave a margin on its timeouts:
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  #   nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  annotations: {}
   # Empty means the host of publicURL.
   host: ""
   tls: []
   #  - secretName: murmur-tls
   #    hosts:
   #      - murmur.example.com
+
+# A Gateway API HTTPRoute that attaches the hub to a Gateway you already run, instead of an Ingress.
+httpRoute:
+  enabled: false
+  # The Gateway, and optionally its listener, to attach to. Required when enabled. For example:
+  #   - name: public
+  #     namespace: gateway-system
+  #     sectionName: https
+  parentRefs: []
+  # Empty means the host of publicURL.
+  hostnames: []
+  # The rule's timeouts. Never set a request or backendRequest timeout: it ends every laptop's WebSocket when it
+  # reaches that age. If your implementation applies one by default, turn it off with request: 0s.
+  timeouts: {}
+  annotations: {}
+  labels: {}
 
 resources:
   requests:

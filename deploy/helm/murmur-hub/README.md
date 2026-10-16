@@ -1,13 +1,13 @@
 # Helm chart for the murmur hub
 
-Runs the hub on Kubernetes: a Deployment, a Service, an optional Ingress, and a volume for the sqlite store when
-there is one replica.
+Runs the hub on Kubernetes: a Deployment, a Service, an optional Ingress or Gateway API HTTPRoute, and a volume for
+the sqlite store when there is one replica.
 
 ## What you need
 
-- A Kubernetes cluster and Helm 3.
-- An ingress controller and a way to get TLS certificates (for example ingress-nginx and cert-manager), or another
-  way to route `https://` traffic to a Service.
+- A Kubernetes cluster and Helm 3 or later.
+- A way to route `https://` traffic to a Service: an ingress controller, or a Gateway API implementation with a
+  Gateway, and a way to get TLS certificates (for example cert-manager).
 - A DNS name for the hub, for example `murmur.example.com`.
 - An identity provider. [docs/self-hosting.md](../../../docs/self-hosting.md) shows how to set up Google,
   Microsoft Entra, Okta, Keycloak, Authentik, GitLab or GitHub. Register
@@ -24,7 +24,7 @@ there is one replica.
      --from-literal=OIDC_CLIENT_SECRET='<from your identity provider>'
    ```
 
-2. Write your settings to `values.yaml`:
+2. Write your settings to `values.yaml`. With an Ingress:
 
    ```yaml
    publicURL: https://murmur.example.com
@@ -39,7 +39,7 @@ there is one replica.
      ADMINS: you@example.com
    ingress:
      enabled: true
-     className: nginx
+     className: traefik # your controller's IngressClass
      annotations:
        cert-manager.io/cluster-issuer: letsencrypt
      tls:
@@ -47,7 +47,18 @@ there is one replica.
          hosts: [murmur.example.com]
    ```
 
-   Helm merges your `ingress.annotations` with the chart's WebSocket timeouts, so you keep both.
+   Or, with a Gateway you already run, replace the `ingress` section with an HTTPRoute. The Gateway's HTTPS
+   listener holds the certificate.
+
+   ```yaml
+   httpRoute:
+     enabled: true
+     parentRefs:
+       - name: public
+         namespace: gateway-system
+   ```
+
+   Check [WebSockets and timeouts](#websockets-and-timeouts) for your controller or gateway.
 
 3. Install from a checkout of this repository:
 
@@ -60,12 +71,13 @@ there is one replica.
 4. Open `https://murmur.example.com`, sign in, and share the install line it shows.
 
 The data lives in the PersistentVolumeClaim the chart creates. `helm uninstall` keeps that claim, so the team's
-data survives a reinstall; delete it yourself when you mean to.
+data survives a reinstall; delete it yourself when you mean to. Give it a block storage class (the default on most
+clusters), not NFS or another network file system: sqlite isn't safe there.
 
-Unless `bus` is a `postgres://`, `postgresql://`, `redis://` or `rediss://` URL, the chart uses the `Recreate`
-strategy, whatever `replicaCount` says: during an upgrade the old pod stops before the new one starts, and laptops
-reconnect a few seconds later. Two pods on the local bus would each hold part of the team, and two pods can't share
-a sqlite volume.
+With sqlite, the chart uses the `Recreate` strategy, whatever `replicaCount` says: during an upgrade the old pod
+stops, letting go of the sqlite file and its ReadWriteOnce volume, before the new one starts. Laptops reconnect a few
+seconds later. It does the same with the local bus, where two pods would each hold part of the team. Rolling
+updates need a `store` that is a Postgres or Firestore URL and a `bus` that is a Postgres or Redis URL.
 
 ## More than one replica
 
@@ -86,14 +98,64 @@ store: postgres://murmur:$(POSTGRES_PASSWORD)@postgres.example.internal:5432/mur
 bus: postgres://murmur:$(POSTGRES_PASSWORD)@postgres.example.internal:5432/murmur
 ```
 
-A password with characters such as `@`, `:` or `/` must be URL-encoded in the Secret.
+A password with characters such as `@`, `:` or `/` must be URL-encoded in the Secret. With a managed database, see
+[docs/managed-services.md](../../../docs/managed-services.md) for which endpoint the bus may use.
 
 ## WebSockets and timeouts
 
-Every laptop keeps one WebSocket open to the hub. The chart sets ingress-nginx's read and send timeouts to an hour.
-With another controller, raise its idle and stream timeouts to an hour or more, or laptops will reconnect each
-time the controller cuts them off. They do reconnect on their own, so a lower limit costs reconnections, not
-messages.
+Every laptop keeps one WebSocket open to the hub, and laptops and the hub ping each other every 25 seconds, so any
+idle timeout of a minute or more works. What cuts laptops off is a limit on how long a whole request may last: to
+a proxy, a WebSocket is one request that lasts as long as the laptop stays connected. When a proxy does cut one, the
+laptop reconnects on its own and resends what wasn't confirmed: a reconnection, not lost messages.
+
+- **Gateway API HTTPRoute**: never set `timeouts.request` or `timeouts.backendRequest` on the route; some
+  implementations end a WebSocket when it reaches that age. Leave `httpRoute.timeouts` empty. If your
+  implementation applies a request timeout by default, set `httpRoute.timeouts.request: 0s`, which the Gateway API
+  defines as no timeout ([Gateway API](https://gateway-api.sigs.k8s.io/guides/http-timeouts/)).
+- **Envoy Gateway, and other gateways built on Envoy**, close a stream after 5 minutes without data by default
+  ([kgateway](https://kgateway.dev/docs/envoy/main/resiliency/timeouts/idle-stream/)). The pings keep it busy.
+- **GKE Gateway**: the load balancer's backend timeout is 30 seconds by default, and for a WebSocket it caps the
+  connection's whole life
+  ([Google](https://docs.cloud.google.com/load-balancing/docs/https/request-distribution)). Attach a
+  GCPBackendPolicy to the hub's Service with `timeoutSec` of 3600 or more
+  ([GKE](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/configure-gateway-resources)); laptops then
+  reconnect once an hour:
+
+  ```yaml
+  apiVersion: networking.gke.io/v1
+  kind: GCPBackendPolicy
+  metadata:
+    name: murmur-hub
+    namespace: murmur
+  spec:
+    default:
+      timeoutSec: 3600
+    targetRef:
+      group: ""
+      kind: Service
+      name: murmur-hub # the Service the chart created
+  ```
+
+- **Traefik** passes WebSockets through with its defaults. It also understands many ingress-nginx annotations,
+  which helps when you move an Ingress over from it
+  ([SUSE](https://documentation.suse.com/cloudnative/rke2/latest/en/reference/ingress_migration.html)).
+- **AKS**: the managed NGINX of the application routing add-on gets only critical fixes until November 2026
+  ([AKS](https://blog.aks.azure.com/2026/03/18/app-routing-gateway-api)). It works with its defaults, like
+  ingress-nginx below; for the longer run, use a Gateway API implementation and the HTTPRoute.
+- **ingress-nginx** was archived on 24 March 2026
+  ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)). Its 60-second read and send
+  timeouts work with the pings. The chart no longer sets its annotations; to leave a margin, add them yourself:
+
+  ```yaml
+  ingress:
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  ```
+
+- **Other controllers**: allow WebSocket upgrades, and make sure nothing limits how long a request may last, or set
+  that limit to an hour or more.
 
 ## Values
 
@@ -103,10 +165,11 @@ messages.
 | `existingSecret` | `""` | A Secret whose keys become environment variables (`SESSION_SECRET`, client secrets, passwords) |
 | `env` | `{}` | Every other setting as a plain environment variable; see [docs/configuration.md](../../../docs/configuration.md). Every replica gets the same values, so leave `INSTANCE_ID` out |
 | `store` | `""` (sqlite in `/data`) | `STORE` for the hub |
-| `bus` | `""` (`local://`) | `BUS` for the hub; anything but a Postgres or Redis URL makes upgrades `Recreate` |
+| `bus` | `""` (`local://`) | `BUS` for the hub; rolling updates need a Postgres or Redis URL here and a networked `store` |
 | `replicaCount` | `1` | Above 1 needs a networked store and bus |
 | `image.repository`, `image.tag` | `ghcr.io/eledoneai/murmur-hub`, appVersion | The image; pin `image.tag` |
 | `persistence.*` | enabled, 1Gi | The sqlite volume (one replica only) |
-| `ingress.*` | disabled | Host defaults to the host of `publicURL` |
+| `ingress.*` | disabled, no annotations | `className` and `annotations` are your controller's; the host defaults to the host of `publicURL` |
+| `httpRoute.*` | disabled | A Gateway API HTTPRoute; `parentRefs` is required, `hostnames` defaults to the host of `publicURL`, `timeouts` stays unset |
 | `serviceAccount.annotations` | `{}` | For example Workload Identity, to reach Firestore on GKE |
 | `resources`, `podSecurityContext`, `securityContext`, `nodeSelector`, `tolerations`, `affinity` | see `values.yaml` | The usual pod settings |
