@@ -141,7 +141,10 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 		if b == nil {
 			return nil
 		}
-		return os.Remove(path)
+		if st, err := os.Lstat(path); err != nil || st.Mode()&os.ModeSymlink == 0 {
+			return os.Remove(path)
+		}
+		// a link the person keeps (their dotfiles) stays a link, to an empty object
 	}
 	var out bytes.Buffer
 	if err := json.Indent(&out, o.Bytes(), "", indentOf(b)); err != nil {
@@ -158,19 +161,27 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 			_ = os.WriteFile(keep, b, 0o600)
 		}
 	}
-	mode := os.FileMode(0o644)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return WriteAtomic(path, out.Bytes(), mode)
+	return WriteAtomic(path, out.Bytes(), 0o644)
 }
 
-// WriteAtomic replaces path with b: a reader sees the old file or the new one, never half of it. A link at path is
-// replaced, not followed.
+// WriteAtomic replaces the file at path with b, keeping its permissions (mode for a new one): a reader sees the old
+// file or the new one, never half of it. A link at path, such as a settings file a person keeps with their dotfiles,
+// stays a link: its target is replaced.
 func WriteAtomic(path string, b []byte, mode os.FileMode) error {
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		path = target
+	}
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	return ReplaceFile(path, b, mode)
+}
+
+// ReplaceFile replaces whatever is at path, a link included, with a file holding b, atomically.
+func ReplaceFile(path string, b []byte, mode os.FileMode) error {
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".murmur-*")
 	if err != nil {
 		return err

@@ -3,176 +3,35 @@ package hookish
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/EledoneAi/murmur/internal/config"
 	"github.com/EledoneAi/murmur/internal/harness"
 )
 
-// ---------------------------------------------------------------- Codex's config.toml
+// ---------------------------------------------------------------- Codex's MCP server, in config.toml
 
-// murmur changes config.toml only in tables of its own, and keeps everything else as its person wrote it: comments,
-// blank lines, multi-line strings. A file murmur changes is copied first, once, to config.toml.before-murmur.
+// murmur registers its MCP server in Codex's config.toml itself, as one block at the end of the file between two
+// comment lines, the second carrying a digest of what is between them. It replaces or removes that block only when
+// it is exactly what murmur wrote, and reads nothing else in the file but a search for another server called murmur.
+// Anything else (a block someone changed, a server murmur didn't write) it leaves alone, and says what to do by hand.
+// `codex mcp add` isn't used: Codex rewrites every MCP server's table when it runs, losing its person's comments.
+
+const (
+	blockStart = "# murmur's MCP server, which murmur join writes and murmur uninstall removes as written: change it and murmur leaves it alone"
+	blockEnd   = "# end of murmur's block, "
+)
 
 func (s *Spec) tomlPath() string { return filepath.Join(s.dir(), s.tomlFile) }
-
-// tomlBlock is one table of a TOML file: its header's name, "" for the lines before the first, whether it is an
-// element of an array of tables ([[name]]), and its lines, the header first.
-type tomlBlock struct {
-	name  string
-	array bool
-	lines []string
-}
-
-var tomlHeader = regexp.MustCompile(`^\s*(\[\[?)\s*([^\[\]]+?)\s*\]\]?\s*(#.*)?$`)
-
-// tomlBlocks splits a TOML file into its tables. A line inside a multi-line string never starts one.
-func tomlBlocks(text string) []tomlBlock {
-	bs := []tomlBlock{{}}
-	quote := "" // the multi-line string a line is in, if any
-	for _, line := range strings.Split(text, "\n") {
-		if quote == "" {
-			if m := tomlHeader.FindStringSubmatch(line); m != nil {
-				bs = append(bs, tomlBlock{name: m[2], array: m[1] == "[["})
-			}
-		}
-		b := &bs[len(bs)-1]
-		b.lines = append(b.lines, line)
-		for _, q := range []string{`"""`, `'''`} {
-			if (quote == "" || quote == q) && strings.Count(line, q)%2 == 1 {
-				if quote == q {
-					quote = ""
-				} else {
-					quote = q
-				}
-			}
-		}
-	}
-	return bs
-}
-
-func joinBlocks(bs []tomlBlock) string {
-	var lines []string
-	for _, b := range bs {
-		lines = append(lines, b.lines...)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func tomlBlank(line string) bool   { return strings.TrimSpace(line) == "" }
-func tomlComment(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "#") }
-
-// without drops the blocks drop names. Consecutive tables of murmur's go as one: the blank line put before them goes
-// too, and the blank lines and comments after the last stay, for they introduce the next table. Comments between
-// them stay as well.
-func without(bs []tomlBlock, drop func(i int) bool) ([]tomlBlock, bool) {
-	var out []tomlBlock
-	found := false
-	for i, b := range bs {
-		if !drop(i) {
-			out = append(out, b)
-			continue
-		}
-		found = true
-		if n := len(out); n > 0 && (i == 0 || !drop(i-1)) {
-			if last := &out[n-1]; len(last.lines) > 0 && tomlBlank(last.lines[len(last.lines)-1]) {
-				last.lines = last.lines[:len(last.lines)-1]
-			}
-		}
-		tail := trailing(b)
-		if i+1 < len(bs) && drop(i+1) {
-			tail = slices.DeleteFunc(slices.Clone(tail), tomlBlank)
-		}
-		if len(tail) > 0 {
-			out = append(out, tomlBlock{lines: tail})
-		}
-	}
-	return out, found
-}
-
-// trailing are the blank lines and comments at the end of a table, after its last key.
-func trailing(b tomlBlock) []string {
-	end := len(b.lines)
-	for end > 1 && (tomlBlank(b.lines[end-1]) || tomlComment(b.lines[end-1])) {
-		end--
-	}
-	return b.lines[end:]
-}
-
-// editTOML rewrites a TOML file with change, which returns the new text and whether it changed it. It never creates
-// the file, and keeps a copy of it as it was before murmur first changed it.
-func editTOML(path string, change func(text string) (string, bool)) error {
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	text, changed := change(string(b))
-	if strings.HasSuffix(string(b), "\n") {
-		text = strings.TrimRight(text, "\n") + "\n"
-	}
-	if !changed || text == string(b) {
-		return nil
-	}
-	if _, err := os.Stat(path + ".before-murmur"); errors.Is(err, os.ErrNotExist) {
-		_ = os.WriteFile(path+".before-murmur", b, 0o600)
-	}
-	mode := os.FileMode(0o600)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	return harness.WriteAtomic(path, []byte(text), mode)
-}
-
-// dropTables takes out the tables under prefix, [prefix] and [prefix.…].
-func dropTables(path, prefix string) error {
-	return editTOML(path, func(text string) (string, bool) {
-		bs := tomlBlocks(text)
-		bs, found := without(bs, func(i int) bool {
-			return bs[i].name == prefix || strings.HasPrefix(bs[i].name, prefix+".")
-		})
-		return joinBlocks(bs), found
-	})
-}
-
-// codexEvents are the events Codex hooks, as config.toml names their tables: [[hooks.SessionStart]]…
-var codexEvents = regexp.MustCompile(`^hooks\.(SessionStart|SessionEnd|UserPromptSubmit|PreToolUse|PermissionRequest|PostToolUse|` +
-	`PreCompact|PostCompact|SubagentStart|SubagentStop|Stop|Interrupt)(\.hooks)?$`)
-
-// tomlHasHooks says whether the person keeps hooks inline in config.toml. hooks.state, where Codex keeps which hooks
-// are trusted, isn't one.
-func tomlHasHooks(path string) bool {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	for _, blk := range tomlBlocks(string(b)) {
-		if codexEvents.MatchString(blk.name) {
-			return true
-		}
-	}
-	return false
-}
-
-var tomlCommand = regexp.MustCompile(`^\s*command\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*(#.*)?$`)
-
-// tomlString reads a TOML string: basic, with escapes, or literal.
-func tomlString(v string) string {
-	if strings.HasPrefix(v, "'") {
-		return strings.Trim(v, "'")
-	}
-	s, _ := strconv.Unquote(v)
-	return s
-}
 
 // tomlQuote writes s as a TOML basic string.
 func tomlQuote(s string) string {
@@ -184,7 +43,7 @@ func tomlQuote(s string) string {
 			b.WriteByte('\\')
 			b.WriteRune(r)
 		case r < 0x20 || r == 0x7f:
-			b.WriteString(`\u` + strconv.FormatInt(int64(0x10000+r), 16)[1:])
+			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)
 		}
@@ -193,166 +52,155 @@ func tomlQuote(s string) string {
 	return b.String()
 }
 
-// tomlElements finds, for one event, the blocks of each element of its array: [[hooks.E]] and the
-// [[hooks.E.hooks]] after it. It returns the first and last block of each, and whether it is murmur's.
-func tomlElements(bs []tomlBlock, event string) (spans [][2]int, ours []bool) {
-	for i := 0; i < len(bs); i++ {
-		if !bs[i].array || bs[i].name != "hooks."+event {
-			continue
-		}
-		j, mine := i, false
-		for j+1 < len(bs) && strings.HasPrefix(bs[j+1].name, "hooks."+event+".") {
-			j++
-		}
-		for _, b := range bs[i : j+1] {
-			for _, l := range b.lines {
-				if m := tomlCommand.FindStringSubmatch(l); m != nil && harness.Ours(tomlString(m[1])) {
-					mine = true
-				}
-			}
-		}
-		spans, ours = append(spans, [2]int{i, j}), append(ours, mine)
-		i = j
+// codexServer is murmur's server, as config.toml's tables: the command, and its two tools approved, so Codex runs
+// them without asking. Codex starts MCP servers with a bare environment, so a MURMUR_HOME of the person's own goes
+// with it.
+func codexServer(exe string) string {
+	var b strings.Builder
+	b.WriteString("[mcp_servers.murmur]\ncommand = " + tomlQuote(exe) + "\nargs = [\"mcp\", \"codex\"]\n")
+	if home := os.Getenv("MURMUR_HOME"); home != "" {
+		b.WriteString("\n[mcp_servers.murmur.env]\nMURMUR_HOME = " + tomlQuote(home) + "\n")
 	}
-	return spans, ours
+	b.WriteString("\n[mcp_servers.murmur.tools.who]\napproval_mode = \"approve\"\n\n[mcp_servers.murmur.tools.send]\napproval_mode = \"approve\"\n")
+	return b.String()
 }
 
-func tomlHasOurHooks(path string) bool {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	bs := tomlBlocks(string(b))
-	for _, ev := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "PermissionRequest", "SessionEnd"} {
-		if _, ours := tomlElements(bs, ev); slices.Contains(ours, true) {
-			return true
-		}
-	}
-	return false
+func digest(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return "sha256:" + hex.EncodeToString(sum[:12])
 }
 
-// tomlElement is murmur's element for one event, as config.toml writes it.
-func (s *Spec) tomlElement(exe string, h hook) []string {
-	head := []string{"[[hooks." + h.event + "]]"}
-	if h.matcher != "" {
-		head = append(head, "matcher = "+tomlQuote(h.matcher))
-	}
-	body := []string{"[[hooks." + h.event + ".hooks]]", `type = "command"`, "command = " + tomlQuote(s.commandFor(exe, h)),
-		"timeout = " + strconv.Itoa(s.timeout(h))}
-	if h.async {
-		body = append(body, "async = true")
-	}
-	return append(append(head, ""), body...)
+// codexBlock is murmur's block, markers included.
+func codexBlock(exe string) string {
+	body := codexServer(exe)
+	return blockStart + "\n" + body + blockEnd + digest(body) + "\n"
 }
 
-// editTOMLHooks puts murmur's hooks inline in config.toml (or with add=false takes them out): an element of murmur's
-// is rewritten in its place, which keeps the trust Codex gave the person's hooks after it, and a new one goes at the
-// end.
-func editTOMLHooks(s *Spec, exe string, add bool) error {
-	return editTOML(s.tomlPath(), func(text string) (string, bool) {
-		bs := tomlBlocks(text)
-		replace, gone, drop := map[int][]string{}, map[int]bool{}, map[int]bool{}
-		changed := false
-		var tail []string
-		for _, h := range s.hooks {
-			spans, ours := tomlElements(bs, h.event)
-			kept := false
-			for k, o := range ours {
-				if !o {
-					continue
-				}
-				changed = true
-				first, last := spans[k][0], spans[k][1]
-				if add && !kept { // in its place, before the comments that introduce the next table
-					kept = true
-					replace[first] = append(s.tomlElement(exe, h), trailing(bs[last])...)
-					for i := first + 1; i <= last; i++ {
-						gone[i] = true
-					}
-					continue
-				}
-				for i := first; i <= last; i++ {
-					drop[i] = true
-				}
-			}
-			if add && !kept {
-				tail = append(append(tail, ""), s.tomlElement(exe, h)...)
-			}
-		}
-		var mid []tomlBlock
-		var dropped []bool
-		for i, b := range bs {
-			switch {
-			case replace[i] != nil:
-				mid, dropped = append(mid, tomlBlock{name: b.name, array: true, lines: replace[i]}), append(dropped, false)
-			case !gone[i]:
-				mid, dropped = append(mid, b), append(dropped, drop[i])
-			}
-		}
-		mid, _ = without(mid, func(i int) bool { return dropped[i] })
-		out := joinBlocks(mid)
-		if len(tail) > 0 {
-			out = strings.TrimRight(out, "\n") + "\n" + strings.Join(tail, "\n")
-			changed = true
-		}
-		return out, changed
-	})
+// otherServer finds a server called murmur in config.toml that isn't in murmur's block: a table, dotted keys or an
+// inline table. A false alarm only sends the person to do it by hand.
+var otherServer = regexp.MustCompile(`(?m)^\s*(\[\s*mcp_servers\s*\.\s*"?murmur"?\s*[\].]|mcp_servers\s*\.\s*"?murmur"?\s*[.=]|"?murmur"?\s*=\s*\{)`)
+
+// block is where murmur's block is in text: its first and last byte, as written (intact) or not. found says the
+// file has a marker of murmur's; other says it has a server called murmur outside the block.
+type block struct {
+	start, end   int
+	found, whole bool
+	other        bool
 }
 
-// ---------------------------------------------------------------- Codex's MCP server
+func findBlock(text string) block {
+	var b block
+	i := lineAt(text, 0, blockStart)
+	if i < 0 {
+		b.found = strings.Contains(text, blockEnd) // the end of a block whose start someone took out
+		b.other = otherServer.MatchString(text)
+		return b
+	}
+	b.found = true
+	body := i + len(blockStart) + 1
+	j := lineAt(text, body, blockEnd)
+	if j < 0 {
+		b.other = otherServer.MatchString(text[:i])
+		return b
+	}
+	end := len(text)
+	if k := strings.IndexByte(text[j:], '\n'); k >= 0 {
+		end = j + k + 1
+	}
+	b.start, b.end = i, end
+	b.whole = strings.TrimSuffix(text[j:end], "\n") == blockEnd+digest(text[body:j])
+	b.other = otherServer.MatchString(text[:i] + text[end:])
+	return b
+}
 
-// codexApprovals let Codex run murmur's two tools without asking. `codex mcp add` writes the server's table and
-// drops these, so they follow it each time; TOML takes a table's sub-tables anywhere in the file.
-const codexApprovals = `
-[mcp_servers.murmur.tools.who]
-approval_mode = "approve"
+// lineAt is where the first line at or after from that starts with prefix begins, or -1.
+func lineAt(text string, from int, prefix string) int {
+	for i := from; i < len(text); {
+		if (i == 0 || text[i-1] == '\n') && strings.HasPrefix(text[i:], prefix) {
+			return i
+		}
+		k := strings.IndexByte(text[i:], '\n')
+		if k < 0 {
+			return -1
+		}
+		i += k + 1
+	}
+	return -1
+}
 
-[mcp_servers.murmur.tools.send]
-approval_mode = "approve"
-`
+// byHandTOML is what to do in config.toml when murmur won't change it.
+func byHandTOML(path, exe string, add bool, why string) error {
+	if add {
+		return fmt.Errorf("%s %s: give it this server by hand, or take that out and run murmur join again:\n%s", config.Tildify(path), why, codexServer(exe))
+	}
+	return fmt.Errorf("%s %s: take murmur's MCP server out of it by hand", config.Tildify(path), why)
+}
 
-// codexMCP registers (or with add=false removes) murmur's MCP server in Codex. Codex starts MCP servers with a bare
-// environment, so a MURMUR_HOME of the person's own goes with it. Removing it takes murmur's tables out of
-// config.toml even without codex on PATH, and touches the file only when they are there.
+// codexMCP registers (or with add=false removes) murmur's MCP server in Codex's config.toml.
 func codexMCP(s *Spec, exe string, add bool) error {
-	toml := s.tomlPath()
-	codex, lerr := exec.LookPath("codex")
-	if lerr == nil && codexMCPRegistered(codex) {
-		_ = exec.Command(codex, "mcp", "remove", "murmur").Run()
-	}
-	if err := dropTables(toml, "mcp_servers.murmur"); err != nil || !add {
+	path := s.tomlPath()
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if !add {
+			return nil
+		}
+		return harness.WriteAtomic(path, []byte(codexBlock(exe)), 0o600)
+	} else if err != nil {
 		return err
 	}
-	if lerr != nil {
-		return errors.New("codex not found on PATH; run: codex mcp add murmur -- " + exe + " mcp codex")
+	text := string(b)
+	blk := findBlock(text)
+	switch {
+	case blk.found && !blk.whole:
+		return byHandTOML(path, exe, add, "has murmur's block, changed since murmur wrote it")
+	case blk.other:
+		return byHandTOML(path, exe, add, "has an MCP server called murmur that murmur didn't write")
+	case !blk.found && !add:
+		return nil
 	}
-	args := []string{"mcp", "add", "murmur"}
-	if home := os.Getenv("MURMUR_HOME"); home != "" {
-		args = append(args, "--env", "MURMUR_HOME="+home)
-	}
-	if out, err := exec.Command(codex, append(args, "--", exe, "mcp", "codex")...).CombinedOutput(); err != nil {
-		return errors.New(strings.TrimSpace(string(out)))
-	}
-	return editTOML(toml, func(text string) (string, bool) {
-		return strings.TrimRight(text, "\n") + "\n" + codexApprovals, true
-	})
-}
-
-func codexMCPRegistered(codex string) bool {
-	return exec.Command(codex, "mcp", "get", "murmur").Run() == nil
-}
-
-func codexMCPConnected(s *Spec) bool {
-	if codex, err := exec.LookPath("codex"); err == nil && codexMCPRegistered(codex) {
-		return true
-	}
-	b, _ := os.ReadFile(s.tomlPath())
-	for _, blk := range tomlBlocks(string(b)) {
-		if blk.name == "mcp_servers.murmur" || strings.HasPrefix(blk.name, "mcp_servers.murmur.") {
-			return true
+	var out string
+	switch {
+	case blk.found && add: // in its place
+		out = text[:blk.start] + codexBlock(exe) + text[blk.end:]
+	case blk.found: // with the blank line murmur put before it
+		before := text[:blk.start]
+		if strings.HasSuffix(before, "\n\n") {
+			before = before[:len(before)-1]
 		}
+		out = before + text[blk.end:]
+	default:
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		if text != "" {
+			text += "\n"
+		}
+		out = text + codexBlock(exe)
 	}
-	return false
+	if out == string(b) {
+		return nil
+	}
+	if _, err := os.Stat(path + ".before-murmur"); errors.Is(err, os.ErrNotExist) {
+		_ = os.WriteFile(path+".before-murmur", b, 0o600)
+	}
+	return harness.WriteAtomic(path, []byte(out), 0o600)
+}
+
+// codexMCPConnected says whether config.toml has murmur's block, or any server called murmur.
+func codexMCPConnected(s *Spec) bool {
+	b, _ := os.ReadFile(s.tomlPath())
+	blk := findBlock(string(b))
+	return blk.found || blk.other
+}
+
+// inlineHooks finds hooks kept in config.toml: [[hooks.SessionStart]] and the like. hooks.state, where Codex keeps
+// which hooks it trusts, isn't one.
+var inlineHooks = regexp.MustCompile(`(?m)^\s*\[\[?\s*hooks\s*\.\s*(SessionStart|SessionEnd|UserPromptSubmit|PreToolUse|PermissionRequest|PostToolUse|PreCompact|PostCompact|SubagentStart|SubagentStop|Stop|Interrupt)\b`)
+
+// codexInline says whether the person keeps Codex hooks inline in config.toml, besides murmur's in hooks.json.
+func codexInline(s *Spec) bool {
+	b, _ := os.ReadFile(s.tomlPath())
+	return inlineHooks.Match(b)
 }
 
 // ---------------------------------------------------------------- Codex's thread names

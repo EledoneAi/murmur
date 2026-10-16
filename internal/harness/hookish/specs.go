@@ -24,9 +24,9 @@ func mcpArgs(exe, name string) map[string]any {
 	return map[string]any{"command": exe, "args": []string{"mcp", name}}
 }
 
-// Codex: hooks in $CODEX_HOME/hooks.json, or inline in config.toml when its person keeps theirs there, which Codex
-// runs once its person trusts them; the MCP server through `codex mcp add`, its two tools approved in config.toml.
-// Its hooks fire in a shared background server rather than the terminal's process, and its edits are patches.
+// Codex: hooks in $CODEX_HOME/hooks.json, which Codex runs once its person trusts them; the MCP server in a block of
+// murmur's own in config.toml, its two tools approved. Its hooks fire in a shared background server rather than the
+// terminal's process, and its edits are patches.
 var Codex = &Spec{
 	name: "codex", title: "Codex", command: "codex", dirVar: "CODEX_HOME", dir: homeDir("CODEX_HOME", ".codex"),
 	hooksFile: "hooks.json", tomlFile: "config.toml", layout: groups, timeoutUnit: 1, dialect: claudeStyle,

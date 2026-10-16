@@ -28,7 +28,7 @@ type Spec struct {
 	dirVar      string        // its own variable for its folder, which a development build needs set
 	dir         func() string // its folder
 	hooksFile   string        // under dir
-	tomlFile    string        // under dir: a TOML file that may hold the hooks instead (Codex's config.toml)
+	tomlFile    string        // under dir: the TOML file murmur's MCP server goes in (Codex's config.toml)
 	layout      layout
 	timeoutUnit int // what a hook's timeout counts: 1 for seconds, 1000 for milliseconds
 	hooks       []hook
@@ -99,13 +99,7 @@ func (s *Spec) Installed() bool {
 }
 
 // Connected says whether murmur's hooks are in the harness's settings, as any version wrote them.
-func (s *Spec) Connected() bool {
-	if s.tomlFile != "" && tomlHasOurHooks(s.tomlPath()) {
-		return true
-	}
-	o, _, err := harness.ReadObject(s.hooksPath())
-	return err == nil && harness.HasOurs(o.Sub("hooks"))
-}
+func (s *Spec) Connected() bool { return s.jsonHasOurs() }
 
 // Holds says whether anything of murmur's is in the harness's settings: hooks, MCP server or tool permissions. A
 // settings file murmur can't read may: uninstall tries it, and says what went wrong.
@@ -148,30 +142,14 @@ func byHand(path string, add bool, what any) error {
 	return fmt.Errorf("%s %w: take murmur's entries out of it by hand", config.Tildify(path), harness.ErrComments)
 }
 
-// editHooks adds (or with add=false removes) murmur's hooks where the harness keeps them. A hook of murmur's is
-// rewritten in its place. Removing touches no file that holds none of murmur's.
-func (s *Spec) editHooks(exe string, add bool) error {
-	if s.tomlFile != "" {
-		inline := tomlHasOurHooks(s.tomlPath()) || (tomlHasHooks(s.tomlPath()) && !s.jsonHasOurs())
-		if add && inline { // the person keeps their hooks in config.toml: murmur's go there too, not in a second place
-			if err := editTOMLHooks(s, exe, true); err != nil {
-				return err
-			}
-			return s.editJSONHooks(exe, false)
-		}
-		if err := editTOMLHooks(s, exe, false); err != nil {
-			return err
-		}
-	}
-	return s.editJSONHooks(exe, add)
-}
-
 func (s *Spec) jsonHasOurs() bool {
 	o, _, err := harness.ReadObject(s.hooksPath())
 	return err == nil && harness.HasOurs(o.Sub("hooks"))
 }
 
-func (s *Spec) editJSONHooks(exe string, add bool) error {
+// editHooks adds (or with add=false removes) murmur's hooks in the harness's hooks file. A hook of murmur's is
+// rewritten in its place. Removing touches no file that holds none of murmur's.
+func (s *Spec) editHooks(exe string, add bool) error {
 	path := s.hooksPath()
 	if s.layout == ownFile {
 		if !add {
@@ -303,7 +281,7 @@ func (s *Spec) Connect(exe string, _ func(string) bool) []protocol.Check {
 	if err := s.editHooks(exe, true); err != nil {
 		checks = append(checks, protocol.Check{Name: "Hooks", Detail: err.Error()})
 	} else {
-		checks = append(checks, protocol.Check{Name: "Hooks", OK: true, Detail: s.events() + " in " + config.Tildify(s.hooksWhere())})
+		checks = append(checks, protocol.Check{Name: "Hooks", OK: true, Detail: s.events() + " in " + config.Tildify(s.hooksPath())})
 	}
 	var err error
 	if s.mcpFile == "" {
@@ -322,15 +300,11 @@ func (s *Spec) Connect(exe string, _ func(string) bool) []protocol.Check {
 	if s.note != "" {
 		checks = append(checks, protocol.Check{Name: "Next", Detail: s.note})
 	}
-	return append(checks, s.version()...)
-}
-
-// hooksWhere is the file that holds murmur's hooks.
-func (s *Spec) hooksWhere() string {
-	if s.tomlFile != "" && tomlHasOurHooks(s.tomlPath()) {
-		return s.tomlPath()
+	if s.tomlFile != "" && codexInline(s) {
+		checks = append(checks, protocol.Check{Name: "Next", Detail: "you keep Codex hooks in " + config.Tildify(s.tomlPath()) +
+			", and murmur's are in hooks.json: Codex warns that both are in use until one holds them all"})
 	}
-	return s.hooksPath()
+	return append(checks, s.version()...)
 }
 
 // Disconnect takes out what Connect added, wherever it is, and goes on past a file it can't change, to say so at the
@@ -358,7 +332,7 @@ func (s *Spec) Checks() []protocol.Check {
 		current, fix = false, "an older murmur's, which this version doesn't run: run murmur join, then restart your sessions"
 	}
 	checks := []protocol.Check{
-		harness.Check(current, "Hooks", s.events()+" in "+config.Tildify(s.hooksWhere()), fix),
+		harness.Check(current, "Hooks", s.events()+" in "+config.Tildify(s.hooksPath()), fix),
 		harness.Check(s.mcpConnected(), "MCP server", "murmur: who, send", "missing: run murmur join"),
 	}
 	if s.checks != nil {

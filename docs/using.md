@@ -160,9 +160,9 @@ in how a message reaches their agents:
   person, and can't approve anything.
 - **Context.** How full an agent's context window is shows for Claude Code only.
 - **Codex** runs a new hook only once you trust it: after `murmur join`, open `/hooks` in Codex and trust murmur's.
-  If you keep your Codex hooks in `config.toml`, murmur's go there too. Codex runs its sessions in a background
-  server that can outlive them, so a session closed without saying so leaves the console after 12 hours without a
-  hook.
+  murmur's hooks go in `hooks.json`; if you keep yours in `config.toml`, Codex warns that both are in use until one
+  place holds them all. Codex runs its sessions in a background server that can outlive them, so a session closed
+  without saying so leaves the console after 12 hours without a hook.
 - **Gemini CLI** has folder trust on by default, and in a folder you haven't trusted it runs no hooks and no MCP
   server: murmur doesn't see its sessions there. Trust each project folder when Gemini CLI asks.
 - **Cursor** also runs the hooks in `~/.claude/settings.json`. When `murmur join` set Cursor up, murmur's hooks
@@ -182,9 +182,11 @@ For each coding tool it finds, and only those:
   for an approval and drops it after 5 minutes, and with `"refuse"` agents get no messages at all. `join` and
   `doctor` say so, and `join` offers to set it when it runs in a terminal. The `murmur` MCP server, registered
   with `claude mcp add --scope user`.
-- **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`), or `config.toml` when your hooks are there: hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
-  (`apply_patch`), `PostToolUse`, `Stop`, `PermissionRequest` and `SessionEnd`, after your own. The MCP server,
-  through `codex mcp add`, and in `config.toml` its two tools set to run without asking.
+- **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`): hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
+  (`apply_patch`), `PostToolUse`, `Stop`, `PermissionRequest` and `SessionEnd`, after your own. At the end of
+  `config.toml`, a block of murmur's own between two comment lines: the MCP server, with its two tools set to run
+  without asking. murmur changes or removes that block only as it wrote it, and reads nothing else in the file; if
+  you changed it, or have another server called `murmur`, join and uninstall say what to do by hand.
 - **Cursor**, `~/.cursor/hooks.json`: hooks on `sessionStart`, `beforeSubmitPrompt`, `preToolUse` (`Write`),
   `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:who` and `murmur:send` in the
   editor's MCP allowlist in `permissions.json`, only where you keep one (an allowlist murmur created would replace
@@ -200,7 +202,8 @@ For each coding tool it finds, and only those:
 - `~/.murmur/`: config and sign-in token, the background process's socket and log, message history.
 
 Settings files keep their keys in order, their indentation and what they say, and a copy of the original is kept as
-`<file>.before-murmur`; murmur's own entries keep their place when join runs again. A settings file with comments
+`<file>.before-murmur`; murmur's own entries keep their place when join runs again. A settings file you keep as a
+link, with your dotfiles, stays a link: murmur writes the file it points to. A settings file with comments
 (Gemini CLI allows them) is never rewritten: join says what to add by hand. Murmur finds its own entries by their
 exact command, `murmur hook <tool> <event>`.
 

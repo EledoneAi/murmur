@@ -223,45 +223,6 @@ func TestCodexHooks(t *testing.T) {
 	}
 }
 
-// The MCP server goes through `codex mcp add`, with murmur's tools approved and MURMUR_HOME passed on; uninstall
-// leaves config.toml without them.
-func TestCodexMCP(t *testing.T) {
-	root := sandbox(t)
-	bin := filepath.Join(root, "bin")
-	_ = os.MkdirAll(bin, 0o755)
-	fake := `#!/bin/sh
-echo "$*" >> "$CODEX_HOME/calls"
-case "$2" in
-add) printf '\n[mcp_servers.murmur]\ncommand = "x"\n' >> "$CODEX_HOME/config.toml" ;;
-get) grep -q 'mcp_servers.murmur' "$CODEX_HOME/config.toml" ;;
-esac
-`
-	_ = os.WriteFile(filepath.Join(bin, "codex"), []byte(fake), 0o755)
-	t.Setenv("PATH", bin+":/bin:/usr/bin")
-	toml := filepath.Join(os.Getenv("CODEX_HOME"), "config.toml")
-	_ = os.WriteFile(toml, []byte("model = \"gpt\"\n\n[mcp_servers.docs]\ncommand = \"docs\"\n"), 0o600)
-	t.Setenv("MURMUR_HOME", filepath.Join(root, "murmur"))
-	if err := codexMCP(Codex, "/opt/murmur", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := codexMCP(Codex, "/opt/murmur", true); err != nil { // again, as after an update
-		t.Fatal(err)
-	}
-	got := read(t, toml)
-	if strings.Count(got, "[mcp_servers.murmur.tools.send]\napproval_mode = \"approve\"") != 1 || !strings.Contains(got, "[mcp_servers.docs]") {
-		t.Fatalf("config.toml:\n%s", got)
-	}
-	if calls := read(t, filepath.Join(os.Getenv("CODEX_HOME"), "calls")); !strings.Contains(calls, "mcp add murmur --env MURMUR_HOME="+filepath.Join(root, "murmur")+" -- /opt/murmur mcp codex") {
-		t.Fatalf("calls:\n%s", calls)
-	}
-	if err := codexMCP(Codex, "", false); err != nil {
-		t.Fatal(err)
-	}
-	if got := read(t, toml); strings.Contains(got, "murmur") || got != "model = \"gpt\"\n\n[mcp_servers.docs]\ncommand = \"docs\"\n" {
-		t.Fatalf("after uninstall:\n%q", got)
-	}
-}
-
 // A thread's name is the newest its person gave it with /rename.
 func TestCodexTitle(t *testing.T) {
 	sandbox(t)
@@ -392,71 +353,6 @@ func TestDevGuard(t *testing.T) {
 	}
 }
 
-// Taking murmur's tables out of config.toml leaves the rest as its person wrote it: the comment that introduces the
-// next table, a multi-line string that looks like a table, blank lines. A file without murmur's tables isn't touched,
-// and a changed one is copied first.
-func TestCodexTOML(t *testing.T) {
-	sandbox(t)
-	path := filepath.Join(Codex.dir(), "config.toml")
-	theirs := "model = \"gpt\"\n\n\n[mcp_servers.docs]\ncommand = \"docs\"\n" +
-		"description = '''\n[mcp_servers.murmur]\nnot a table\n'''\n"
-	withOurs := theirs + "\n[mcp_servers.murmur]\ncommand = \"x\"\n\n# my profiles\n[profiles.fast]\nmodel = \"mini\"\n" +
-		"\n[mcp_servers.murmur.tools.who]\napproval_mode = \"approve\"\n"
-	_ = os.WriteFile(path, []byte(withOurs), 0o600)
-	if err := dropTables(path, "mcp_servers.murmur"); err != nil {
-		t.Fatal(err)
-	}
-	want := theirs + "\n# my profiles\n[profiles.fast]\nmodel = \"mini\"\n"
-	if got := read(t, path); got != want {
-		t.Fatalf("got\n%q\nwant\n%q", got, want)
-	}
-	if read(t, path+".before-murmur") != withOurs {
-		t.Fatal("no copy of the file as it was")
-	}
-	st, _ := os.Stat(path)
-	if err := dropTables(path, "mcp_servers.murmur"); err != nil {
-		t.Fatal(err)
-	}
-	if st2, _ := os.Stat(path); !st2.ModTime().Equal(st.ModTime()) {
-		t.Fatal("rewrote a file without murmur's tables")
-	}
-}
-
-// When the person keeps their Codex hooks in config.toml, murmur's go there too, after theirs; rewriting them keeps
-// their place, and uninstall leaves the person's.
-func TestCodexInlineHooks(t *testing.T) {
-	sandbox(t)
-	path := filepath.Join(Codex.dir(), "config.toml")
-	theirs := "[[hooks.PreToolUse]]\nmatcher = \"^Bash$\"\n\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\ncommand = 'policy.py'\n\n" +
-		"# trusted hooks\n[hooks.state.\"/x/config.toml:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:1\"\n"
-	_ = os.WriteFile(path, []byte(theirs), 0o600)
-	if checks := Codex.Connect("/opt/murmur", nil); !checks[0].OK || !strings.Contains(checks[0].Detail, "config.toml") {
-		t.Fatalf("connect: %+v", checks)
-	}
-	if _, err := os.Stat(Codex.hooksPath()); !os.IsNotExist(err) {
-		t.Fatal("hooks.json written next to inline hooks")
-	}
-	got := read(t, path)
-	if !strings.HasPrefix(got, theirs) || strings.Count(got, `command = "/opt/murmur hook codex`) != 7 ||
-		!strings.Contains(got, "[[hooks.PreToolUse]]\nmatcher = \"apply_patch\"\n\n[[hooks.PreToolUse.hooks]]") || !Codex.Connected() {
-		t.Fatalf("config.toml:\n%s", got)
-	}
-	// the person adds a hook after murmur's; joining again keeps murmur's where it was
-	mine := "\n[[hooks.Stop]]\n\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = 'after.sh'\n"
-	_ = os.WriteFile(path, []byte(got+mine), 0o600)
-	Codex.Connect("/usr/local/bin/murmur", nil)
-	again := read(t, path)
-	if strings.Contains(again, "/opt/murmur") || !strings.HasSuffix(again, mine) || strings.Count(again, "/usr/local/bin/murmur hook codex") != 7 {
-		t.Fatalf("joined again:\n%s", again)
-	}
-	if err := Codex.Disconnect(""); err != nil {
-		t.Fatal(err)
-	}
-	if got := read(t, path); got != theirs+mine {
-		t.Fatalf("after uninstall:\n%q\nwant\n%q", got, theirs+mine)
-	}
-}
-
 // Joining again rewrites murmur's hook where it was in hooks.json, so the person's hooks after it keep the place Codex
 // trusted them at.
 func TestCodexHooksInPlace(t *testing.T) {
@@ -499,15 +395,16 @@ func TestUninstallLeavesNothing(t *testing.T) {
 	}
 
 	toml := filepath.Join(Codex.dir(), "config.toml")
-	_ = os.WriteFile(toml, []byte("model = \"gpt\"\n\n[mcp_servers.murmur]\ncommand = \"x\"\n"+codexApprovals), 0o600)
+	_ = os.WriteFile(toml, []byte("model = \"gpt\"\n"), 0o600)
+	Codex.Connect("/opt/murmur", nil)
 	if !Codex.Holds() {
 		t.Fatal("Codex holds murmur's MCP server")
 	}
-	if err := Codex.Disconnect(""); err != nil { // codex isn't on PATH
+	if err := Codex.Disconnect(""); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, toml); got != "model = \"gpt\"\n" {
-		t.Fatalf("config.toml without codex on PATH:\n%q", got)
+		t.Fatalf("config.toml after uninstall:\n%q", got)
 	}
 
 	gemini := "{\n    \"theme\": \"Dracula\"\n}\n" // four spaces, which murmur's own writes don't use

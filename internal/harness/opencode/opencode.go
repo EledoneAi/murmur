@@ -94,7 +94,7 @@ func (o OpenCode) Connect(exe string, _ func(string) bool) []protocol.Check {
 	}
 	err := os.MkdirAll(filepath.Dir(path), 0o755)
 	if err == nil {
-		err = harness.WriteAtomic(path, []byte(Source(exe)), 0o644)
+		err = harness.ReplaceFile(path, []byte(Source(exe)), 0o644) // never through a link
 	}
 	if err != nil {
 		return []protocol.Check{{Name: "Plugin", Detail: err.Error()}}
