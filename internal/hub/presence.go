@@ -325,10 +325,10 @@ func (h *Hub) reindex() *overlapIndex {
 }
 
 // rosterLoop sends every laptop here the whole team whenever something changes, and tells the team pages open here,
-// so every laptop always holds a complete, consistent picture. Each laptop gets the whole team, so a roster costs
-// the team's size times the laptops: rosters go out at rosterRate at most, to the laptops that just connected first,
-// and a big, busy team gets them every few seconds rather than in bursts that would take the CPU, memory and network
-// its messages need.
+// so every laptop always holds a complete, consistent picture: a laptop's first roster already has its agents, as
+// the hub's checks do. Each laptop gets the whole team, so a roster costs the team's size times the laptops: rosters
+// go out at rosterRate at most, to the laptops that just connected first, and a big, busy team gets them every few
+// seconds rather than in bursts that would take the CPU, memory and network its messages need.
 func (h *Hub) rosterLoop(ctx context.Context) {
 	var (
 		r     *roster   // the newest roster
@@ -348,8 +348,6 @@ func (h *Hub) rosterLoop(ctx context.Context) {
 			if stale.IsZero() {
 				stale = time.Now()
 			}
-		case <-h.joined:
-			queue = append(h.takeNewLinks(), queue...)
 		case <-wake.C:
 		}
 		now := time.Now()
@@ -429,15 +427,6 @@ func later(a, b time.Time) time.Time {
 		return a
 	}
 	return b
-}
-
-// takeNewLinks lists the laptops that connected since it last did.
-func (h *Hub) takeNewLinks() []*link {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	fresh := h.newLinks
-	h.newLinks = nil
-	return fresh
 }
 
 // tellPages tells the team pages open here that the team changed, and says about how much they send for it.

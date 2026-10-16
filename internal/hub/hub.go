@@ -71,8 +71,7 @@ type Hub struct {
 	pages    map[string]chan protocol.Frame // message id -> the team page here waiting for its answer
 	streams  map[chan struct{}]bool         // the team pages open here, told when the roster changes
 	teamPage atomic.Pointer[teamEvent]      // what the last roster told the team pages, while some are open
-	newLinks []*link                        // connected since the last roster: rosterLoop greets them
-	joined   chan struct{}                  // a laptop connected
+	newLinks []*link                        // connected since the last roster: the next one goes to them first
 	colours  map[string]int                 // by email, until people change: coloursLocked
 	news     []announcement                 // announcements to repos, newest first, as the store had them
 	newsMu   sync.Mutex                     // one change to the stored announcements at a time
@@ -128,7 +127,7 @@ func New(ctx context.Context, cfg Config, st store.Store, b bus.Bus) (*Hub, erro
 		cfg: cfg, store: st, bus: b, id: cfg.Instance, log: cfg.Log, stop: stop,
 		links: map[string]*link{}, remote: map[string]*presence{}, asked: map[string]time.Time{}, waiting: map[string]*waiter{}, pairs: map[string]*pair{},
 		pages: map[string]chan protocol.Frame{}, streams: map[chan struct{}]bool{}, done: ctx.Done(),
-		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1), joined: make(chan struct{}, 1),
+		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1),
 		gets: downloads{seen: map[string][]time.Time{}},
 	}
 	if err := h.loadSettings(ctx); err != nil {

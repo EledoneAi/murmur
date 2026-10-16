@@ -133,10 +133,6 @@ func (h *Hub) attach(ctx context.Context, l *link, dev store.Device) {
 	l.send(h.welcomeLocked(l))
 	h.mu.Unlock()
 	h.markDirty()
-	select {
-	case h.joined <- struct{}{}:
-	default:
-	}
 	seen := time.Now()
 	h.mu.Lock()
 	if d := h.devices[dev.ID]; d != nil {
