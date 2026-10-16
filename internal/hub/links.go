@@ -66,7 +66,8 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hello.Version = protocol.Clean(protocol.Cut(hello.Version, 40), false)
-	l := &link{dev: dev.ID, email: user.Email, handle: user.Handle, version: hello.Version, out: conn.Out, cancel: conn.Cancel}
+	l := &link{dev: dev.ID, email: user.Email, handle: user.Handle, version: hello.Version, out: conn.Out, roster: conn.Latest,
+		cancel: conn.Cancel}
 	h.attach(ctx, l, dev)
 	h.handle(l, hello)
 	start, reason := time.Now(), "closed by the hub"
@@ -95,7 +96,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 
 func (l *link) send(f protocol.Frame) {
 	select {
-	case l.out <- f:
+	case l.out <- &f:
 	default:
 		l.cancel() // a laptop that can't keep up reconnects and gets a fresh roster
 	}
@@ -108,9 +109,14 @@ func (h *Hub) attach(ctx context.Context, l *link, dev store.Device) {
 		l.agents = old.agents // keep the agents visible until the laptop says hello again
 	}
 	h.links[l.dev] = l
+	h.newLinks = append(h.newLinks, l)
 	l.send(h.welcomeLocked(l))
 	h.mu.Unlock()
 	h.markDirty()
+	select {
+	case h.joined <- struct{}{}:
+	default:
+	}
 	seen := time.Now()
 	h.mu.Lock()
 	if d := h.devices[dev.ID]; d != nil {

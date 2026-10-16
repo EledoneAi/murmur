@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -96,7 +96,50 @@ func (h *Hub) teamFor(email string) (teamView, bool) {
 }
 
 func (h *Hub) teamLocked(me string) teamView {
-	people := h.rosterLocked()
+	people := pageOrder(h.rosterLocked())
+	return teamView{Me: me, People: people, PRs: pullRequests(people), Mine: mine(running(h.holdersLocked()), me),
+		Repos: repos(people), News: h.newsLocked()}
+}
+
+// mine is what a person runs, as running lists it: an empty list rather than none.
+func mine(running map[string][]string, me string) []string {
+	if r := running[me]; r != nil {
+		return r
+	}
+	return []string{}
+}
+
+// teamEvent is what the team pages' stream sends after a roster: the team, encoded once for every page, and the
+// agents each person runs, the one part that differs between viewers.
+type teamEvent struct {
+	shared  []byte              // the people, pull requests, repos and announcements, as members of a JSON object
+	running map[string][]string // by handle
+}
+
+func newTeamEvent(people []protocol.Person, holders []holder, news []newsItem) *teamEvent {
+	people = slices.Clone(people) // laptops share the roster: the page orders its own copy
+	for i := range people {
+		people[i].Agents = slices.Clone(people[i].Agents)
+	}
+	people = pageOrder(people)
+	v := mustJSON(struct {
+		People []protocol.Person `json:"people"`
+		PRs    []pullRequest     `json:"prs"`
+		Repos  []string          `json:"repos"`
+		News   []newsItem        `json:"news"`
+	}{people, pullRequests(people), repos(people), news})
+	return &teamEvent{shared: v[1 : len(v)-1], running: running(holders)}
+}
+
+// event is the team as one person sees it: teamView, as JSON, in parts that pages share.
+func (e *teamEvent) event(me string) net.Buffers {
+	b := append(append([]byte(`{"me":`), mustJSON(me)...), `,"mine":`...)
+	return net.Buffers{append(append(b, mustJSON(mine(e.running, me))...), ','), e.shared, []byte("}")}
+}
+
+// pageOrder puts people with a waiting agent first, and their waiting agents first, and keeps only links a page
+// may show.
+func pageOrder(people []protocol.Person) []protocol.Person {
 	for i := range people {
 		p := &people[i]
 		slices.SortStableFunc(p.Agents, func(a, b protocol.Agent) int {
@@ -114,7 +157,7 @@ func (h *Hub) teamLocked(me string) teamView {
 		return cmp.Or(last(!slices.ContainsFunc(a.Agents, waitingFor), !slices.ContainsFunc(b.Agents, waitingFor)),
 			last(len(a.Agents) == 0, len(b.Agents) == 0))
 	})
-	return teamView{Me: me, People: people, PRs: pullRequests(people), Mine: h.runningLocked(me), Repos: repos(people), News: h.newsLocked()}
+	return people
 }
 
 // pullRequests lists the pull requests of the team's agents, oldest first by their agent's last change, each once.
@@ -151,18 +194,21 @@ func repos(people []protocol.Person) []string {
 	return out
 }
 
-// runningLocked lists the agents a person runs now, on laptops that are online.
-func (h *Hub) runningLocked(handle string) []string {
-	out := []string{}
-	for _, x := range h.holdersLocked() {
-		if x.handle == handle && x.online {
+// running lists the agents each person runs now, on laptops that are online, by handle.
+func running(holders []holder) map[string][]string {
+	out := map[string][]string{}
+	for _, x := range holders {
+		if x.online {
 			for _, a := range x.agents {
-				out = append(out, a.Name)
+				out[x.handle] = append(out[x.handle], a.Name)
 			}
 		}
 	}
-	slices.Sort(out)
-	return slices.Compact(out)
+	for handle, names := range out {
+		slices.Sort(names)
+		out[handle] = slices.Compact(names)
+	}
+	return out
 }
 
 // newsLocked lists the announcements still up, newest first.
@@ -233,12 +279,12 @@ func (h *Hub) teamEvents(w http.ResponseWriter, r *http.Request, me store.User) 
 		case <-beat.C:
 			_, err = io.WriteString(w, ": still here\n\n")
 		case <-changed:
-			v, ok := h.teamFor(me.Email)
+			b, ok := h.teamNow(me.Email)
 			if !ok { // removed from the team since the page opened
 				return
 			}
-			b, _ := json.Marshal(v) // escapes <, > and &: what laptops wrote stays data
-			_, err = fmt.Fprintf(w, "data: %s\n\n", b)
+			b = append(append(net.Buffers{[]byte("data: ")}, b...), []byte("\n\n"))
+			_, err = b.WriteTo(w)
 		}
 		if err == nil {
 			err = rc.Flush()
@@ -247,6 +293,29 @@ func (h *Hub) teamEvents(w http.ResponseWriter, r *http.Request, me store.User) 
 			return
 		}
 	}
+}
+
+// teamNow is the team as a person sees it now, as JSON (which escapes <, > and &: what laptops wrote stays data), or
+// false once they are no longer on it. It comes from the last roster, encoded once for every page open, or is
+// worked out for this page when there is none.
+func (h *Hub) teamNow(email string) (net.Buffers, bool) {
+	e := h.teamPage.Load()
+	h.mu.Lock()
+	u := h.users[email]
+	if u == nil || u.Disabled {
+		h.mu.Unlock()
+		return nil, false
+	}
+	handle := u.Handle
+	var v teamView
+	if e == nil {
+		v = h.teamLocked(handle)
+	}
+	h.mu.Unlock()
+	if e != nil {
+		return e.event(handle), true
+	}
+	return net.Buffers{mustJSON(v)}, true
 }
 
 // teamPRs lists the team's pull requests, oldest first, for a signed-in browser or a laptop.

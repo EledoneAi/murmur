@@ -206,7 +206,8 @@ docker stats load-hub
 
 A hub built with `-tags pprof` serves Go's profiles on `PPROF_ADDR` (`127.0.0.1:6060` unless set):
 `go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=10'`, and `heap`, `goroutine`, `mutex` and
-`block` the same way. Release builds leave it out.
+`block` the same way. Release builds leave it out. `go test ./internal/hub -run '^$' -bench . -benchmem` measures a
+roster and a message without sockets.
 
 ### Claude Code compatibility
 

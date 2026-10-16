@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"hash/maphash"
+	"iter"
 	"maps"
 	"slices"
 	"strings"
@@ -230,20 +232,34 @@ type holder struct {
 }
 
 // holdersLocked lists every laptop the team can see: this instance's, then the others'.
-func (h *Hub) holdersLocked() []holder {
-	var out []holder
-	for _, l := range h.links {
-		if p := h.remote[l.dev]; !l.gone.IsZero() && p != nil && p.Online {
-			continue // gone from here, online on another instance
+func (h *Hub) holdersLocked() []holder { return slices.Collect(h.holdersOfLocked("")) }
+
+// holdersOfLocked goes through one person's laptops, or everyone's for "", as holdersLocked lists them, without
+// listing them all first: each message looks for its recipient this way.
+func (h *Hub) holdersOfLocked(handle string) iter.Seq[holder] {
+	return func(yield func(holder) bool) {
+		for _, l := range h.links {
+			if handle != "" && l.handle != handle {
+				continue
+			}
+			if p := h.remote[l.dev]; !l.gone.IsZero() && p != nil && p.Online {
+				continue // gone from here, online on another instance
+			}
+			if !yield(holder{dev: l.dev, email: l.email, handle: l.handle, agents: l.agents, online: l.gone.IsZero()}) {
+				return
+			}
 		}
-		out = append(out, holder{dev: l.dev, email: l.email, handle: l.handle, agents: l.agents, online: l.gone.IsZero()})
-	}
-	for _, p := range h.remote {
-		if l, here := h.links[p.Device]; !here || (!l.gone.IsZero() && p.Online) {
-			out = append(out, holder{dev: p.Device, email: p.Email, handle: p.Handle, agents: p.Agents, online: p.Online})
+		for _, p := range h.remote {
+			if handle != "" && p.Handle != handle {
+				continue
+			}
+			if l, here := h.links[p.Device]; !here || (!l.gone.IsZero() && p.Online) {
+				if !yield(holder{dev: p.Device, email: p.Email, handle: p.Handle, agents: p.Agents, online: p.Online}) {
+					return
+				}
+			}
 		}
 	}
-	return out
 }
 
 // toDeviceLocked sends a frame to one laptop, wherever it is connected. replyTo names the laptop to tell when the
@@ -287,7 +303,7 @@ func (h *Hub) markDirty() {
 	}
 }
 
-// rosterGap is the least time between two rosters: a burst of changes makes one.
+// rosterGap is the least time between a change and its roster: a burst of changes makes one.
 const rosterGap = 100 * time.Millisecond
 
 // overlapIndex is the latest overlap index, or a new one before the first roster.
@@ -308,41 +324,178 @@ func (h *Hub) reindex() *overlapIndex {
 	return x
 }
 
-// rosterLoop sends every laptop here the whole team whenever something changes, and tells the team pages open here.
-// A team is a few dozen agents, so the whole roster is a few kilobytes and every laptop always holds a complete,
-// consistent picture.
+// rosterLoop sends every laptop here the whole team whenever something changes, and tells the team pages open here,
+// so every laptop always holds a complete, consistent picture. Each laptop gets the whole team, so a roster costs
+// the team's size times the laptops: rosters go out at rosterRate at most, to the laptops that just connected first,
+// and a big, busy team gets them every few seconds rather than in bursts that would take the CPU, memory and network
+// its messages need.
 func (h *Hub) rosterLoop(ctx context.Context) {
+	var (
+		r     *roster   // the newest roster
+		queue []*link   // the laptops still to hand it to, in turn
+		pages bool      // the team pages haven't heard of it yet
+		stale time.Time // when something changed since it, if something did
+		built time.Time // when it was worked out, and how long that took
+		took  time.Duration
+		paid  time.Time // until when what was handed out uses up rosterRate
+	)
+	wake := time.NewTimer(time.Hour)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-h.dirty:
-		}
-		time.Sleep(rosterGap) // gather bursts, such as a laptop reporting several sessions
-		h.mu.Lock()
-		people, holders, s := h.rosterLocked(), h.holdersLocked(), h.settings
-		var links []*link
-		for _, l := range h.links {
-			if l.gone.IsZero() {
-				links = append(links, l)
+			if stale.IsZero() {
+				stale = time.Now()
 			}
+		case <-h.joined:
+			queue = append(h.takeNewLinks(), queue...)
+		case <-wake.C:
 		}
-		h.mu.Unlock()
-		// overlaps are worked out without the lock: the hub keeps answering while a big team's are found
-		x := newIndex(holders, s)
-		h.index.Store(x)
-		for _, l := range links {
-			l.send(protocol.Frame{T: protocol.FrameRoster, People: people, Pairs: x.current(l.handle)})
+		now := time.Now()
+		// once a burst of changes is over, such as a laptop reporting several sessions, and at most a tenth of the time
+		rework := later(stale.Add(rosterGap), built.Add(10*took))
+		if !stale.IsZero() && !now.Before(rework) {
+			r, queue = h.buildRoster(queue)
+			built, took, stale, pages = now, time.Since(now), time.Time{}, true
 		}
-		h.mu.Lock()
-		for c := range h.streams {
-			select {
-			case c <- struct{}{}:
-			default: // it hasn't sent the last change yet, and reads the team afresh when it does
+		for r != nil && (pages || len(queue) > 0) && paid.Before(now.Add(rosterBurst)) {
+			n := 0
+			if pages {
+				n, pages = h.tellPages(), false
+			} else {
+				n, queue = r.hand(queue[0]), queue[1:]
 			}
+			paid = later(paid, now).Add(time.Duration(n) * time.Second / rosterRate)
 		}
-		h.mu.Unlock()
+		next := time.Hour
+		if r != nil && (pages || len(queue) > 0) {
+			next = paid.Sub(now) - rosterBurst
+		}
+		if !stale.IsZero() {
+			next = min(next, rework.Sub(now))
+		}
+		wake.Reset(max(next, 0))
 	}
+}
+
+// rosterRate is how many bytes of rosters a second this instance hands out at most, to its laptops and team pages
+// together, and rosterBurst how far ahead of it it may go at once.
+//
+// ponytail: the whole team each time makes the rosters' cost grow with the square of the team. Rosters that carry
+// only who changed would make it linear: a protocol change, for teams of thousands.
+const (
+	rosterRate  = 64 << 20
+	rosterBurst = rosterGap
+)
+
+// buildRoster works out the roster and the team pages' view of it, and lists the laptops to hand it to: those that
+// just connected and those still waiting for the last one first, then every other laptop here.
+func (h *Hub) buildRoster(waiting []*link) (*roster, []*link) {
+	h.mu.Lock()
+	people, holders, s := h.rosterLocked(), h.holdersLocked(), h.settings
+	queue, in := make([]*link, 0, len(h.links)), map[*link]bool{}
+	for _, list := range [][]*link{h.newLinks, waiting, slices.Collect(maps.Values(h.links))} {
+		for _, l := range list {
+			if !in[l] && l.gone.IsZero() && h.links[l.dev] == l {
+				in[l] = true
+				queue = append(queue, l)
+			}
+		}
+	}
+	h.newLinks = nil
+	var news []newsItem
+	if len(h.streams) > 0 {
+		news = h.newsLocked()
+	}
+	h.mu.Unlock()
+	// overlaps are worked out, and the roster encoded, without the lock: the hub keeps answering meanwhile
+	x := newIndex(holders, s)
+	h.index.Store(x)
+	if news == nil {
+		h.teamPage.Store(nil)
+	} else {
+		h.teamPage.Store(newTeamEvent(people, holders, news))
+	}
+	return newRoster(people, x), queue
+}
+
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+// takeNewLinks lists the laptops that connected since it last did.
+func (h *Hub) takeNewLinks() []*link {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	fresh := h.newLinks
+	h.newLinks = nil
+	return fresh
+}
+
+// tellPages tells the team pages open here that the team changed, and says about how much they send for it.
+func (h *Hub) tellPages() int {
+	e := h.teamPage.Load()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.streams {
+		select {
+		case c <- struct{}{}:
+		default: // it hasn't sent the last change yet, and sends the newest when it does
+		}
+	}
+	if e == nil {
+		return 0
+	}
+	return len(h.streams) * len(e.shared)
+}
+
+// roster is one roster as JSON in two parts: the team, encoded once for every laptop, then what each person's own
+// roster adds, their overlaps. Only rosterLoop uses it.
+type roster struct {
+	head    []byte // the frame up to the end of the team
+	headSum uint64 // its hash
+	x       *overlapIndex
+	tails   map[string][]byte // by handle
+	sums    map[string]uint64 // by handle: the whole frame's hash
+}
+
+var hashSeed = maphash.MakeSeed()
+
+func newRoster(people []protocol.Person, x *overlapIndex) *roster {
+	head := []byte(`{"t":"` + protocol.FrameRoster + `"`)
+	if len(people) > 0 { // as omitempty would
+		head = append(append(head, `,"people":`...), mustJSON(people)...)
+	}
+	return &roster{head: head, headSum: maphash.Bytes(hashSeed, head), x: x, tails: map[string][]byte{}, sums: map[string]uint64{}}
+}
+
+// frame is a person's roster, in its two parts, and the hash of the whole: protocol.Frame{T: FrameRoster, People:
+// the team, Pairs: their overlaps}, as json.Marshal would write it.
+func (r *roster) frame(handle string) (head, tail []byte, sum uint64) {
+	tail, ok := r.tails[handle]
+	if !ok {
+		tail = []byte("}")
+		if pairs := r.x.current(handle); len(pairs) > 0 {
+			tail = append(append([]byte(`,"pairs":`), mustJSON(pairs)...), '}')
+		}
+		r.tails[handle], r.sums[handle] = tail, maphash.Comparable(hashSeed, [2]uint64{r.headSum, maphash.Bytes(hashSeed, tail)})
+	}
+	return r.head, tail, r.sums[handle]
+}
+
+// hand gives a laptop this roster, unless it has it already, and returns the bytes it handed.
+func (r *roster) hand(l *link) int {
+	head, tail, sum := r.frame(l.handle)
+	if l.shown == sum {
+		return 0
+	}
+	l.shown = sum
+	l.roster(head, tail)
+	return len(head) + len(tail)
 }
 
 // rosterBudget keeps the team list under what a laptop reads in one frame, whatever its agents say of themselves.
@@ -359,17 +512,20 @@ func worstSize(a protocol.Agent) int {
 }
 
 // coloursLocked gives each person their colour: everyone who ever joined, removed people included so nobody's colour
-// moves, in the order they joined.
+// moves, in the order they joined. It is worked out again only once people change; callers don't change it.
 func (h *Hub) coloursLocked() map[string]int {
+	if h.colours != nil {
+		return h.colours
+	}
 	users := slices.Collect(maps.Values(h.users))
 	slices.SortFunc(users, func(a, b *store.User) int {
 		return cmp.Or(a.Created.Compare(b.Created), strings.Compare(a.Email, b.Email))
 	})
-	out := make(map[string]int, len(users))
+	h.colours = make(map[string]int, len(users))
 	for i, u := range users {
-		out[u.Email] = i % protocol.Colours
+		h.colours[u.Email] = i % protocol.Colours
 	}
-	return out
+	return h.colours
 }
 
 func (h *Hub) rosterLocked() []protocol.Person {
@@ -382,27 +538,28 @@ func (h *Hub) rosterLocked() []protocol.Person {
 	}
 	type placed struct {
 		p *protocol.Person
-		a protocol.Agent
+		a *protocol.Agent // as its laptop said, which nothing changes
 	}
 	var all []placed
-	for _, x := range h.holdersLocked() {
+	for x := range h.holdersOfLocked("") {
 		p := byEmail[x.email]
 		if p == nil {
 			continue
 		}
 		p.Online = p.Online || x.online
-		for _, a := range x.agents {
-			a.Files, a.Tree = nil, ""
-			all = append(all, placed{p, a})
+		for i := range x.agents {
+			all = append(all, placed{p, &x.agents[i]})
 		}
 	}
 	slices.SortFunc(all, func(a, b placed) int { return cmp.Compare(b.a.Since, a.a.Since) })
 	size := 1024 * len(byEmail)
 	for _, x := range all {
-		if size += worstSize(x.a); size > rosterBudget {
+		if size += worstSize(*x.a); size > rosterBudget {
 			break // the least recently active agents are left out, rather than every laptop dropping its connection
 		}
-		x.p.Agents = append(x.p.Agents, x.a)
+		a := *x.a
+		a.Files, a.Tree = nil, ""
+		x.p.Agents = append(x.p.Agents, a)
 	}
 	var out []protocol.Person
 	for _, p := range byEmail {

@@ -210,6 +210,7 @@ func (h *Hub) putUser(ctx context.Context, u store.User) error {
 		delete(h.handles, old.Handle)
 	}
 	h.users[u.Email], h.handles[u.Handle] = &u, &u
+	h.colours = nil
 	h.mu.Unlock()
 	h.markDirty()
 	h.changed(ctx, "people")

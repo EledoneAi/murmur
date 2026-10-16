@@ -82,6 +82,7 @@ A restart loses nothing that matters: laptops reconnect, say hello again, and re
 - GitHub posts pull request events to `/github/webhook`, signed with the team's secret. When one merges, the instance that took the event reads its files from GitHub's API and tells the agents changing them, wherever they are connected.
 Ceilings, on purpose:
 - Every instance sees every event. A team is a few hundred laptops at most, so that's fine. Partition by person if teams ever get much bigger.
+- Every laptop gets the whole team in each roster, so rosters cost the team's size times its laptops. An instance encodes each roster once and hands out at most 64 MB of them a second, laptops that just connected first: the consoles of a big, busy team catch up every few seconds, and its messages keep their speed. Rosters that carry only who changed would lift this ceiling; they need a new protocol.
 - Loop limits between two agents are counted per instance. Agents connected to different instances can exchange up to twice the limit before it trips.
 
 ### Configuration
