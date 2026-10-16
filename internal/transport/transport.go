@@ -5,7 +5,7 @@ package transport
 import (
 	"context"
 	"encoding/json"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
@@ -24,8 +24,10 @@ type Conn struct {
 	Cancel context.CancelFunc   // ends the connection
 	ctx    context.Context
 	c      *websocket.Conn
-	latest atomic.Pointer[[][]byte] // the newest frame Latest handed over, not written yet
-	ready  chan struct{}            // Latest handed one over
+	mu     sync.Mutex
+	latest [][]byte      // the newest frame Latest handed over, not written yet
+	ahead  int           // the frames in Out before it, which go first
+	ready  chan struct{} // Latest handed one over
 }
 
 // New starts the writer: it drains Out and Latest's frame, and pings, until the context ends or a write fails.
@@ -38,17 +40,43 @@ func New(ctx context.Context, c *websocket.Conn, depth int) *Conn {
 }
 
 // Latest hands the writer a frame already encoded, which replaces the one handed over before if that one isn't
-// written yet: a peer that reads slowly skips frames it couldn't take instead of making them pile up here. The hub
-// sends rosters this way. Frames in Out go first.
+// written yet, and takes its place: a peer that reads slowly skips frames it couldn't take instead of making them
+// pile up here. The hub sends rosters this way. The frame goes after the frames already in Out when the first of them
+// was handed over, and before those queued since, as in one queue: a message never overtakes a roster handed over
+// before it.
 //
 // The frame comes in parts, written one after the other as one message, so connections can share the large ones.
 // Each part goes as a frame of the message, as WebSocket allows, and the peer reads the message whole.
 func (t *Conn) Latest(parts ...[]byte) {
-	t.latest.Store(&parts)
+	t.mu.Lock()
+	if t.latest == nil {
+		t.ahead = len(t.Out)
+	}
+	t.latest = parts
+	t.mu.Unlock()
 	select {
 	case t.ready <- struct{}{}:
 	default:
 	}
+}
+
+// due takes Latest's frame once the frames before it are written.
+func (t *Conn) due() [][]byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.ahead > 0 {
+		return nil
+	}
+	parts := t.latest
+	t.latest = nil
+	return parts
+}
+
+// took counts a frame taken from Out, one fewer before Latest's.
+func (t *Conn) took() {
+	t.mu.Lock()
+	t.ahead = max(t.ahead-1, 0)
+	t.mu.Unlock()
 }
 
 func (t *Conn) write() {
@@ -56,19 +84,16 @@ func (t *Conn) write() {
 	defer tick.Stop()
 	for {
 		var err error
-		select {
-		case f := <-t.Out: // ahead of a roster waiting beside it
-			err = t.frame(f)
-		default:
+		if parts := t.due(); parts != nil {
+			err = t.parts(parts)
+		} else {
 			select {
 			case <-t.ctx.Done():
 				return
 			case f := <-t.Out:
+				t.took()
 				err = t.frame(f)
-			case <-t.ready:
-				if parts := t.latest.Swap(nil); parts != nil {
-					err = t.parts(*parts)
-				}
+			case <-t.ready: // due takes it in its turn
 			case <-tick.C:
 				ctx, done := context.WithTimeout(t.ctx, pingWait)
 				err = t.c.Ping(ctx)

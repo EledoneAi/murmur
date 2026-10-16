@@ -189,6 +189,8 @@ func (h *Hub) handle(l *link, f protocol.Frame) {
 		}
 		h.mu.Lock()
 		l.agents = f.Agents
+		h.changes++
+		l.changed = h.changes
 		h.publishLinkLocked(context.Background(), l)
 		h.mu.Unlock()
 		h.markDirty()

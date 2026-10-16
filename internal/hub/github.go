@@ -207,8 +207,8 @@ func (h *Hub) mergeNoticesLocked(ev prEvent, files []string) int {
 				Text: fmt.Sprintf("pull request #%d in %s merged into %q, changing %s. Rebase before you push.",
 					ev.PR.Number, ev.Repo.FullName, base, fileList(common)),
 			}
-			h.toDeviceLocked(x.dev, protocol.Frame{T: protocol.FrameMsg, Msg: &m}, "")
-			h.toPeopleLocked([]string{x.handle}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{x.dev})
+			h.toDeviceLocked(x.dev, protocol.Frame{T: protocol.FrameMsg, Msg: &m}, "", 0)
+			h.toPeopleLocked([]string{x.handle}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{x.dev}, 0)
 			h.log.Info("merge notice", "id", m.ID, "to", to, "repo", ev.Repo.FullName, "pr", ev.PR.Number, "files", len(common))
 			sent++
 		}

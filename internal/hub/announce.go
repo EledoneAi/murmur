@@ -66,11 +66,11 @@ func (h *Hub) announceLocked(s sender, m protocol.Msg, repo string, ack func(boo
 	for _, t := range targets {
 		c := m
 		c.ID, c.To, c.Announce = announceID(m.From, m.ID, t.to), t.to, repo
-		h.toDeviceLocked(t.dev, protocol.Frame{T: protocol.FrameMsg, Msg: &c}, "")
+		h.toDeviceLocked(t.dev, protocol.Frame{T: protocol.FrameMsg, Msg: &c}, "", s.causeLocked())
 		devs = append(devs, t.dev)
 	}
 	m.To, m.Announce = protocol.RepoAddress+repo, repo
-	h.toPeopleLocked([]string{protocol.PersonOf(m.From)}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, devs)
+	h.toPeopleLocked([]string{protocol.PersonOf(m.From)}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, devs, s.causeLocked())
 	h.log.Info("announcement sent", "id", m.ID, "from", m.From, "repo", repo, "agents", len(targets), "chars", len(m.Text))
 	a := announcement{ID: m.ID, From: m.From, Repo: repo, Text: m.Text, At: time.UnixMilli(m.At), Reached: len(targets)}
 	h.news = slices.Insert(slices.DeleteFunc(h.news, a.same), 0, a) // the page shows it at once

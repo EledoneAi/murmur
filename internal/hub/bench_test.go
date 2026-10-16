@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/bus"
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
@@ -13,15 +14,15 @@ import (
 // The hub's hot paths with a big team on one instance, without sockets: cmd/murmur-load measures the whole hub.
 // go test ./internal/hub -run '^$' -bench . -benchmem
 
-// benchTeam puts n laptops on a hub, one person each with two agents in twenty repos, as murmur-load does: their
+// bigTeam puts n laptops on a hub, one person each with two agents in twenty repos, as murmur-load does: their
 // files overlap often.
-func benchTeam(b *testing.B, n int) (*Hub, []*link) {
-	h, err := New(b.Context(), Config{Secret: []byte("0123456789abcdef"), Seed: seed(nil), Log: slog.New(slog.DiscardHandler)},
+func bigTeam(tb testing.TB, n int) (*Hub, []*link) {
+	h, err := New(tb.Context(), Config{Secret: []byte("0123456789abcdef"), Seed: seed(nil), Log: slog.New(slog.DiscardHandler)},
 		store.NewMemory(), bus.NewLocal())
 	if err != nil {
-		b.Fatal(err)
+		tb.Fatal(err)
 	}
-	b.Cleanup(h.Close)
+	tb.Cleanup(h.Close)
 	links := make([]*link, n)
 	h.mu.Lock()
 	for i := range links {
@@ -53,14 +54,14 @@ func benchTeam(b *testing.B, n int) (*Hub, []*link) {
 func BenchmarkRoster(b *testing.B) {
 	for _, n := range []int{100, 1000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			h, links := benchTeam(b, n)
+			h, links := bigTeam(b, n)
 			for b.Loop() {
 				for _, l := range links {
 					l.shown = 0
 				}
-				r, queue := h.buildRoster(nil)
-				for _, l := range queue {
-					r.hand(l)
+				now := time.Now()
+				for _, l := range h.buildRoster(nil) {
+					h.out.hand(l, now)
 				}
 			}
 		})
@@ -69,7 +70,7 @@ func BenchmarkRoster(b *testing.B) {
 
 // One message from an agent to another's, through the checks, limits and lookups every message goes through.
 func BenchmarkSend(b *testing.B) {
-	h, links := benchTeam(b, 1000)
+	h, links := bigTeam(b, 1000)
 	h.mu.Lock()
 	h.settings.SendsPerMinute, h.settings.LoopMax = 1<<30, 1<<30 // past what the panel allows: only the path counts
 	h.mu.Unlock()

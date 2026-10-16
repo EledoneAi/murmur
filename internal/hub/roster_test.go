@@ -3,11 +3,16 @@ package hub
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // A roster put together from the team, encoded once, is the frame json.Marshal would write, for a person with
@@ -64,4 +69,123 @@ func TestRosterEncoding(t *testing.T) {
 	if !reflect.DeepEqual(got, want) || got.People[0].Agents[0].PRURL != "" {
 		t.Fatalf("team page:\n%+v\nwant\n%+v", got, want)
 	}
+}
+
+// busy reports a tool call of one of these laptops every 20 ms, as a big, busy team does, until the test ends.
+func busy(t *testing.T, h *Hub, links []*link) {
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+			l := links[i%len(links)]
+			h.mu.Lock()
+			agents := copyAgents(l.agents)
+			h.mu.Unlock()
+			agents[0].Since, agents[0].Doing = int64(i+2), fmt.Sprintf("tool call %d", i)
+			h.handle(l, protocol.Frame{T: protocol.FrameAgents, Agents: agents})
+		}
+	}()
+}
+
+// The team pages take their turn as one more laptop: with a hundred open on a big, busy team, the laptops keep getting
+// rosters, and one that just said hello gets its first soon.
+func TestRostersWithManyPages(t *testing.T) {
+	h, links := bigTeam(t, 400)
+	var handed atomic.Int64
+	h.mu.Lock()
+	for _, l := range links {
+		l.roster = func(...[]byte) { handed.Add(1) }
+	}
+	for range 100 {
+		c := make(chan struct{}, 1)
+		h.streams[c] = true
+		go func() {
+			for range c { // a page that reads every event at once
+			}
+		}()
+	}
+	h.mu.Unlock()
+	busy(t, h, links)
+	time.Sleep(time.Second)
+
+	got := make(chan struct{})
+	fresh := newLink("fresh")
+	var once sync.Once
+	fresh.roster = func(...[]byte) { once.Do(func() { close(got) }) }
+	h.mu.Lock()
+	u := &store.User{Email: "fresh@x.com", Handle: "fresh"}
+	h.users[u.Email], h.handles[u.Handle], h.links[fresh.dev], h.colours = u, u, fresh, nil
+	h.mu.Unlock()
+	before := handed.Load()
+	h.handle(fresh, protocol.Frame{T: protocol.FrameHello, Agents: []protocol.Agent{{Name: "f1", Status: protocol.StatusIdle}}})
+	select {
+	case <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a laptop that said hello got no roster in 5 s")
+	}
+	time.Sleep(time.Second)
+	if n := handed.Load() - before; n < 100 {
+		t.Fatalf("the laptops got %d rosters in a second or more", n)
+	}
+}
+
+// A message reaches a laptop after the roster that has its sender as it was when it sent, however long the laptops'
+// turn for rosters: the laptop's mutes and console see the sender's new repo first.
+func TestMessageAfterItsSendersRoster(t *testing.T) {
+	h, links := bigTeam(t, 1000)
+	var mu sync.Mutex
+	var log []string // what reached the recipient, in order
+	recipient, sender := links[0], links[len(links)-1]
+	recipient.roster = func(parts ...[]byte) {
+		if bytes.Contains(bytes.Join(parts, nil), []byte(`"acme/muted"`)) {
+			mu.Lock()
+			log = append(log, "roster")
+			mu.Unlock()
+		}
+	}
+	for _, l := range links[1:] {
+		l.roster = func(...[]byte) {}
+	}
+	busy(t, h, links[1:len(links)-1])
+	time.Sleep(300 * time.Millisecond)
+
+	moved := copyAgents(sender.agents)
+	moved[0].Repo = "acme/muted"
+	h.handle(sender, protocol.Frame{T: protocol.FrameAgents, Agents: moved})
+	for built := false; !built; time.Sleep(10 * time.Millisecond) { // the roster that has it is built, not handed
+		h.mu.Lock()
+		changed := sender.changed
+		h.mu.Unlock()
+		h.out.mu.Lock()
+		built = h.out.r != nil && h.out.r.version >= changed
+		h.out.mu.Unlock()
+	}
+	h.route(sender, protocol.Msg{ID: "m1", From: "a1", To: "p0/a1", Text: "hello"})
+	for f := range recipient.out {
+		if f.T == protocol.FrameMsg {
+			mu.Lock()
+			log = append(log, "message")
+			mu.Unlock()
+			break
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if r, m := slices.Index(log, "roster"), slices.Index(log, "message"); r < 0 || m < r {
+		t.Fatalf("reached the recipient in this order: %q", log)
+	}
+}
+
+// copyAgents copies agents as a laptop's next frame brings them: the hub cleans what it gets in place.
+func copyAgents(agents []protocol.Agent) []protocol.Agent {
+	out := slices.Clone(agents)
+	for i := range out {
+		out[i].Files, out[i].Also = slices.Clone(out[i].Files), slices.Clone(out[i].Also)
+	}
+	return out
 }

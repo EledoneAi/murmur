@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/bus"
@@ -263,12 +264,14 @@ func (h *Hub) holdersOfLocked(handle string) iter.Seq[holder] {
 }
 
 // toDeviceLocked sends a frame to one laptop, wherever it is connected. replyTo names the laptop to tell when the
-// message in the frame is delivered.
-func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string) bool {
+// message in the frame is delivered; cause is its sender's latest agents report, if a laptop here sent it, which a
+// laptop here gets in a roster before the message.
+func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string, cause uint64) bool {
 	if l := h.links[dev]; l != nil && l.gone.IsZero() {
 		if replyTo != "" && f.Msg != nil {
 			h.waiting[f.Msg.ID] = &waiter{from: replyTo, created: time.Now()}
 		}
+		h.out.before(l, cause)
 		l.send(f)
 		return true
 	}
@@ -279,10 +282,12 @@ func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string) bool 
 	return false
 }
 
-// toPeopleLocked sends a frame to every laptop of these people except skip, on every instance.
-func (h *Hub) toPeopleLocked(handles []string, f protocol.Frame, skip []string) {
+// toPeopleLocked sends a frame to every laptop of these people except skip, on every instance, cause as for
+// toDeviceLocked.
+func (h *Hub) toPeopleLocked(handles []string, f protocol.Frame, skip []string, cause uint64) {
 	for _, l := range h.links {
 		if l.gone.IsZero() && slices.Contains(handles, l.handle) && !slices.Contains(skip, l.dev) {
+			h.out.before(l, cause)
 			l.send(f)
 		}
 	}
@@ -327,17 +332,15 @@ func (h *Hub) reindex() *overlapIndex {
 // rosterLoop sends every laptop here the whole team whenever something changes, and tells the team pages open here,
 // so every laptop always holds a complete, consistent picture: a laptop's first roster already has its agents, as
 // the hub's checks do. Each laptop gets the whole team, so a roster costs the team's size times the laptops: rosters
-// go out at rosterRate at most, to the laptops that just connected first, and a big, busy team gets them every few
-// seconds rather than in bursts that would take the CPU, memory and network its messages need.
+// go out at rosterRate at most, in turn, to the laptops that just connected first and to the team pages as to one
+// more laptop, and a big, busy team gets them every few seconds rather than in bursts that would take the CPU, memory
+// and network its messages need.
 func (h *Hub) rosterLoop(ctx context.Context) {
 	var (
-		r     *roster   // the newest roster
-		queue []*link   // the laptops still to hand it to, in turn
-		pages bool      // the team pages haven't heard of it yet
+		queue []*link   // the laptops still to hand the newest roster to, in turn, and pagesTurn
 		stale time.Time // when something changed since it, if something did
 		built time.Time // when it was worked out, and how long that took
 		took  time.Duration
-		paid  time.Time // until when what was handed out uses up rosterRate
 	)
 	wake := time.NewTimer(time.Hour)
 	for {
@@ -354,25 +357,21 @@ func (h *Hub) rosterLoop(ctx context.Context) {
 		// once a burst of changes is over, such as a laptop reporting several sessions, and at most a tenth of the time
 		rework := later(stale.Add(rosterGap), built.Add(10*took))
 		if !stale.IsZero() && !now.Before(rework) {
-			r, queue = h.buildRoster(queue)
-			built, took, stale, pages = now, time.Since(now), time.Time{}, true
+			queue = h.buildRoster(queue)
+			built, took, stale = now, time.Since(now), time.Time{}
 		}
-		for r != nil && (pages || len(queue) > 0) && paid.Before(now.Add(rosterBurst)) {
-			n := 0
-			if pages {
-				n, pages = h.tellPages(), false
+		for len(queue) > 0 && h.out.room(now) {
+			l := queue[0]
+			queue = queue[1:]
+			if l == pagesTurn {
+				h.out.spend(now, h.tellPages())
 			} else {
-				first := queue[0].shown == 0 // its console shows no team yet, as after a deploy: twice the rate
-				n, queue = r.hand(queue[0]), queue[1:]
-				if first {
-					n /= 2
-				}
+				h.out.hand(l, now)
 			}
-			paid = later(paid, now).Add(time.Duration(n) * time.Second / rosterRate)
 		}
 		next := time.Hour
-		if r != nil && (pages || len(queue) > 0) {
-			next = paid.Sub(now) - rosterBurst
+		if len(queue) > 0 {
+			next = h.out.wait(now)
 		}
 		if !stale.IsZero() {
 			next = min(next, rework.Sub(now))
@@ -391,15 +390,24 @@ const (
 	rosterBurst = rosterGap
 )
 
-// buildRoster works out the roster and the team pages' view of it, and lists the laptops to hand it to: those that
-// just connected and those still waiting for the last one first, then every other laptop here.
-func (h *Hub) buildRoster(waiting []*link) (*roster, []*link) {
+// pagesTurn stands for the team pages in rosterLoop's queue: they hear of the newest roster in their turn, as one more
+// laptop, and what they send for it counts against rosterRate.
+var pagesTurn = &link{}
+
+// buildRoster works out the roster and the team pages' view of it, and lists who to hand it to: the laptops that just
+// said hello, and those still waiting for the last one, the team pages among them, first; then every other laptop
+// here, and the team pages.
+func (h *Hub) buildRoster(waiting []*link) []*link {
 	h.mu.Lock()
-	people, holders, s := h.rosterLocked(), h.holdersLocked(), h.settings
-	queue, in := make([]*link, 0, len(h.links)), map[*link]bool{}
-	for _, list := range [][]*link{h.newLinks, waiting, slices.Collect(maps.Values(h.links))} {
+	people, holders, s, version := h.rosterLocked(), h.holdersLocked(), h.settings, h.changes
+	queue, in := make([]*link, 0, len(h.links)+1), map[*link]bool{}
+	for _, list := range [][]*link{h.newLinks, waiting, slices.Collect(maps.Values(h.links)), {pagesTurn}} {
 		for _, l := range list {
-			if !in[l] && l.gone.IsZero() && h.links[l.dev] == l {
+			here := l.gone.IsZero() && h.links[l.dev] == l
+			if l == pagesTurn {
+				here = len(h.streams) > 0
+			}
+			if here && !in[l] {
 				in[l] = true
 				queue = append(queue, l)
 			}
@@ -419,7 +427,12 @@ func (h *Hub) buildRoster(waiting []*link) (*roster, []*link) {
 	} else {
 		h.teamPage.Store(newTeamEvent(people, holders, news))
 	}
-	return newRoster(people, x), queue
+	r := newRoster(people, x)
+	r.version = version
+	h.out.mu.Lock()
+	h.out.r = r
+	h.out.mu.Unlock()
+	return queue
 }
 
 func later(a, b time.Time) time.Time {
@@ -446,11 +459,76 @@ func (h *Hub) tellPages() int {
 	return len(h.streams) * len(e.shared)
 }
 
+// handout is where rosters leave for the laptops here, at rosterRate. rosterLoop hands the newest one to each in turn,
+// and a message hands it to its recipient first when it has the sender's latest change and the recipient's doesn't.
+type handout struct {
+	mu   sync.Mutex
+	r    *roster   // the newest roster
+	paid time.Time // until when what was handed out uses up rosterRate
+}
+
+// room says whether rosterRate leaves room to hand out more now.
+func (o *handout) room(now time.Time) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.r != nil && o.paid.Before(now.Add(rosterBurst))
+}
+
+// wait is how long until there is room again.
+func (o *handout) wait(now time.Time) time.Duration {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.paid.Sub(now) - rosterBurst
+}
+
+// spend counts n bytes against rosterRate.
+func (o *handout) spend(now time.Time, n int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.spendLocked(now, n)
+}
+
+func (o *handout) spendLocked(now time.Time, n int) {
+	o.paid = later(o.paid, now).Add(time.Duration(n) * time.Second / rosterRate)
+}
+
+// hand gives a laptop the newest roster, unless it has it already, and counts it against rosterRate: half of it for
+// a laptop whose console shows no team yet, as after a deploy.
+func (o *handout) hand(l *link, now time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.handLocked(l, now)
+}
+
+func (o *handout) handLocked(l *link, now time.Time) {
+	first := l.shown == 0
+	n := o.r.hand(l)
+	if first {
+		n /= 2
+	}
+	o.spendLocked(now, n)
+}
+
+// before hands a laptop the newest roster ahead of a message, when that roster has the sender's latest change (cause,
+// as h.changes counts them) and the laptop's roster doesn't: its console and its mutes see the sender as it was when
+// it sent. The roster goes ahead of the message in the laptop's connection.
+func (o *handout) before(l *link, cause uint64) {
+	if cause == 0 {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.r != nil && o.r.version >= cause && l.shownAt < cause {
+		o.handLocked(l, time.Now())
+	}
+}
+
 // roster is one roster as JSON in two parts: the team, encoded once for every laptop, then what each person's own
-// roster adds, their overlaps. Only rosterLoop uses it.
+// roster adds, their overlaps. Only handout uses it, under its lock.
 type roster struct {
 	head    []byte // the frame up to the end of the team
 	headSum uint64 // its hash
+	version uint64 // the changes it has, as h.changes counts them
 	x       *overlapIndex
 	tails   map[string][]byte // by handle
 	sums    map[string]uint64 // by handle: the whole frame's hash
@@ -483,6 +561,7 @@ func (r *roster) frame(handle string) (head, tail []byte, sum uint64) {
 // hand gives a laptop this roster, unless it has it already, and returns the bytes it handed.
 func (r *roster) hand(l *link) int {
 	head, tail, sum := r.frame(l.handle)
+	l.shownAt = max(l.shownAt, r.version)
 	if l.shown == sum {
 		return 0
 	}

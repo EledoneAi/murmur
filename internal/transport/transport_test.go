@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -12,17 +13,31 @@ import (
 	"github.com/coder/websocket"
 )
 
-// A frame Latest hands over replaces the one before while the writer hasn't taken it: a slow peer gets the latest.
-func TestLatestReplaces(t *testing.T) {
-	c := &Conn{ready: make(chan struct{}, 1)} // no writer
+// A frame Latest hands over goes after the frames queued before it and before those queued since; a newer one
+// replaces it in its place, so a slow peer gets the latest only, and no message overtakes a roster handed before it.
+func TestLatestOrder(t *testing.T) {
+	c := &Conn{Out: make(chan *protocol.Frame, 4), ready: make(chan struct{}, 1)} // no writer: the test takes its place
+	c.Out <- &protocol.Frame{ID: "before"}
 	c.Latest([]byte("old"))
+	c.Out <- &protocol.Frame{ID: "after"}
 	c.Latest([]byte("new"), []byte("er"))
-	if p := c.latest.Swap(nil); p == nil || len(*p) != 2 || string((*p)[0])+string((*p)[1]) != "newer" || len(c.ready) != 1 {
-		t.Fatalf("latest: %q", *p)
+	var got []string
+	for len(got) < 3 {
+		if parts := c.due(); parts != nil {
+			got = append(got, string(bytes.Join(parts, nil)))
+			continue
+		}
+		f := <-c.Out
+		c.took()
+		got = append(got, f.ID)
+	}
+	if strings.Join(got, " ") != "before newer after" || c.due() != nil {
+		t.Fatalf("written in this order: %q", got)
 	}
 }
 
-// A frame handed over in parts reaches the peer as one message, after the frames queued before it.
+// A frame handed over in parts reaches the peer as one message, after the frames queued before it and before those
+// queued after.
 func TestLatest(t *testing.T) {
 	conns := make(chan *Conn, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +61,8 @@ func TestLatest(t *testing.T) {
 
 	conn.Out <- &protocol.Frame{T: protocol.FrameAck, ID: "m1"}
 	conn.Latest([]byte(`{"t":"roster","people":[{"handle":"alice"`), []byte(`,"online":true}]`), []byte(`}`))
-	want := []string{`{"t":"ack","id":"m1"}`, `{"t":"roster","people":[{"handle":"alice","online":true}]}`}
+	conn.Out <- &protocol.Frame{T: protocol.FrameAck, ID: "m2"}
+	want := []string{`{"t":"ack","id":"m1"}`, `{"t":"roster","people":[{"handle":"alice","online":true}]}`, `{"t":"ack","id":"m2"}`}
 	for _, w := range want {
 		_, b, err := peer.Read(ctx)
 		if err != nil {

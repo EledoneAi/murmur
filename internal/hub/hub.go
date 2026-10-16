@@ -71,7 +71,9 @@ type Hub struct {
 	pages    map[string]chan protocol.Frame // message id -> the team page here waiting for its answer
 	streams  map[chan struct{}]bool         // the team pages open here, told when the roster changes
 	teamPage atomic.Pointer[teamEvent]      // what the last roster told the team pages, while some are open
-	newLinks []*link                        // connected since the last roster: the next one goes to them first
+	newLinks []*link                        // said hello since the last roster: the next one goes to them first
+	out      handout                        // where rosters leave for the laptops here
+	changes  uint64                         // agents reports from laptops here, counted: what a roster has
 	colours  map[string]int                 // by email, until people change: coloursLocked
 	news     []announcement                 // announcements to repos, newest first, as the store had them
 	newsMu   sync.Mutex                     // one change to the stored announcements at a time
@@ -98,7 +100,9 @@ type link struct {
 	roster  func(...[]byte) // hands the laptop the newest roster, encoded, in parts, ahead of any it hasn't read yet
 	cancel  context.CancelFunc
 	gone    time.Time // zero while connected
-	shown   uint64    // the roster last handed to it, by hash; only rosterLoop reads and writes it
+	shown   uint64    // the roster last handed to it, by hash, and the changes it has: under the hub's handout lock
+	shownAt uint64    //
+	changed uint64    // its agents' latest report, as h.changes counts them
 }
 
 type waiter struct {
