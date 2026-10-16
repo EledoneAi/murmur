@@ -174,6 +174,41 @@ docker run -d --name murmur-test-firestore -p 18086:8086 \
 
 The Firestore emulator takes several seconds to start; it answers `Ok` on http://localhost:18086/ when ready.
 
+### Load on a hub
+
+`cmd/murmur-load` puts a hub on your machine under load: many laptops, each on its own WebSocket doing what a
+laptop's daemon does (hello, agent updates, checks before edits, messages and their deliveries, pings, reconnects
+with the daemon's backoff), and team pages following the team's stream. It signs its laptops in with dev login, so
+the hub runs with `DEV_LOGIN=1`, and it refuses a hub that isn't on this computer. Every few seconds it prints the
+laptops online and showing the team, messages a second and their latency from sender to recipient, and the rosters
+and team page events; then the totals.
+
+```sh
+go run ./cmd/murmur-load -hub http://127.0.0.1:8080 -laptops 1000 -for 1m  # against make dev
+go run ./cmd/murmur-load -laptops 1000 -agents 4 -send 1s  # messages: 4 agents a laptop stay under the send limit
+go run ./cmd/murmur-load -laptops 1000 -storm 30s          # every laptop drops and reconnects every 30 s
+go run ./cmd/murmur-load -laptops 200 -pages 50            # team pages
+go run ./cmd/murmur-load -hub http://127.0.0.1:8081,http://127.0.0.1:8082  # two instances on one bus
+```
+
+`go run ./cmd/murmur-load -h` lists the rest. To see the hub as a small server sees it, run it in a container with
+one CPU and 512 MiB, and the load in the same network namespace, where `-ips` spreads the connections past the
+ephemeral ports of one address:
+
+```sh
+CGO_ENABLED=0 GOOS=linux go build -tags pprof -o bin/linux/murmur-hub ./cmd/murmur-hub
+CGO_ENABLED=0 GOOS=linux go build -o bin/linux/murmur-load ./cmd/murmur-load
+docker run -d --name load-hub --cpus=1 --memory=512m -v "$PWD/bin/linux:/b:ro" -e DEV_LOGIN=1 \
+  -e PUBLIC_URL=http://localhost:8080 -e PPROF_ADDR=0.0.0.0:6060 -p 127.0.0.1:6060:6060 alpine /b/murmur-hub
+docker run --rm --network container:load-hub -v "$PWD/bin/linux:/b:ro" alpine /b/murmur-load -laptops 5000 -ips 8
+docker stats load-hub
+```
+
+A hub built with `-tags pprof` serves Go's profiles on `PPROF_ADDR` (`127.0.0.1:6060` unless set):
+`go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=10'`, and `heap`, `goroutine`, `mutex` and
+`block` the same way. Release builds leave it out. `go test ./internal/hub -run '^$' -bench . -benchmem` measures a
+roster and a message without sockets.
+
 ### Claude Code compatibility
 
 Murmur reads files Claude Code writes and uses its inbox socket, so a new Claude Code can break it. The other coding

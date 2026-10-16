@@ -23,6 +23,14 @@ type sender struct {
 	answer func(protocol.Frame) // takes the hub's answer about the message
 }
 
+// causeLocked is the sender's latest agents report, as h.changes counts them, when a laptop here sends.
+func (s sender) causeLocked() uint64 {
+	if s.l == nil {
+		return 0
+	}
+	return s.l.changed
+}
+
 // pagePrefix starts the address of the team pages waiting on an instance for the answer to what they sent:
 // "page:<instance>". Laptops are addressed by their device id.
 const pagePrefix = "page:"
@@ -103,16 +111,20 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		ack(false, "", fmt.Sprintf("%s is not running. Send to %s to reach the person, or check `who`.", protocol.Cut(m.To, 120), u.Handle))
 		return
 	}
+	var host *holder
+	if toAgent != "" {
+		host = h.hostLocked(u.Handle, toAgent)
+	}
 	// two agents are counted as a pair only when the recipient exists, so made-up names can't fill the hub's memory
-	if why := h.limitLocked(from, m.To, toAgent != "" && h.hostLocked(u.Handle, toAgent) != nil); why != "" {
+	if why := h.limitLocked(from, m.To, host != nil); why != "" {
 		ack(false, "", why)
 		return
 	}
 	f := protocol.Frame{T: protocol.FrameMsg, Msg: &m}
 	people := []string{protocol.PersonOf(m.From), u.Handle}
+	cause := s.causeLocked()
 
 	if toAgent != "" {
-		host := h.hostLocked(u.Handle, toAgent)
 		if host != nil {
 			h.countCrossedLocked(m)
 		}
@@ -120,8 +132,8 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		case host == nil:
 			ack(false, "", fmt.Sprintf("%s is not running. Send to %s to reach the person, or check `who`.", m.To, u.Handle))
 		case host.online:
-			h.toDeviceLocked(host.dev, f, h.replyTo(s))
-			h.toPeopleLocked(people, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{host.dev})
+			h.toDeviceLocked(host.dev, f, h.replyTo(s), cause)
+			h.toPeopleLocked(people, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{host.dev}, cause)
 			h.log.Info("message sent", "id", m.ID, "from", m.From, "to", m.To, "chars", len(m.Text))
 		default: // its laptop dropped a moment ago: it gets the message when it's back, on any instance
 			h.keepLocked(s, m, u.Email, host.dev, holdFor, "its laptop is reconnecting", "")
@@ -129,10 +141,10 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		return
 	}
 	var targets []string
-	for _, x := range h.holdersLocked() {
-		if x.handle == u.Handle && x.online {
+	for x := range h.holdersOfLocked(u.Handle) {
+		if x.online {
 			targets = append(targets, x.dev)
-			h.toDeviceLocked(x.dev, f, h.replyTo(s))
+			h.toDeviceLocked(x.dev, f, h.replyTo(s), cause)
 		}
 	}
 	if len(targets) == 0 { // the sender hears it is kept only once it is, in the store
@@ -140,7 +152,7 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 			fmt.Sprintf("%s is offline and gets it when murmur is back on their laptop", u.Handle))
 		return
 	}
-	h.toPeopleLocked(people, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, targets)
+	h.toPeopleLocked(people, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, targets, cause)
 	h.log.Info("message sent", "id", m.ID, "from", m.From, "to", m.To, "laptops", len(targets), "chars", len(m.Text))
 }
 
@@ -190,7 +202,8 @@ func (h *Hub) keepLocked(s sender, m protocol.Msg, email, dev string, ttl time.D
 			s.answer(protocol.Frame{T: protocol.FrameAck, ID: m.ID, OK: true, Note: "kept for later: " + why})
 		}
 		h.mu.Lock()
-		h.toPeopleLocked([]string{protocol.PersonOf(m.From), protocol.PersonOf(m.To)}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, nil)
+		h.toPeopleLocked([]string{protocol.PersonOf(m.From), protocol.PersonOf(m.To)}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, nil,
+			s.causeLocked())
 		h.mu.Unlock()
 		h.log.Info("message kept", "id", m.ID, "from", m.From, "to", m.To, "why", why)
 	}()
@@ -199,8 +212,8 @@ func (h *Hub) keepLocked(s sender, m protocol.Msg, email, dev string, ttl time.D
 // hostLocked finds the laptop running an agent: one that is online first, else one reconnecting.
 func (h *Hub) hostLocked(handle, agent string) *holder {
 	var back *holder
-	for _, x := range h.holdersLocked() {
-		if x.handle != handle || !slices.ContainsFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent }) {
+	for x := range h.holdersOfLocked(handle) {
+		if !slices.ContainsFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent }) {
 			continue
 		}
 		if x.online {
@@ -249,7 +262,7 @@ func (h *Hub) answerLocked(to string, f protocol.Frame) {
 	inst, page := strings.CutPrefix(to, pagePrefix)
 	switch {
 	case !page:
-		h.toDeviceLocked(to, f, "")
+		h.toDeviceLocked(to, f, "", 0)
 	case inst == h.id:
 		h.pageAnswerLocked(f)
 	default:

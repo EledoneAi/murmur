@@ -58,7 +58,7 @@ func (h *Hub) expire(ctx context.Context, now time.Time) {
 		}
 		h.log.Info("message expired", "id", p.Msg.ID, "to", p.Msg.To)
 		if p.Sender != "" {
-			h.toDeviceLocked(p.Sender, protocol.Frame{T: protocol.FrameAck, ID: p.Msg.ID, Err: why}, "")
+			h.toDeviceLocked(p.Sender, protocol.Frame{T: protocol.FrameAck, ID: p.Msg.ID, Err: why}, "", 0)
 		}
 	}
 }

@@ -122,11 +122,11 @@ func TestHub(t *testing.T) {
 		t.Fatal("roster leaks file lists")
 	}
 
-	// the same file changed in two checkouts of one repo: alice's console sees it, and her agent hears of it when it
-	// checks the file before an edit
-	alice.expect(func(f protocol.Frame) bool {
-		return f.T == "roster" && len(f.Pairs) == 1 && f.Pairs[0].Other == "bob/b1" && len(f.Overlaps) == 0
-	})
+	// the same file changed in two checkouts of one repo: alice's console sees it on that roster, and her agent hears
+	// of it when it checks the file before an edit
+	if len(r.Pairs) != 1 || r.Pairs[0].Other != "bob/b1" || len(r.Overlaps) != 0 {
+		t.Fatalf("overlaps on the roster: %+v", r.Pairs)
+	}
 	alice.send(protocol.Frame{T: protocol.FrameCheck, ID: "c1", Repo: "Org/App", Tree: "t1", Files: []string{"x.go"}})
 	if c := alice.expect(func(f protocol.Frame) bool { return f.T == protocol.FrameChecked && f.ID == "c1" }); len(c.Overlaps) != 1 ||
 		c.Overlaps[0] != "bob/b1 is also changing x.go" {
@@ -306,7 +306,7 @@ func TestOverlapsOnTheRosterOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	laptop := func(handle string) *link {
-		l := &link{dev: "d-" + handle, handle: handle, email: handle + "@x.com", out: make(chan protocol.Frame, 64), cancel: func() {}}
+		l := newLink(handle)
 		h.mu.Lock()
 		h.links[l.dev] = l
 		h.mu.Unlock()
@@ -327,7 +327,7 @@ func TestOverlapsOnTheRosterOnly(t *testing.T) {
 				t.Fatalf("pushed to alice: %+v", f.Msg)
 			}
 			if f.T == protocol.FrameRoster {
-				roster = f
+				roster = *f
 			}
 		case <-timeout:
 			t.Fatal("no roster with the overlap")
@@ -426,7 +426,7 @@ func TestCheck(t *testing.T) {
 	h.mu.Lock()
 	h.settings.IgnoredPaths = []string{"traces/**"}
 	laptop := func(handle string, agents ...protocol.Agent) *link {
-		l := &link{dev: "d-" + handle, handle: handle, email: handle + "@x.com", agents: agents, out: make(chan protocol.Frame, 64), cancel: func() {}}
+		l := newLink(handle, agents...)
 		h.links[l.dev] = l
 		return l
 	}
@@ -723,6 +723,21 @@ func TestSignInsExpire(t *testing.T) {
 		t.Fatal("an expired sign-in got in")
 	}
 	connect(t, srv.URL, "tok-new").expect(func(f protocol.Frame) bool { return f.T == "roster" })
+}
+
+// newLink is a laptop's link without a connection: the frames sent to it, rosters included, wait in its out.
+func newLink(handle string, agents ...protocol.Agent) *link {
+	out := make(chan *protocol.Frame, 256)
+	return &link{dev: "d-" + handle, handle: handle, email: handle + "@x.com", agents: agents, out: out, cancel: func() {},
+		roster: func(parts ...[]byte) {
+			var f protocol.Frame
+			if json.Unmarshal(bytes.Join(parts, nil), &f) == nil {
+				select {
+				case out <- &f:
+				default:
+				}
+			}
+		}}
 }
 
 // newHub starts a hub on one instance for a test: the team is everyone at x.com unless cfg says otherwise.

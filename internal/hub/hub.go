@@ -46,6 +46,7 @@ const (
 	aliveEvery   = 10 * time.Second // each instance says which laptops it still holds
 	aliveTimeout = 35 * time.Second // after which another instance's laptops count as gone
 	codeTTL      = 10 * time.Minute
+	helloWait    = 10 * time.Second
 	frameWindow  = 10 * time.Second
 	maxFrames    = 300 // in frameWindow, from one laptop
 )
@@ -69,6 +70,11 @@ type Hub struct {
 	waiting  map[string]*waiter             // message id -> the sender to tell when it is delivered
 	pages    map[string]chan protocol.Frame // message id -> the team page here waiting for its answer
 	streams  map[chan struct{}]bool         // the team pages open here, told when the roster changes
+	teamPage atomic.Pointer[teamEvent]      // what the last roster told the team pages, while some are open
+	newLinks []*link                        // said hello since the last roster: the next one goes to them first
+	out      handout                        // where rosters leave for the laptops here
+	changes  uint64                         // agents reports from laptops here, counted: what a roster has
+	colours  map[string]int                 // by email, until people change: coloursLocked
 	news     []announcement                 // announcements to repos, newest first, as the store had them
 	newsMu   sync.Mutex                     // one change to the stored announcements at a time
 	pairs    map[string]*pair
@@ -90,9 +96,13 @@ type link struct {
 	handle  string
 	version string
 	agents  []protocol.Agent
-	out     chan protocol.Frame
+	out     chan *protocol.Frame
+	roster  func(...[]byte) // hands the laptop the newest roster, encoded, in parts, ahead of any it hasn't read yet
 	cancel  context.CancelFunc
 	gone    time.Time // zero while connected
+	shown   uint64    // the roster last handed to it, by hash, and the changes it has: under the hub's handout lock
+	shownAt uint64    //
+	changed uint64    // its agents' latest report, as h.changes counts them
 }
 
 type waiter struct {
@@ -121,7 +131,8 @@ func New(ctx context.Context, cfg Config, st store.Store, b bus.Bus) (*Hub, erro
 		cfg: cfg, store: st, bus: b, id: cfg.Instance, log: cfg.Log, stop: stop,
 		links: map[string]*link{}, remote: map[string]*presence{}, asked: map[string]time.Time{}, waiting: map[string]*waiter{}, pairs: map[string]*pair{},
 		pages: map[string]chan protocol.Frame{}, streams: map[chan struct{}]bool{}, done: ctx.Done(),
-		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1), gets: downloads{seen: map[string][]time.Time{}},
+		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1),
+		gets: downloads{seen: map[string][]time.Time{}},
 	}
 	if err := h.loadSettings(ctx); err != nil {
 		stop()
@@ -174,6 +185,7 @@ func (h *Hub) reload(ctx context.Context) error {
 		u := &us[i]
 		h.users[u.Email], h.handles[u.Handle] = u, u
 	}
+	h.colours = nil
 	h.devices, h.tokens = map[string]*store.Device{}, map[string]*store.Device{}
 	for i := range ds {
 		d := &ds[i]

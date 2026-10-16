@@ -17,6 +17,7 @@ and is changed in the hub's admin panel, without a restart: see [Admin settings]
 | `DIST_DIR` | `/usr/share/murmur/dist` | The folder of laptop binaries the hub serves to the install script and to laptops updating themselves. It holds `murmur-darwin-amd64`, `murmur-darwin-arm64`, `murmur-linux-amd64`, `murmur-linux-arm64`, `checksums.txt` and `checksums.txt.sig`. The image carries the ones of its own release. Without the folder the hub starts, but laptops can't install or update from it. A hub built with a release key refuses to start when the folder's `checksums.txt.sig` doesn't verify against that key. |
 | `INSTANCE_ID` | random at each start | Optional: this instance's name on the bus, in the job lease and in the logs. If you set it, give each instance its own. |
 | `TRUST_PROXY` | unset | `1` when the hub runs behind a proxy or load balancer that appends the client's address to `X-Forwarded-For` (Caddy, nginx, Kubernetes ingress, Cloud Run, Fly). The hub then limits downloads per client address, read from the last hop. Without a proxy, leave it unset: anyone can write that header. |
+| `GOMEMLIMIT` | 80% of the container's memory limit | Go's soft memory limit, such as `400MiB`: the hub collects garbage harder as it nears it rather than outgrow its container. In a container (cgroup v2), the hub sets it from the container's limit itself. |
 
 ### Store and bus
 

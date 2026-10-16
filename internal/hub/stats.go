@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -57,6 +57,7 @@ type teamStats struct {
 	waits map[string]*wait // agent address -> its wait
 	day   string           // the day seen is for, in the team's time zone
 	seen  map[string]bool  // pairs of checkouts and files already counted that day
+	saved []string         // those in the store, in the order counted
 }
 
 // wait is an agent waiting for its person, as the lease holder follows it.
@@ -185,7 +186,7 @@ func getJSON(ctx context.Context, st store.Store, key string, v any) error {
 func (h *Hub) followTeam(ctx context.Context, now time.Time) {
 	t := &h.stats
 	if t.waits == nil || now.Sub(t.last) > 2*jobEvery {
-		t.waits, t.seen = map[string]*wait{}, nil
+		t.waits, t.seen, t.saved = map[string]*wait{}, nil, nil
 	}
 	t.last = now
 	h.followWaits(ctx, now)
@@ -253,14 +254,15 @@ func (h *Hub) countCollisions(ctx context.Context, now time.Time) {
 			h.log.Error("database", "op", "read today's collisions", "error", err.Error())
 			return
 		}
-		t.day, t.seen = day, map[string]bool{}
+		t.day, t.seen, t.saved = day, map[string]bool{}, nil
 		if c.Day == day {
 			for _, k := range c.Seen {
 				t.seen[k] = true
 			}
+			t.saved = c.Seen
 		}
 	}
-	files := map[string]int{}
+	files, fresh := map[string]int{}, []string(nil) // fresh: the pairs counted on this look
 	for k, cs := range x.files {
 		repo, f, _ := strings.Cut(k, "\x00")
 		for i, a := range cs {
@@ -272,6 +274,7 @@ func (h *Hub) countCollisions(ctx context.Context, now time.Time) {
 				if k := hex.EncodeToString(hash[:8]); !t.seen[k] {
 					t.seen[k] = true
 					files[repo+" "+f]++
+					fresh = append(fresh, k)
 				}
 			}
 		}
@@ -280,11 +283,25 @@ func (h *Hub) countCollisions(ctx context.Context, now time.Time) {
 		return
 	}
 	h.count(weekOf(now, s.TimeZone), func(w *weekStats) { w.Collisions = sum(w.Collisions, files) })
-	c := collided{Day: day, Seen: slices.Sorted(maps.Keys(t.seen))}
-	if err := h.store.Put(ctx, collidedKey, mustJSON(c)); err != nil {
+	// ponytail: a store that limits its values (Firestore: a document of 1 MiB, some 50,000 pairs) keeps the day's
+	// first pairs only, and a lease holder that starts later that day counts those beyond again. A store that adds to
+	// a set, instead of a list written whole, would keep them all.
+	room := math.MaxInt
+	if v, ok := h.store.(store.ValueLimit); ok {
+		room = (v.MaxValue() - 64) / pairSize
+	}
+	n := min(len(fresh), max(room-len(t.saved), 0))
+	if n == 0 {
+		return
+	}
+	t.saved = append(t.saved, fresh[:n]...)
+	if err := h.store.Put(ctx, collidedKey, mustJSON(collided{Day: day, Seen: t.saved})); err != nil {
 		h.log.Error("database", "op", "save today's collisions", "error", err.Error())
 	}
 }
+
+// pairSize is what one pair takes in the list in the store: 16 hex digits, quoted, and a comma.
+const pairSize = 19
 
 // collided is the collisions counted on one day: a hash of each pair of checkouts and file.
 type collided struct {

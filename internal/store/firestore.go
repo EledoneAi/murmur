@@ -289,4 +289,7 @@ func (s *fireStore) Lease(ctx context.Context, name, holder string, ttl time.Dur
 	return held, nil
 }
 
+// MaxValue is what a value can take of a document's 1 MiB, its name and field's included.
+func (s *fireStore) MaxValue() int { return 1_000_000 }
+
 func (s *fireStore) Close() error { return s.c.Close() }

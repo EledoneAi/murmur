@@ -49,8 +49,7 @@ func chatTo(h *Hub, url, kind string) {
 
 // place puts a laptop with these agents on a hub, as if it had connected.
 func place(h *Hub, handle string, agents ...protocol.Agent) *link {
-	l := &link{dev: "d-" + handle, handle: handle, email: handle + "@x.com", agents: agents,
-		out: make(chan protocol.Frame, 256), cancel: func() {}}
+	l := newLink(handle, agents...)
 	h.mu.Lock()
 	h.links[l.dev] = l
 	h.mu.Unlock()
