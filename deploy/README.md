@@ -9,6 +9,8 @@ is one way to run the hub, with a README you can follow from start to finish:
 | [helm/murmur-hub](helm/murmur-hub) | A Helm chart for Kubernetes |
 | [cloudrun](cloudrun) | Google Cloud Run, with Firestore or Cloud SQL |
 | [fly](fly) | Fly.io, one Machine with a volume |
+| [aws](aws) | AWS: ECS Express Mode, or ECS on Fargate behind your own load balancer, with RDS for PostgreSQL |
+| [azure](azure) | Azure Container Apps or App Service, with Azure Database for PostgreSQL |
 | [systemd](systemd) | The release binary as a hardened systemd service |
 
 The other folders are for building and releasing murmur itself: [docker](docker) holds the hub's Dockerfiles,

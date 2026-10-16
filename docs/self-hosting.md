@@ -40,8 +40,8 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 | Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | Set your ingress controller's timeouts for WebSockets. |
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
-| Azure Container Apps | [below](#azure-container-apps) | Use Azure Database for PostgreSQL for the store. |
-| AWS ECS on Fargate | [below](#aws-ecs-on-fargate) | Behind an Application Load Balancer. |
+| AWS: ECS Express Mode, or ECS on Fargate with your own load balancer | [deploy/aws](../deploy/aws) | No local disk: use RDS for PostgreSQL. |
+| Azure Container Apps, or App Service for Containers | [deploy/azure](../deploy/azure) | No disk safe for sqlite: use Azure Database for PostgreSQL. |
 
 ### Not supported
 
@@ -55,7 +55,7 @@ These platforms run code per request and can't hold the long-lived WebSocket eac
 
 **AWS App Runner** has been closed to new customers since 30 April 2026
 ([AWS](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html)), and it never supported
-WebSockets. ECS Express Mode is AWS's replacement for it.
+WebSockets. ECS Express Mode is AWS's replacement for it: see [deploy/aws](../deploy/aws).
 
 ## Choose a store and a bus
 
@@ -221,37 +221,12 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
   traffic. Raising it, to 3600 for example, is harmless but not needed
   ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).
 - **Google Cloud Run** ends every request at its timeout, 60 minutes at most: deploy with `--timeout=3600`.
+- **Azure Container Apps and App Service** document a timeout of about four minutes. The pings keep a connection
+  from sitting idle that long; if one is still cut, the laptop reconnects ([deploy/azure](../deploy/azure)).
 - **Other proxies and load balancers**: allow WebSocket upgrades and set the idle timeout to an hour or more.
 
 Hub instances don't need sticky sessions: each laptop's connection stays on the instance it reached, and the bus
 carries what the others need.
-
-## Azure Container Apps
-
-1. Create an Azure Database for PostgreSQL flexible server and a database for the hub.
-2. Create a container app from `ghcr.io/eledoneai/murmur-hub:<version>` with external ingress, target port
-   8080, and at least one replica (`--min-replicas 1`) so it never scales to zero.
-3. Store `SESSION_SECRET`, the client secret and the Postgres URL as secrets of the app, and reference them in
-   the environment: `STORE=postgres://...?sslmode=require`, `PUBLIC_URL` (the app's address or your domain), and
-   the sign-in settings.
-4. For more than one replica, also set `BUS` to the same Postgres URL, or to Azure Managed Redis with
-   `rediss://:<access key>@<host>:10000`. Create it with the Enterprise or Non-clustered clustering policy, and turn
-   on access keys. Azure Cache for Redis is closed to new customers and retiring.
-
-Don't put sqlite on an Azure Files share: its file locking isn't safe for sqlite.
-
-## AWS ECS on Fargate
-
-1. Create an RDS for PostgreSQL database for the store. Fargate tasks have no lasting disk, and sqlite isn't safe
-   on EFS.
-2. Write a task definition for `ghcr.io/eledoneai/murmur-hub:<version>` with container port 8080, the
-   settings as environment variables, and `SESSION_SECRET`, the client secret and the Postgres URL from Secrets
-   Manager.
-3. Run it as a service behind an Application Load Balancer: an HTTPS listener with your certificate, a target
-   group on port 8080 with the health check path `/healthz`. The load balancer's default idle timeout of 60 seconds
-   works.
-4. With one task, keep the default bus. With more, set `BUS` to the Postgres URL, or to ElastiCache for Redis
-   (`rediss://` when in-transit encryption is on).
 
 ## The admin panel
 
