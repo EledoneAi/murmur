@@ -103,8 +103,12 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		ack(false, "", fmt.Sprintf("%s is not running. Send to %s to reach the person, or check `who`.", protocol.Cut(m.To, 120), u.Handle))
 		return
 	}
+	var host *holder
+	if toAgent != "" {
+		host = h.hostLocked(u.Handle, toAgent)
+	}
 	// two agents are counted as a pair only when the recipient exists, so made-up names can't fill the hub's memory
-	if why := h.limitLocked(from, m.To, toAgent != "" && h.hostLocked(u.Handle, toAgent) != nil); why != "" {
+	if why := h.limitLocked(from, m.To, host != nil); why != "" {
 		ack(false, "", why)
 		return
 	}
@@ -112,7 +116,6 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 	people := []string{protocol.PersonOf(m.From), u.Handle}
 
 	if toAgent != "" {
-		host := h.hostLocked(u.Handle, toAgent)
 		if host != nil {
 			h.countCrossedLocked(m)
 		}
@@ -129,8 +132,8 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		return
 	}
 	var targets []string
-	for _, x := range h.holdersLocked() {
-		if x.handle == u.Handle && x.online {
+	for x := range h.holdersOfLocked(u.Handle) {
+		if x.online {
 			targets = append(targets, x.dev)
 			h.toDeviceLocked(x.dev, f, h.replyTo(s))
 		}
@@ -199,8 +202,8 @@ func (h *Hub) keepLocked(s sender, m protocol.Msg, email, dev string, ttl time.D
 // hostLocked finds the laptop running an agent: one that is online first, else one reconnecting.
 func (h *Hub) hostLocked(handle, agent string) *holder {
 	var back *holder
-	for _, x := range h.holdersLocked() {
-		if x.handle != handle || !slices.ContainsFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent }) {
+	for x := range h.holdersOfLocked(handle) {
+		if !slices.ContainsFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent }) {
 			continue
 		}
 		if x.online {
