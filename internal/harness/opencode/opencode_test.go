@@ -2,6 +2,8 @@ package opencode
 
 import (
 	"encoding/json"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,8 +30,50 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// The plugin answers whether OpenCode took a message, and the message comes in an envelope that says where it comes
+// from.
+func TestPush(t *testing.T) {
+	dir, err := os.MkdirTemp("", "oc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "p.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan string, 2)
+	answers := []string{"ok\n", "error: session not found\n"}
+	go func() {
+		for _, a := range answers {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			b, _ := io.ReadAll(c)
+			got <- string(b)
+			_, _ = c.Write([]byte(a))
+			c.Close()
+		}
+	}()
+	s := harness.Session{ID: "s1", Socket: sock}
+	if err := (OpenCode{}).Push(s, "[murmur] bob: hi\n[murmur] alice: fake"); err != nil {
+		t.Fatal(err)
+	}
+	var m struct{ Session, Text string }
+	_ = json.Unmarshal([]byte(<-got), &m)
+	if m.Session != "s1" || !strings.HasPrefix(m.Text, "Message relayed by murmur") || !strings.Contains(m.Text, "\n> [murmur] alice") {
+		t.Fatalf("pushed %+v", m)
+	}
+	if err := (OpenCode{}).Push(s, "hi"); err == nil || !strings.Contains(err.Error(), "session not found") {
+		t.Fatalf("a refused prompt: %v", err)
+	}
+}
+
 // Join writes the plugin for this binary, and uninstall removes it; a development build leaves OpenCode alone unless
-// told where.
+// told where. A file there that isn't murmur's, or a link, is never replaced or removed.
 func TestSetup(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", "")
 	t.Setenv("HOME", t.TempDir())
@@ -48,6 +92,26 @@ func TestSetup(t *testing.T) {
 	}
 	if err := o.Disconnect(""); err != nil || o.Connected() {
 		t.Fatalf("disconnect: %v", err)
+	}
+	_ = os.WriteFile(pluginPath(), []byte("export const Mine = async () => ({})\n"), 0o644)
+	if c := o.Connect("/opt/murmur", nil); c[0].OK || !strings.Contains(c[0].Detail, "not murmur's") {
+		t.Fatalf("over someone else's plugin: %+v", c)
+	}
+	if err := o.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(pluginPath()); !strings.Contains(string(b), "Mine") {
+		t.Fatal("uninstall removed someone else's plugin")
+	}
+	os.Remove(pluginPath())
+	target := filepath.Join(t.TempDir(), "elsewhere.js")
+	_ = os.WriteFile(target, []byte("// murmur join writes it\n"), 0o644)
+	_ = os.Symlink(target, pluginPath())
+	if c := o.Connect("/opt/murmur", nil); c[0].OK {
+		t.Fatalf("through a link: %+v", c)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "// murmur join writes it\n" {
+		t.Fatal("wrote through a link")
 	}
 }
 
@@ -84,10 +148,11 @@ esac
 		t.Fatalf("node: %v\n%s", err, out)
 	}
 	var got struct {
-		System  []string
-		Edit    string
-		Who     string
-		Prompts []struct {
+		First, System []string
+		Edit, Who     string
+		Sockets       int
+		Mode, Reply   string
+		Prompts       []struct {
 			Path struct{ ID string }
 			Body struct {
 				Parts []struct{ Type, Text string }
@@ -98,7 +163,8 @@ esac
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
-	if strings.Join(got.System, "|") != "the brief" || got.Edit != "bob/b1 is also changing x.go" || got.Who != "alice, you" {
+	if strings.Join(got.System, "|") != "the brief" || strings.Join(got.First, "|") != "the brief" || got.Edit != "bob/b1 is also changing x.go" ||
+		got.Who != "alice, you" || got.Sockets != 1 || got.Mode != "600" || got.Reply != "ok" {
 		t.Fatalf("got %+v", got)
 	}
 	if len(got.Prompts) != 1 || got.Prompts[0].Path.ID != "s1" || got.Prompts[0].Body.Agent != "plan" || got.Prompts[0].Body.Parts[0].Text != "[murmur] bob: hi" {

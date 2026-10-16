@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/release"
 )
 
@@ -212,5 +213,65 @@ func TestAcceptMessages(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(path); !strings.Contains(string(b), `"model": "opus"`) {
 		t.Fatalf("other settings lost: %s", b)
+	}
+}
+
+// murmur's edits keep the person's settings.json as they wrote it: their indentation, "&&" unescaped, a hook of
+// theirs after murmur's in its place. Removing murmur's entries from a file that holds none leaves it untouched.
+func TestEditKeepsTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	orig := "{\n    \"hooks\": {\n        \"Stop\": [\n            {\n                \"hooks\": [\n                    {\n" +
+		"                        \"type\": \"command\",\n                        \"command\": \"make lint && say done\"\n" +
+		"                    }\n                ]\n            }\n        ]\n    }\n}\n"
+	_ = os.WriteFile(path, []byte(orig), 0o644)
+	st, _ := os.Stat(path)
+	if err := EditSettings(path, "/opt/murmur", false); err != nil {
+		t.Fatal(err)
+	}
+	if st2, _ := os.Stat(path); !st2.ModTime().Equal(st.ModTime()) {
+		t.Fatal("removing murmur's entries rewrote a file that held none")
+	}
+	if err := EditSettings(path, "/opt/murmur", true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "\n    \"hooks\": {\n        \"Stop\"") || !strings.Contains(string(b), "make lint && say done") {
+		t.Fatalf("joined:\n%s", b)
+	}
+	// the person adds a SessionStart hook after murmur's; murmur's stays first when join runs again
+	var s map[string]map[string][]json.RawMessage
+	_ = json.Unmarshal(b, &s)
+	start := append(s["hooks"]["SessionStart"], json.RawMessage(`{"hooks":[{"type":"command","command":"theirs.sh"}]}`))
+	o, raw, _ := harness.ReadObject(path)
+	_ = harness.WriteObject(path, raw, o.PutSub("hooks", o.Sub("hooks").Set("SessionStart", harness.Marshal(start))), true)
+	if err := EditSettings(path, "/usr/local/bin/murmur", true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(path)
+	if i, j := strings.Index(string(b), "/usr/local/bin/murmur hook claude start"), strings.Index(string(b), "theirs.sh"); i < 0 || j < i {
+		t.Fatalf("murmur's hook moved after the person's:\n%s", b)
+	}
+	if err := EditSettings(path, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "murmur") || !strings.Contains(string(b), "theirs.sh") {
+		t.Fatalf("after uninstall:\n%s", b)
+	}
+}
+
+// doctor says when the hooks are an older murmur's, which this version doesn't run.
+func TestOldHooks(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("PATH", "")
+	old := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/opt/murmur hook start"}]}],` +
+		`"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"/opt/murmur hook edit"}]}],` +
+		`"Notification":[{"hooks":[{"type":"command","command":"/opt/murmur hook notify"}]}]}}`
+	_ = os.WriteFile(filepath.Join(dir, "settings.json"), []byte(old), 0o644)
+	if c := (Claude{}).Checks()[0]; c.OK || !strings.Contains(c.Detail, "older murmur") {
+		t.Fatalf("hooks: %+v", c)
+	}
+	if !(Claude{}).Connected() {
+		t.Fatal("an older murmur's hooks don't count as connected: the update wouldn't set them up again")
 	}
 }

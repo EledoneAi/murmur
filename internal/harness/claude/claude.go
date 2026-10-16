@@ -73,17 +73,29 @@ func (Claude) Connect(exe string, ask func(string) bool) []protocol.Check {
 	return append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur (user scope): who, send"})
 }
 
+// Disconnect takes murmur's entries out of settings.json, and its MCP server out of Claude Code when it is there.
 func (Claude) Disconnect(exe string) error {
 	if err := harness.Guard("CLAUDE_CONFIG_DIR"); err != nil {
 		return err
 	}
-	if err := EditSettings(settings(), exe, false); err != nil {
-		return err
-	}
-	if claude, err := exec.LookPath("claude"); err == nil {
+	err := EditSettings(settings(), exe, false)
+	if claude, lerr := exec.LookPath("claude"); lerr == nil && exec.Command(claude, "mcp", "get", "murmur").Run() == nil {
 		_ = exec.Command(claude, "mcp", "remove", "--scope", "user", "murmur").Run()
 	}
-	return nil
+	return err
+}
+
+// Holds says whether Claude Code holds anything of murmur's: its hooks or permissions, or its MCP server. A
+// settings.json murmur can't read may: uninstall tries it, and says what went wrong.
+func (c Claude) Holds() bool {
+	if _, _, err := harness.ReadObject(settings()); err != nil || c.Connected() {
+		return true
+	}
+	if _, perms, _ := SetupState(settings()); perms {
+		return true
+	}
+	claude, err := exec.LookPath("claude")
+	return err == nil && exec.Command(claude, "mcp", "get", "murmur").Run() == nil
 }
 
 // Version is the installed Claude Code's version, or "" when claude isn't on PATH.
@@ -102,8 +114,12 @@ func (Claude) Checks() []protocol.Check {
 	path := settings()
 	hooks, perms, _ := SetupState(path)
 	note := InboundNote(path)
+	fix := "missing: run murmur join"
+	if o, _, err := harness.ReadObject(path); err == nil && harness.HasOld(o.Sub("hooks")) {
+		fix = "an older murmur's, which this version doesn't run: run murmur join, then restart your sessions"
+	}
 	checks := []protocol.Check{
-		harness.Check(hooks, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(path), "missing: run murmur join"),
+		harness.Check(hooks, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(path), fix),
 		harness.Check(perms, "Permissions", "who, send allowed", "missing: run murmur join"),
 		harness.Check(note == "", "Messages", "agents take messages from other sessions", note),
 	}

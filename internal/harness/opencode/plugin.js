@@ -4,7 +4,8 @@
 // hands a session the messages murmur sends to the socket it listens on.
 import { spawn } from "node:child_process"
 import { createServer } from "node:net"
-import { rmSync } from "node:fs"
+import { chmodSync, rmSync } from "node:fs"
+import { randomBytes } from "node:crypto"
 
 const MURMUR = "__MURMUR__"
 const SOCKETS = "__SOCKETS__"
@@ -32,18 +33,22 @@ function run(args, input) {
 export const Murmur = async ({ client, directory }) => {
   const parent = new Map() // a subagent's session -> the session it works for
   const agent = new Map() // a session -> its agent (build, plan…), which murmur's messages keep
-  const brief = new Map() // a session -> what murmur told it as it started, for its system prompt
+  const brief = new Map() // a session -> what murmur tells it as it starts, for its system prompt, once known
   const title = new Map()
   const top = (id) => parent.get(id) ?? id
-  const sock = `${SOCKETS}/opencode-${process.pid}.sock`
+  // one OpenCode process may load the plugin once per folder it serves: each copy listens on a socket of its own
+  const sock = `${SOCKETS}/opencode-${process.pid}-${randomBytes(4).toString("hex")}.sock`
   const hook = (event, id, more = {}) =>
     run(["hook", "opencode", event], { session_id: id, cwd: directory, pid: process.pid, socket: sock, title: title.get(id), ...more })
   const tool = (name, id, more = {}) => run(["tool", "opencode", name], { session_id: top(id), pid: process.pid, ...more })
 
-  rmSync(sock, { force: true })
-  const server = createServer((conn) => {
+  // murmur ends its side once the message is written, and waits for the answer
+  const server = createServer({ allowHalfOpen: true }, (conn) => {
     let data = ""
-    conn.on("data", (d) => (data += d))
+    conn.on("data", (d) => {
+      data += d
+      if (data.length > 1 << 16) conn.destroy() // a message is a few kilobytes
+    })
     conn.on("error", () => {})
     conn.on("end", async () => {
       try {
@@ -52,13 +57,21 @@ export const Murmur = async ({ client, directory }) => {
           path: { id: m.session },
           body: { parts: [{ type: "text", text: m.text }], agent: agent.get(m.session) },
         })
-      } catch {}
+        conn.end("ok\n")
+      } catch (e) {
+        conn.end(`error: ${e?.message ?? e}\n`) // murmur tells the sender
+      }
     })
   })
   server.on("error", () => {})
-  server.listen(sock)
+  server.listen(sock, () => chmodSync(sock, 0o600))
   server.unref?.()
   process.on("exit", () => rmSync(sock, { force: true }))
+  // the brief, fetched once per session: when the session starts, or before its first request if that comes first
+  const briefOf = (id) => {
+    if (!brief.has(id)) brief.set(id, hook("start", id))
+    return brief.get(id)
+  }
 
   return {
     event: async ({ event }) => {
@@ -72,7 +85,7 @@ export const Murmur = async ({ client, directory }) => {
       if (parent.has(id)) return // a subagent's session: the one it works for says it all
       switch (event.type) {
         case "session.created":
-          brief.set(id, await hook("start", id))
+          await briefOf(id)
           break
         case "session.updated":
           if (p.info?.title) title.set(id, p.info.title)
@@ -95,7 +108,7 @@ export const Murmur = async ({ client, directory }) => {
       if (input.agent) agent.set(input.sessionID, input.agent)
     },
     "experimental.chat.system.transform": async (input, output) => {
-      const b = input.sessionID && brief.get(top(input.sessionID))
+      const b = input.sessionID && (await briefOf(top(input.sessionID)))
       if (b) output.system.push(b)
     },
     "tool.execute.before": async (input, output) => {

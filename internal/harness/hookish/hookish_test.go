@@ -241,10 +241,10 @@ esac
 	toml := filepath.Join(os.Getenv("CODEX_HOME"), "config.toml")
 	_ = os.WriteFile(toml, []byte("model = \"gpt\"\n\n[mcp_servers.docs]\ncommand = \"docs\"\n"), 0o600)
 	t.Setenv("MURMUR_HOME", filepath.Join(root, "murmur"))
-	if err := codexMCP("/opt/murmur", true); err != nil {
+	if err := codexMCP(Codex, "/opt/murmur", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := codexMCP("/opt/murmur", true); err != nil { // again, as after an update
+	if err := codexMCP(Codex, "/opt/murmur", true); err != nil { // again, as after an update
 		t.Fatal(err)
 	}
 	got := read(t, toml)
@@ -254,7 +254,7 @@ esac
 	if calls := read(t, filepath.Join(os.Getenv("CODEX_HOME"), "calls")); !strings.Contains(calls, "mcp add murmur --env MURMUR_HOME="+filepath.Join(root, "murmur")+" -- /opt/murmur mcp codex") {
 		t.Fatalf("calls:\n%s", calls)
 	}
-	if err := codexMCP("", false); err != nil {
+	if err := codexMCP(Codex, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, toml); strings.Contains(got, "murmur") || got != "model = \"gpt\"\n\n[mcp_servers.docs]\ncommand = \"docs\"\n" {
@@ -327,7 +327,7 @@ func TestCopilotSetup(t *testing.T) {
 		}
 	}
 	_ = json.Unmarshal([]byte(read(t, Copilot.hooksPath())), &hooks)
-	if hooks.Version != 1 || hooks.Hooks["PreToolUse"][0].Bash != "/opt/murmur hook copilot before-tool" || hooks.Hooks["sessionEnd"][0].TimeoutSec != 5 {
+	if hooks.Version != 1 || hooks.Hooks["PreToolUse"][0].Bash != "/opt/murmur hook copilot before-tool || true" || hooks.Hooks["sessionEnd"][0].TimeoutSec != 5 {
 		t.Fatalf("hooks: %+v", hooks)
 	}
 	if got := read(t, filepath.Join(Copilot.dir(), "mcp-config.json")); !strings.Contains(got, `"tools": [`) || !strings.Contains(got, `"type": "local"`) {
@@ -360,8 +360,8 @@ func TestCursorSetup(t *testing.T) {
 		strings.Index(got, "./audit.sh") > strings.Index(got, "hook cursor stop") {
 		t.Fatalf("hooks.json:\n%s", got)
 	}
-	if !strings.Contains(read(t, filepath.Join(dir, "permissions.json")), `"murmur:*"`) ||
-		!strings.Contains(read(t, filepath.Join(dir, "cli-config.json")), `"Mcp(murmur:*)"`) {
+	if !strings.Contains(read(t, filepath.Join(dir, "permissions.json")), `"murmur:who"`) ||
+		!strings.Contains(read(t, filepath.Join(dir, "cli-config.json")), `"Mcp(murmur:send)"`) {
 		t.Fatal("murmur's tools aren't allowed")
 	}
 	if err := Cursor.Disconnect(""); err != nil {
@@ -389,5 +389,196 @@ func TestDevGuard(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".codex")); !os.IsNotExist(err) {
 		t.Fatal("a development build wrote to ~/.codex")
+	}
+}
+
+// Taking murmur's tables out of config.toml leaves the rest as its person wrote it: the comment that introduces the
+// next table, a multi-line string that looks like a table, blank lines. A file without murmur's tables isn't touched,
+// and a changed one is copied first.
+func TestCodexTOML(t *testing.T) {
+	sandbox(t)
+	path := filepath.Join(Codex.dir(), "config.toml")
+	theirs := "model = \"gpt\"\n\n\n[mcp_servers.docs]\ncommand = \"docs\"\n" +
+		"description = '''\n[mcp_servers.murmur]\nnot a table\n'''\n"
+	withOurs := theirs + "\n[mcp_servers.murmur]\ncommand = \"x\"\n\n# my profiles\n[profiles.fast]\nmodel = \"mini\"\n" +
+		"\n[mcp_servers.murmur.tools.who]\napproval_mode = \"approve\"\n"
+	_ = os.WriteFile(path, []byte(withOurs), 0o600)
+	if err := dropTables(path, "mcp_servers.murmur"); err != nil {
+		t.Fatal(err)
+	}
+	want := theirs + "\n# my profiles\n[profiles.fast]\nmodel = \"mini\"\n"
+	if got := read(t, path); got != want {
+		t.Fatalf("got\n%q\nwant\n%q", got, want)
+	}
+	if read(t, path+".before-murmur") != withOurs {
+		t.Fatal("no copy of the file as it was")
+	}
+	st, _ := os.Stat(path)
+	if err := dropTables(path, "mcp_servers.murmur"); err != nil {
+		t.Fatal(err)
+	}
+	if st2, _ := os.Stat(path); !st2.ModTime().Equal(st.ModTime()) {
+		t.Fatal("rewrote a file without murmur's tables")
+	}
+}
+
+// When the person keeps their Codex hooks in config.toml, murmur's go there too, after theirs; rewriting them keeps
+// their place, and uninstall leaves the person's.
+func TestCodexInlineHooks(t *testing.T) {
+	sandbox(t)
+	path := filepath.Join(Codex.dir(), "config.toml")
+	theirs := "[[hooks.PreToolUse]]\nmatcher = \"^Bash$\"\n\n[[hooks.PreToolUse.hooks]]\ntype = \"command\"\ncommand = 'policy.py'\n\n" +
+		"# trusted hooks\n[hooks.state.\"/x/config.toml:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:1\"\n"
+	_ = os.WriteFile(path, []byte(theirs), 0o600)
+	if checks := Codex.Connect("/opt/murmur", nil); !checks[0].OK || !strings.Contains(checks[0].Detail, "config.toml") {
+		t.Fatalf("connect: %+v", checks)
+	}
+	if _, err := os.Stat(Codex.hooksPath()); !os.IsNotExist(err) {
+		t.Fatal("hooks.json written next to inline hooks")
+	}
+	got := read(t, path)
+	if !strings.HasPrefix(got, theirs) || strings.Count(got, `command = "/opt/murmur hook codex`) != 7 ||
+		!strings.Contains(got, "[[hooks.PreToolUse]]\nmatcher = \"apply_patch\"\n\n[[hooks.PreToolUse.hooks]]") || !Codex.Connected() {
+		t.Fatalf("config.toml:\n%s", got)
+	}
+	// the person adds a hook after murmur's; joining again keeps murmur's where it was
+	mine := "\n[[hooks.Stop]]\n\n[[hooks.Stop.hooks]]\ntype = \"command\"\ncommand = 'after.sh'\n"
+	_ = os.WriteFile(path, []byte(got+mine), 0o600)
+	Codex.Connect("/usr/local/bin/murmur", nil)
+	again := read(t, path)
+	if strings.Contains(again, "/opt/murmur") || !strings.HasSuffix(again, mine) || strings.Count(again, "/usr/local/bin/murmur hook codex") != 7 {
+		t.Fatalf("joined again:\n%s", again)
+	}
+	if err := Codex.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, path); got != theirs+mine {
+		t.Fatalf("after uninstall:\n%q\nwant\n%q", got, theirs+mine)
+	}
+}
+
+// Joining again rewrites murmur's hook where it was in hooks.json, so the person's hooks after it keep the place Codex
+// trusted them at.
+func TestCodexHooksInPlace(t *testing.T) {
+	sandbox(t)
+	Codex.Connect("/opt/murmur", nil)
+	o, b, _ := harness.ReadObject(Codex.hooksPath())
+	hooks := o.Sub("hooks")
+	var stop []json.RawMessage
+	_ = json.Unmarshal(hooks.Get("Stop"), &stop)
+	stop = append(stop, harness.Marshal(map[string]any{"hooks": []any{map[string]string{"type": "command", "command": "after.sh"}}}))
+	_ = harness.WriteObject(Codex.hooksPath(), b, o.PutSub("hooks", hooks.Set("Stop", harness.Marshal(stop))), true)
+	Codex.Connect("/usr/local/bin/murmur", nil)
+	o, _, _ = harness.ReadObject(Codex.hooksPath())
+	_ = json.Unmarshal(o.Sub("hooks").Get("Stop"), &stop)
+	if len(stop) != 2 || !strings.Contains(string(stop[0]), "/usr/local/bin/murmur hook codex stop") || !strings.Contains(string(stop[1]), "after.sh") {
+		t.Fatalf("Stop: %s", stop)
+	}
+}
+
+// Uninstall takes out what join added and nothing else: a permissions list it created, a version it added, Codex's
+// MCP tables without codex on PATH. A file holding none of murmur's isn't rewritten.
+func TestUninstallLeavesNothing(t *testing.T) {
+	sandbox(t)
+	dir := Cursor.dir()
+	cli := "{\n    \"editor\": {\n        \"vimMode\": true\n    }\n}\n"
+	hooks := "{\n    \"note\": \"mine\"\n}\n"
+	_ = os.WriteFile(filepath.Join(dir, "cli-config.json"), []byte(cli), 0o644)
+	_ = os.WriteFile(Cursor.hooksPath(), []byte(hooks), 0o644)
+	if checks := Cursor.Connect("/opt/murmur", nil); !checks[0].OK || !checks[1].OK {
+		t.Fatalf("connect: %+v", checks)
+	}
+	if err := Cursor.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "cli-config.json")); got != cli {
+		t.Errorf("cli-config.json:\n%s", got)
+	}
+	if got := read(t, Cursor.hooksPath()); got != hooks {
+		t.Errorf("hooks.json:\n%s", got)
+	}
+
+	toml := filepath.Join(Codex.dir(), "config.toml")
+	_ = os.WriteFile(toml, []byte("model = \"gpt\"\n\n[mcp_servers.murmur]\ncommand = \"x\"\n"+codexApprovals), 0o600)
+	if !Codex.Holds() {
+		t.Fatal("Codex holds murmur's MCP server")
+	}
+	if err := Codex.Disconnect(""); err != nil { // codex isn't on PATH
+		t.Fatal(err)
+	}
+	if got := read(t, toml); got != "model = \"gpt\"\n" {
+		t.Fatalf("config.toml without codex on PATH:\n%q", got)
+	}
+
+	gemini := "{\n    \"theme\": \"Dracula\"\n}\n" // four spaces, which murmur's own writes don't use
+	_ = os.MkdirAll(filepath.Dir(Gemini.hooksPath()), 0o755)
+	_ = os.WriteFile(Gemini.hooksPath(), []byte(gemini), 0o644)
+	st, _ := os.Stat(Gemini.hooksPath())
+	if err := Gemini.Disconnect(""); err != nil || Gemini.Holds() {
+		t.Fatal(err)
+	}
+	if st2, _ := os.Stat(Gemini.hooksPath()); !st2.ModTime().Equal(st.ModTime()) || read(t, Gemini.hooksPath()) != gemini {
+		t.Fatal("rewrote a settings file without murmur's entries")
+	}
+}
+
+// A settings file with comments is read, never rewritten: join says what to add by hand, and uninstall what to take
+// out, without stopping.
+func TestComments(t *testing.T) {
+	sandbox(t)
+	settings := "{\n  // my theme\n  \"theme\": \"Dracula\",\n}\n"
+	_ = os.MkdirAll(filepath.Dir(Gemini.hooksPath()), 0o755)
+	_ = os.WriteFile(Gemini.hooksPath(), []byte(settings), 0o644)
+	checks := Gemini.Connect("/opt/murmur", nil)
+	if checks[0].OK || !strings.Contains(checks[0].Detail, "add this to it by hand") || !strings.Contains(checks[0].Detail, "hook gemini start") ||
+		checks[1].OK || !strings.Contains(checks[1].Detail, `"mcpServers"`) {
+		t.Fatalf("connect: %+v", checks)
+	}
+	if read(t, Gemini.hooksPath()) != settings {
+		t.Fatal("a file with comments changed")
+	}
+	withOurs := "{\n  // mine\n  \"mcpServers\": {\"murmur\": {\"command\": \"/opt/murmur\"}},\n}\n"
+	_ = os.WriteFile(Gemini.hooksPath(), []byte(withOurs), 0o644)
+	if err := Gemini.Disconnect(""); err == nil || !strings.Contains(err.Error(), "by hand") || read(t, Gemini.hooksPath()) != withOurs {
+		t.Fatalf("disconnect: %v", err)
+	}
+}
+
+// Only murmur's own two tools are let through, by their exact names.
+func TestExactTools(t *testing.T) {
+	for tool, allowed := range map[string]bool{"murmur-who": true, "murmur-send": true, "murmur-evil": false, "evil-murmur-send": false, "bash": false} {
+		if got := Copilot.Answer(harness.Event{Kind: harness.BeforeTool, Tool: tool}, "") != nil; got != allowed {
+			t.Errorf("copilot %s: allowed %v", tool, got)
+		}
+	}
+	sandbox(t)
+	_ = os.WriteFile(filepath.Join(Cursor.dir(), "permissions.json"), []byte(`{"mcpAllowlist": []}`), 0o644)
+	Cursor.Connect("/opt/murmur", nil)
+	var p struct{ MCPAllowlist []string }
+	_ = json.Unmarshal([]byte(read(t, filepath.Join(Cursor.dir(), "permissions.json"))), &p)
+	if strings.Join(p.MCPAllowlist, ",") != "murmur:who,murmur:send" {
+		t.Fatalf("allowlist: %v", p.MCPAllowlist)
+	}
+}
+
+// Messages leave only with the answers a harness reads: Cursor and Copilot drop what a prompt hook prints.
+func TestCarries(t *testing.T) {
+	for _, c := range []struct {
+		s     *Spec
+		kind  string
+		input string
+		want  bool
+	}{
+		{Cursor, harness.Prompt, `{"conversation_id":"c","hook_event_name":"beforeSubmitPrompt","prompt":"hi"}`, false},
+		{Cursor, harness.Start, `{"conversation_id":"c","hook_event_name":"sessionStart"}`, false},
+		{Cursor, harness.AfterTool, `{"conversation_id":"c","hook_event_name":"postToolUse","tool_name":"Read"}`, true},
+		{Copilot, harness.Prompt, `{"session_id":"c","hook_event_name":"UserPromptSubmit","prompt":"hi"}`, false},
+		{Copilot, harness.Stop, `{"session_id":"c","hook_event_name":"Stop"}`, true},
+		{Codex, harness.Prompt, `{"session_id":"c","hook_event_name":"UserPromptSubmit","prompt":"hi"}`, true},
+		{Gemini, harness.Prompt, `{"session_id":"c","hook_event_name":"BeforeAgent","prompt":"hi"}`, true},
+	} {
+		if ev := parse(t, c.s, c.kind, c.input); ev.Carries != c.want {
+			t.Errorf("%s %s: carries %v", c.s.name, c.kind, ev.Carries)
+		}
 	}
 }

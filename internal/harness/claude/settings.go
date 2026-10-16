@@ -38,33 +38,35 @@ func hookGroup(ev, exe string) json.RawMessage {
 	case "Notification":
 		h["async"], h["timeout"] = true, 10
 	}
-	b, _ := json.Marshal(g)
-	return b
+	return harness.Marshal(g)
 }
 
 var toolPermissions = []string{"mcp__murmur__who", "mcp__murmur__send"}
 
-// EditSettings adds (or with add=false removes) murmur's entries in Claude Code's settings.json.
+// EditSettings adds (or with add=false removes) murmur's entries in Claude Code's settings.json. A hook of murmur's
+// is rewritten where it was. Removing touches no file that holds none of murmur's entries.
 func EditSettings(path, exe string, add bool) error {
 	o, b, err := harness.ReadObject(path)
 	if err != nil {
 		return err
 	}
+	found := false
 	hooks := o.Sub("hooks")
 	for _, ev := range hookEvents {
 		var groups []json.RawMessage
 		if v := hooks.Get(ev); v != nil {
 			_ = json.Unmarshal(v, &groups)
 		}
-		groups = slices.DeleteFunc(groups, harness.OurGroup)
+		var entry json.RawMessage
 		if add {
-			groups = append(groups, hookGroup(ev, exe))
+			entry = hookGroup(ev, exe)
 		}
+		groups, had := harness.Replace(groups, entry)
+		found = found || had
 		if len(groups) == 0 {
 			hooks = hooks.Del(ev)
 		} else {
-			v, _ := json.Marshal(groups)
-			hooks = hooks.Set(ev, v)
+			hooks = hooks.Set(ev, harness.Marshal(groups))
 		}
 	}
 	o = o.PutSub("hooks", hooks)
@@ -74,18 +76,22 @@ func EditSettings(path, exe string, add bool) error {
 	if v := perms.Get("allow"); v != nil {
 		_ = json.Unmarshal(v, &allow)
 	}
+	n := len(allow)
 	allow = slices.DeleteFunc(allow, func(s string) bool { return slices.Contains(toolPermissions, s) })
+	found = found || len(allow) < n
 	if add {
 		allow = append(allow, toolPermissions...)
 	}
 	if len(allow) == 0 {
 		perms = perms.Del("allow")
 	} else {
-		v, _ := json.Marshal(allow)
-		perms = perms.Set("allow", v)
+		perms = perms.Set("allow", harness.Marshal(allow))
 	}
 	o = o.PutSub("permissions", perms)
 
+	if !add && !found {
+		return nil
+	}
 	return harness.WriteObject(path, b, o, add)
 }
 
@@ -99,7 +105,7 @@ func SetupState(path string) (hooks, perms bool, inbound string) {
 	for _, ev := range hookEvents {
 		var groups []json.RawMessage
 		_ = json.Unmarshal(o.Sub("hooks").Get(ev), &groups)
-		hooks = hooks && slices.ContainsFunc(groups, harness.OurGroup)
+		hooks = hooks && slices.ContainsFunc(groups, harness.CurrentGroup)
 	}
 	var allow []string
 	_ = json.Unmarshal(o.Sub("permissions").Get("allow"), &allow)

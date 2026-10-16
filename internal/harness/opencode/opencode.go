@@ -4,9 +4,11 @@
 package opencode
 
 import (
+	"bufio"
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -56,11 +58,24 @@ func (OpenCode) Installed() bool {
 	return err == nil
 }
 
-// Connected says whether murmur's plugin is in place, as join wrote it.
-func (OpenCode) Connected() bool {
-	b, err := os.ReadFile(pluginPath())
-	return err == nil && strings.Contains(string(b), "murmur join writes it")
+// marker is how murmur knows its plugin: a file without it is someone else's, which join never replaces.
+const marker = "murmur join writes it"
+
+// ours says whether path is murmur's plugin: a file, not a link, that carries the marker.
+func ours(path string) bool {
+	st, err := os.Lstat(path)
+	if err != nil || !st.Mode().IsRegular() {
+		return false
+	}
+	b, err := os.ReadFile(path)
+	return err == nil && strings.Contains(string(b), marker)
 }
+
+// Connected says whether murmur's plugin is in place, as join wrote it.
+func (OpenCode) Connected() bool { return ours(pluginPath()) }
+
+// Holds says the same: the plugin is all murmur adds to OpenCode.
+func (o OpenCode) Holds() bool { return o.Connected() }
 
 // Source is the plugin as join writes it, for this binary.
 func Source(exe string) string {
@@ -74,9 +89,12 @@ func (o OpenCode) Connect(exe string, _ func(string) bool) []protocol.Check {
 		return harness.Guarded(err)
 	}
 	path := pluginPath()
+	if _, err := os.Lstat(path); err == nil && !ours(path) {
+		return []protocol.Check{{Name: "Plugin", Detail: config.Tildify(path) + " is not murmur's: move it away, then run murmur join again"}}
+	}
 	err := os.MkdirAll(filepath.Dir(path), 0o755)
 	if err == nil {
-		err = os.WriteFile(path, []byte(Source(exe)), 0o644)
+		err = harness.WriteAtomic(path, []byte(Source(exe)), 0o644)
 	}
 	if err != nil {
 		return []protocol.Check{{Name: "Plugin", Detail: err.Error()}}
@@ -84,11 +102,12 @@ func (o OpenCode) Connect(exe string, _ func(string) bool) []protocol.Check {
 	return append([]protocol.Check{{Name: "Plugin", OK: true, Detail: config.Tildify(path) + ": hooks, who and send"}}, version()...)
 }
 
+// Disconnect removes murmur's plugin, and nothing that isn't.
 func (o OpenCode) Disconnect(string) error {
 	if err := harness.Guard("OPENCODE_CONFIG_DIR"); err != nil {
 		return err
 	}
-	if !o.Connected() {
+	if !ours(pluginPath()) {
 		return nil
 	}
 	return os.Remove(pluginPath())
@@ -143,7 +162,8 @@ func (OpenCode) Answer(ev harness.Event, text string) []byte {
 }
 
 // Push hands a message to a session through the plugin, which prompts it: at once when it is idle, after its current
-// step when it works.
+// step when it works. The prompt reaches the model as its person's would, so the message comes in an envelope that
+// says where it comes from. The plugin answers whether OpenCode took it.
 func (OpenCode) Push(s harness.Session, text string) error {
 	if s.Socket == "" {
 		return errors.New("its OpenCode has no murmur plugin listening")
@@ -153,8 +173,18 @@ func (OpenCode) Push(s harness.Session, text string) error {
 		return err
 	}
 	defer c.Close()
-	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
-	b, _ := json.Marshal(map[string]string{"session": s.ID, "text": text})
-	_, err = c.Write(b)
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.Write(harness.Marshal(map[string]string{"session": s.ID, "text": harness.Envelope(text)})); err != nil {
+		return err
+	}
+	if u, ok := c.(*net.UnixConn); ok {
+		_ = u.CloseWrite() // the end of the message
+	}
+	answer, err := bufio.NewReader(io.LimitReader(c, 4096)).ReadString('\n')
+	if answer = strings.TrimSpace(answer); answer == "ok" {
+		return nil
+	} else if answer != "" {
+		return errors.New("OpenCode said: " + strings.TrimPrefix(answer, "error: "))
+	}
 	return err
 }
