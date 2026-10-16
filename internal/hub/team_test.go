@@ -132,8 +132,6 @@ func eventually(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-// Signed-out visitors get the sign-in page, which brings them back to the team page; the page's stream, its
-// pull requests and its form refuse them.
 // The stream outlives the server's deadline for reading a request: net/http lifts it once the request is read.
 func TestTeamStreamOutlivesReadTimeout(t *testing.T) {
 	tm := newTeam(t, Config{}, nil)
@@ -152,6 +150,8 @@ func TestTeamStreamOutlivesReadTimeout(t *testing.T) {
 	})
 }
 
+// Signed-out visitors get the sign-in page, which brings them back to the team page; the page's stream, its
+// pull requests and its form refuse them.
 func TestTeamPageIsForMembers(t *testing.T) {
 	tm := newTeam(t, Config{}, nil)
 	visitor, _ := signedIn(t, tm.url, "")
