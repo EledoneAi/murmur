@@ -32,6 +32,12 @@ services:
       - TOKEN_DAYS
       - INSTANCE_ID
       - LOG_FORMAT
+      # Only with the -litestream image (deploy/litestream): where the sqlite file is copied, s3:// or abs://, and the
+      # keys for it. Not gs://: Google Cloud Storage needs a key file, which this file doesn't mount.
+      - LITESTREAM_REPLICA_URL
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - LITESTREAM_AZURE_ACCOUNT_KEY
     volumes:
       # the image's default STORE is sqlite:///data/murmur.db
       - hub-data:/data

@@ -42,15 +42,20 @@ It builds `bin/murmur` and opens a shell where:
 | Variable | Value |
 |---|---|
 | `MURMUR_HOME` | `.dev/home` |
-| `CLAUDE_CONFIG_DIR` | `.dev/claude` |
 | `MURMUR_HUB` | `http://localhost:8080` |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CURSOR_CONFIG_DIR`, `OPENCODE_CONFIG_DIR`, `COPILOT_HOME`, `GEMINI_CLI_HOME` | `.dev/claude`, `.dev/codex`… |
 | `PATH` | `bin/` first |
+
+A build from source refuses to join without `MURMUR_HOME`, and leaves alone each coding tool whose variable isn't
+set: join writes the binary's path into the tools' settings. OpenCode loads `OPENCODE_CONFIG_DIR` besides its own
+folder, so a test laptop's OpenCode also loads plugins from your own.
 
 In that shell:
 
 ```sh
 murmur join    # signs this test laptop in to the dev hub, in your browser
 claude         # Claude Code, with its settings in .dev/claude; it may ask you to log in the first time
+codex          # or another coding tool, likewise
 murmur         # the console, in another tab of the same shell
 ```
 
@@ -64,7 +69,7 @@ For a second test laptop, start from that and point it elsewhere:
 
 ```sh
 eval "$(make -s laptop)"
-export MURMUR_HOME=$PWD/.dev/home2 CLAUDE_CONFIG_DIR=$PWD/.dev/claude2
+export MURMUR_HOME=$PWD/.dev/home2 CLAUDE_CONFIG_DIR=$PWD/.dev/claude2 CODEX_HOME=$PWD/.dev/codex2
 ```
 
 Builds from source are version `dev` and never update themselves, so the test laptop keeps running the binary
@@ -159,7 +164,9 @@ The Firestore emulator takes several seconds to start; it answers `Ok` on http:/
 
 ### Claude Code compatibility
 
-Murmur reads files Claude Code writes and uses its inbox socket, so a new Claude Code can break it.
+Murmur reads files Claude Code writes and uses its inbox socket, so a new Claude Code can break it. The other coding
+tools are checked against fixtures in the formats their docs and source give (`internal/harness/hookish`,
+`internal/harness/opencode`); a nightly check against each one's newest release would need that vendor's key in CI.
 `make compat` runs the compatibility tests against the `claude` on your `PATH`. Claude Code runs there with a
 configuration folder of its own, so it can't use your sign-in: give it an API key, or a token from
 `claude setup-token`, which uses your Claude subscription.
@@ -184,7 +191,8 @@ A release is a `v*` tag. [.github/workflows/release.yml](../.github/workflows/re
    `go run ./deploy/sign`;
 3. publishes the GitHub release with the changelog from the commits since the last tag;
 4. pushes `ghcr.io/eledoneai/murmur-hub:<version>` and `:latest` for linux/amd64 and linux/arm64, each
-   carrying the four laptop binaries, `checksums.txt` and its signature in `/usr/share/murmur/dist`;
+   carrying the four laptop binaries, `checksums.txt` and its signature in `/usr/share/murmur/dist`, and the same
+   with Litestream as `:<version>-litestream` and `:litestream`;
 5. updates the Homebrew cask in `eledoneai/homebrew-tap`.
 
 A tag with a suffix, such as `v1.2.0-rc.1`, is a prerelease: it doesn't move `latest` and doesn't update the

@@ -12,28 +12,43 @@ import (
 	"time"
 
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/protocol"
 )
 
 // ---------------------------------------------------------------- history
 
 type histLine struct {
-	M       *protocol.Msg `json:"m,omitempty"`
-	Done    string        `json:"done,omitempty"`
-	Handed  string        `json:"handed,omitempty"`
-	Outbox  *outMsg       `json:"outbox,omitempty"` // sent from here, not confirmed yet
-	Sent    string        `json:"sent,omitempty"`   // confirmed, or given up
-	Ask     *protocol.Msg `json:"ask,omitempty"`    // waiting for this person's approval
-	Answer  string        `json:"answer,omitempty"` // and the verdict on it, by answerKey
-	Verdict string        `json:"verdict,omitempty"`
-	Mute    *mute         `json:"mute,omitempty"`
-	Unmute  string        `json:"unmute,omitempty"` // a mute's key
-	Held    *heldMsg      `json:"held,omitempty"`   // waiting for its agent to work again
-	Unheld  string        `json:"unheld,omitempty"` // and taken, by message id
+	M       *protocol.Msg  `json:"m,omitempty"`
+	Done    string         `json:"done,omitempty"`
+	Handed  string         `json:"handed,omitempty"`
+	Outbox  *outMsg        `json:"outbox,omitempty"` // sent from here, not confirmed yet
+	Sent    string         `json:"sent,omitempty"`   // confirmed, or given up
+	Ask     *protocol.Msg  `json:"ask,omitempty"`    // waiting for this person's approval
+	Answer  string         `json:"answer,omitempty"` // and the verdict on it, by answerKey
+	Verdict string         `json:"verdict,omitempty"`
+	Mute    *mute          `json:"mute,omitempty"`
+	Unmute  string         `json:"unmute,omitempty"` // a mute's key
+	Held    *heldMsg       `json:"held,omitempty"`   // waiting for its agent to work again
+	Unheld  string         `json:"unheld,omitempty"` // and taken, by message id
+	Hooked  *hookedSession `json:"hooked,omitempty"` // a session learned from hooks
+	Gone    string         `json:"gone,omitempty"`   // and gone, by session key
+	Queued  *heldMsg       `json:"queued,omitempty"` // waiting for its session's next hook (Agent is the session key)
+	Took    *took          `json:"took,omitempty"`   // and taken, or dropped with its session
+}
+
+// took is a message that left a session's queue.
+type took struct {
+	Key string `json:"key"`
+	ID  string `json:"id"`
 }
 
 func (d *Daemon) loadHistory() {
 	path := filepath.Join(config.Dir(), "history.jsonl")
+	if d.queued == nil {
+		d.queued = map[string][]heldMsg{}
+	}
+	hooked := map[string]hookedSession{}
 	if f, err := os.Open(path); err == nil {
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
@@ -84,11 +99,33 @@ func (d *Daemon) loadHistory() {
 					d.held[agent] = slices.DeleteFunc(q, func(x heldMsg) bool { return x.Msg.ID == h.Unheld })
 				}
 			}
+			if h.Hooked != nil {
+				key := harness.Key(h.Hooked.Harness, h.Hooked.ID)
+				hooked[key] = *h.Hooked
+				if d.names != nil {
+					d.names[key] = h.Hooked.Name
+				}
+			}
+			if h.Gone != "" {
+				delete(hooked, h.Gone)
+			}
+			if h.Queued != nil && !slices.ContainsFunc(d.queued[h.Queued.Agent], func(x heldMsg) bool { return x.Msg.ID == h.Queued.Msg.ID }) {
+				d.queued[h.Queued.Agent] = append(d.queued[h.Queued.Agent], *h.Queued)
+			}
+			if h.Took != nil {
+				d.queued[h.Took.Key] = slices.DeleteFunc(d.queued[h.Took.Key], func(x heldMsg) bool { return x.Msg.ID == h.Took.ID })
+				if len(d.queued[h.Took.Key]) == 0 {
+					delete(d.queued, h.Took.Key)
+				}
+			}
 		}
 		f.Close()
 	}
 	if len(d.history) > keepMsgs {
 		d.history = d.history[len(d.history)-keepMsgs:]
+	}
+	if d.sessions != nil {
+		d.restoreLocked(hooked) // before the history is compacted, which keeps the sessions it knows
 	}
 	d.pruneLocked()
 	if st, err := os.Stat(path); err == nil && st.Size() > historyMax { // compact
@@ -120,10 +157,27 @@ func (d *Daemon) loadHistory() {
 				_ = enc.Encode(histLine{Held: &h})
 			}
 		}
+		for _, s := range d.sessions {
+			if s.hooked {
+				_ = enc.Encode(histLine{Hooked: s.hookedLine()})
+			}
+		}
+		for _, q := range d.queued {
+			for _, h := range q {
+				_ = enc.Encode(histLine{Queued: &h})
+			}
+		}
 		_ = os.WriteFile(path+".tmp", b.Bytes(), 0o600)
 		_ = os.Rename(path+".tmp", path)
 	}
 	d.hist, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if d.sessions != nil { // what waited for a session that is gone leaves the queue in the history, once
+		for key := range d.queued {
+			if d.sessions[key] == nil {
+				d.unreadLocked(key)
+			}
+		}
+	}
 }
 
 // pruneLocked keeps what the daemon remembers about messages to those the history keeps: which it has seen, which
@@ -145,11 +199,13 @@ func (d *Daemon) pruneLocked() {
 	maps.DeleteFunc(d.handed, func(k string, _ bool) bool { return gone(k) })
 	maps.DeleteFunc(d.answers, func(k, _ string) bool { return gone(k) })
 	maps.DeleteFunc(d.failed, func(_ string, f failure) bool { return time.Since(f.At) > outboxTTL })
-	for agent, q := range d.held {
-		if q = slices.DeleteFunc(q, func(h heldMsg) bool { return time.Since(h.At) > heldTTL }); len(q) > 0 {
-			d.held[agent] = q
-		} else {
-			delete(d.held, agent)
+	for _, m := range []map[string][]heldMsg{d.held, d.queued} {
+		for k, q := range m {
+			if q = slices.DeleteFunc(q, func(h heldMsg) bool { return time.Since(h.At) > heldTTL }); len(q) > 0 {
+				m[k] = q
+			} else {
+				delete(m, k)
+			}
 		}
 	}
 }

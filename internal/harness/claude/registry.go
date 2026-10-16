@@ -1,6 +1,4 @@
-// Package claudecode is everything murmur reads from or writes to Claude Code: its session files, transcripts,
-// inbox sockets and settings.
-package claudecode
+package claude
 
 import (
 	"encoding/json"
@@ -9,9 +7,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
 )
 
 // ---------------------------------------------------------------- registry
@@ -30,7 +28,7 @@ type Entry struct {
 	Version   string `json:"version"` // Claude Code's version in that session
 }
 
-// appOf names where a session runs. The VS Code and Desktop apps run the same Claude Code, so their sessions
+// AppOf names where a session runs. The VS Code and Desktop apps run the same Claude Code, so their sessions
 // register, get an inbox and pick up the hooks and MCP server exactly like a terminal session.
 func AppOf(entrypoint string) string {
 	switch {
@@ -54,7 +52,7 @@ func Dir() string {
 
 func RegistryDir() string { return filepath.Join(Dir(), "sessions") }
 
-// pidOf turns ".../sessions/12345.json" into 12345.
+// PIDOf turns ".../sessions/12345.json" into 12345.
 func PIDOf(path string) (int, bool) {
 	base := filepath.Base(path)
 	n, ok := strings.CutSuffix(base, ".json")
@@ -80,9 +78,29 @@ func ReadEntry(path string) (Entry, error) {
 	return e, nil
 }
 
-func Alive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+func (Claude) Watch() string { return RegistryDir() }
+
+// Sessions lists the live sessions in Claude Code's registry: one file per process, which Claude Code rewrites as
+// the session's status changes.
+func (Claude) Sessions() []harness.Session {
+	files, _ := filepath.Glob(filepath.Join(RegistryDir(), "*.json"))
+	var out []harness.Session
+	for _, f := range files {
+		pid, ok := PIDOf(f)
+		if !ok {
+			continue
+		}
+		e, err := ReadEntry(f)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			out = append(out, harness.Session{Harness: Name, PID: pid}) // half-written: read again on its next event
+		case harness.Alive(e.PID) && e.Kind != "daemon":
+			out = append(out, harness.Session{Harness: Name, ID: e.SessionID, PID: pid, Started: e.ProcStart, Name: e.Name,
+				Cwd: e.Cwd, Status: e.Status, Since: e.StatusAt, App: AppOf(e.Entry), Version: e.Version, Socket: e.Socket})
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------- transcript
@@ -93,4 +111,17 @@ func FindTranscript(id string) string {
 		return ""
 	}
 	return m[0]
+}
+
+// Open finds a session's transcript: the path its start hook named, or the one Claude Code keeps under its id.
+func (Claude) Open(s harness.Session) (string, func(*harness.Activity) bool) {
+	p := s.Transcript
+	if p == "" {
+		p = FindTranscript(s.ID)
+	}
+	if _, err := os.Stat(p); p == "" || err != nil {
+		return "", nil // Claude Code writes it with the first message, after the start hook named it
+	}
+	t := &Transcript{Path: p}
+	return p, t.Read
 }

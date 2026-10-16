@@ -1,11 +1,10 @@
-package claudecode
+package claude
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
-	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/protocol"
 )
 
@@ -24,55 +24,47 @@ var assistantLine = []byte(`"type":"assistant"`)
 var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"custom-title"`), []byte(`"type":"pr-link"`),
 	[]byte(`"type":"model"`), []byte(`"subtype":"compact_boundary"`)}
 
-// Transcript is what murmur reads from one conversation's transcript, as it grows.
+// Transcript reads one conversation's transcript as it grows.
 type Transcript struct {
-	Path    string
-	Offset  int64
-	AITitle string // the title Claude Code gives the conversation
-	Custom  string // the title its person set, which wins
-	PR      int
-	PRURL   string
-	Doing   string   // the last tool call in a few words
-	Kinds   string   // the kinds of the last tool calls, oldest first, one letter each (see protocol.Kind*)
-	Loop    bool     // the same command in most of the last tool calls
-	Context int      // how full the context window is, in percent
-	Dirs    []string // folders the tool calls named by absolute path, the most recent last
+	Path   string
+	Offset int64
 
-	recent []uint64 // the last tool calls, for Loop: a fingerprint of a Bash command, 0 for any other tool
-	tokens int      // the context the latest answer used
-	model  string   // the model, as Claude Code names it to the model itself
-	large  bool     // the context window is known to hold a million tokens
+	aiTitle string // the title Claude Code gives the conversation
+	custom  string // the title its person set, which wins
+	tokens  int    // the context the latest answer used
+	model   string // the model, as Claude Code names it to the model itself
+	large   bool   // the context window is known to hold a million tokens
 }
 
-// Title is the conversation's title: its person's, or else Claude Code's.
-func (t *Transcript) Title() string {
-	if t.Custom != "" {
-		return t.Custom
+// title is the conversation's title: its person's, or else Claude Code's.
+func (t *Transcript) title() string {
+	if t.custom != "" {
+		return t.custom
 	}
-	return t.AITitle
+	return t.aiTitle
 }
 
-// Read reads what was appended since the last call. Titles and PR links are short lines that start with
+// Read reads what was appended since the last call into a. Titles and PR links are short lines that start with
 // their type; tool calls and context sizes are assistant lines. Long lines (tool output, file contents) are skipped
 // without being held in memory.
-func (s *Transcript) Read() bool {
-	if s.Path == "" {
+func (t *Transcript) Read(a *harness.Activity) bool {
+	if t.Path == "" {
 		return false
 	}
-	f, err := os.Open(s.Path)
+	f, err := os.Open(t.Path)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err != nil || st.Size() < s.Offset {
-		s.Offset = 0 // rewritten from scratch
+	if st, err := f.Stat(); err != nil || st.Size() < t.Offset {
+		t.Offset = 0 // rewritten from scratch
 	}
-	if _, err := f.Seek(s.Offset, io.SeekStart); err != nil {
+	if _, err := f.Seek(t.Offset, io.SeekStart); err != nil {
 		return false
 	}
 	r := bufio.NewReaderSize(f, 64<<10)
 	changed := false
-	pos := s.Offset
+	pos := t.Offset
 	for {
 		line, err := r.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
@@ -92,7 +84,7 @@ func (s *Transcript) Read() bool {
 		}
 		pos += int64(len(line))
 		if bytes.Contains(line, assistantLine) {
-			changed = s.assistant(line) || changed
+			changed = t.assistant(line, a) || changed
 			continue
 		}
 		head := line[:min(len(line), 200)]
@@ -123,46 +115,39 @@ func (s *Transcript) Read() bool {
 		}
 		switch e.Type {
 		case "ai-title":
-			changed = changed || s.AITitle != e.AITitle
-			s.AITitle = e.AITitle
+			t.aiTitle = e.AITitle
 		case "custom-title":
-			t := e.CustomTitle
-			if t == "" {
-				t = e.Title
+			t.custom = e.CustomTitle
+			if t.custom == "" {
+				t.custom = e.Title
 			}
-			changed = changed || s.Custom != t
-			s.Custom = t
 		case "pr-link":
 			if e.PRNumber != 0 {
-				changed = changed || s.PR != e.PRNumber
-				s.PR, s.PRURL = e.PRNumber, e.PRURL
+				changed = changed || a.PR != e.PRNumber
+				a.PR, a.PRURL = e.PRNumber, e.PRURL
 			}
 		case "attachment": // Claude Code tells the model which it is, again when its person switches
-			if id := e.Attachment.Identity.ModelID; e.Attachment.Type == "model" && id != "" && id != s.model {
-				s.model, s.large = id, false
-				changed = s.context(s.tokens) || changed
+			if id := e.Attachment.Identity.ModelID; e.Attachment.Type == "model" && id != "" && id != t.model {
+				t.model, t.large = id, false
+				changed = t.context(a, t.tokens) || changed
 			}
 		case "system":
 			if e.Subtype == "compact_boundary" && e.Compact.PostTokens > 0 {
-				s.large = s.large || e.Compact.PreTokens > smallWindow
-				changed = s.context(e.Compact.PostTokens) || changed
+				t.large = t.large || e.Compact.PreTokens > smallWindow
+				changed = t.context(a, e.Compact.PostTokens) || changed
 			}
 		}
+		if title := t.title(); a.Title != title {
+			a.Title, changed = title, true
+		}
 	}
-	s.Offset = pos
+	t.Offset = pos
 	return changed
 }
 
-const (
-	maxKinds = 30  // tool calls in Kinds
-	loopOf   = 12  // Loop looks at the last loopOf tool calls
-	loopMin  = 9   // and needs one command in at least loopMin of them
-	maxDirs  = 200 // folders in Dirs: an early look into another repo is forgotten after this many others
-)
-
 // assistant reads an assistant line: how full the context window is, and its tool calls. Claude Code writes one line
 // per block of an answer, each with the answer's usage.
-func (s *Transcript) assistant(line []byte) bool {
+func (t *Transcript) assistant(line []byte, a *harness.Activity) bool {
 	var e struct {
 		Type      string    `json:"type"`
 		Sidechain bool      `json:"isSidechain"`
@@ -186,14 +171,13 @@ func (s *Transcript) assistant(line []byte) bool {
 	changed := false
 	// a subagent's answers measure its own context; Claude Code's own notes (an API error) carry no usage
 	if u := e.Message.Usage; !e.Sidechain && u.Input+u.CacheRead+u.CacheCreation > 0 {
-		changed = s.context(u.Input + u.CacheRead + u.CacheCreation)
+		changed = t.context(a, u.Input+u.CacheRead+u.CacheCreation)
 	}
 	for _, c := range e.Message.Content {
 		if c.Type != "tool_use" {
 			continue
 		}
-		s.Doing = doingOf(c.Name, c.Input)
-		s.called(c.Name, c.Input)
+		a.Called(callOf(c.Name, c.Input))
 		changed = true
 	}
 	return changed
@@ -219,24 +203,23 @@ func windowOf(model string) int {
 }
 
 // context takes the tokens the conversation now uses, and says whether its percentage changed.
-func (s *Transcript) context(tokens int) bool {
-	s.tokens = tokens
-	s.large = s.large || tokens > smallWindow
-	window := windowOf(s.model)
-	if s.large {
+func (t *Transcript) context(a *harness.Activity, tokens int) bool {
+	t.tokens = tokens
+	t.large = t.large || tokens > smallWindow
+	window := windowOf(t.model)
+	if t.large {
 		window = largeWindow
 	}
 	pct := min((tokens*100+window/2)/window, 100)
-	if pct == s.Context {
+	if pct == a.Context {
 		return false
 	}
-	s.Context = pct
+	a.Context = pct
 	return true
 }
 
-// called counts one tool call: its kind, its command for the loop hint, and the folder it names. Commands are kept
-// only as fingerprints.
-func (s *Transcript) called(tool string, input json.RawMessage) {
+// callOf reads one of Claude Code's tool calls. Commands are kept only as fingerprints.
+func callOf(tool string, input json.RawMessage) harness.Call {
 	var in struct {
 		Command      string `json:"command"`
 		FilePath     string `json:"file_path"`
@@ -244,47 +227,12 @@ func (s *Transcript) called(tool string, input json.RawMessage) {
 		NotebookPath string `json:"notebook_path"`
 	}
 	_ = json.Unmarshal(input, &in)
-	if k := kindOf(tool); k != 0 {
-		s.Kinds += string(k)
-		s.Kinds = s.Kinds[max(len(s.Kinds)-maxKinds, 0):]
-	}
-	var cmd uint64
+	c := harness.Call{Kind: kindOf(tool), Doing: doingOf(tool, input)}
 	if tool == "Bash" {
-		h := fnv.New64a()
-		_, _ = h.Write([]byte(in.Command))
-		cmd = h.Sum64() | 1 // never 0, which stands for every other tool
+		c.Shell = harness.Shell(in.Command)
 	}
-	s.recent = append(s.recent, cmd)
-	s.recent = s.recent[max(len(s.recent)-loopOf, 0):]
-	s.Loop = looping(s.recent)
-	for _, dir := range []string{filepath.Dir(in.FilePath), filepath.Dir(in.NotebookPath), filepath.Clean(in.Path)} {
-		if filepath.IsAbs(dir) {
-			s.touch(dir)
-		}
-	}
-}
-
-// touch moves dir to the end of Dirs, which keeps the maxDirs folders named most recently.
-func (s *Transcript) touch(dir string) {
-	if i := slices.Index(s.Dirs, dir); i >= 0 {
-		s.Dirs = slices.Delete(s.Dirs, i, i+1)
-	} else if len(s.Dirs) >= maxDirs {
-		s.Dirs = slices.Delete(s.Dirs, 0, 1)
-	}
-	s.Dirs = append(s.Dirs, dir)
-}
-
-// looping says whether one command makes up at least loopMin of these calls.
-func looping(calls []uint64) bool {
-	n := map[uint64]int{}
-	for _, c := range calls {
-		if c != 0 {
-			if n[c]++; n[c] >= loopMin {
-				return true
-			}
-		}
-	}
-	return false
+	c.Dirs = []string{filepath.Dir(in.FilePath), filepath.Dir(in.NotebookPath), filepath.Clean(in.Path)}
+	return c
 }
 
 // kindOf is the letter a tool call shows as in Kinds, or 0 for tools Kinds leaves out (plans, other MCP servers).
@@ -319,12 +267,7 @@ func doingOf(tool string, input json.RawMessage) string {
 	file := filepath.Base(in.FilePath + in.NotebookPath)
 	switch tool {
 	case "Bash":
-		for _, f := range strings.Fields(in.Command) {
-			if !strings.Contains(f, "=") { // skip VAR=value before the command
-				return "Running " + filepath.Base(f)
-			}
-		}
-		return "Running a command"
+		return harness.Running(in.Command)
 	case "Read":
 		return "Reading " + file
 	case "Edit", "MultiEdit", "NotebookEdit":

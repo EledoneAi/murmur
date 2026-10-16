@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+#
+# The published hub image with Litestream, tagged <version>-litestream: the image of Dockerfile.release, plus
+# Litestream, which copies the sqlite file to object storage as it changes and restores it when a new container
+# starts without one. deploy/litestream explains when to use it. GoReleaser assembles it (the murmur-hub-litestream
+# entry of dockers_v2 in .goreleaser.yaml); to build it from source, use deploy/docker/Dockerfile with
+# --target litestream.
+
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/murmur-hub /usr/local/bin/murmur-hub
+COPY dist/client/ dist/checksums.txt dist/checksums.txt.sig /usr/share/murmur/dist/
+# Litestream's own image carries a static binary for each platform. Keep the version in step with Dockerfile.
+COPY --from=docker.io/litestream/litestream:0.5.17@sha256:4b02b9859a6b6b4087d8b8944e15f7e984bd7957cba322bbeee38b0e27b9656a \
+     /usr/local/bin/litestream /usr/local/bin/litestream
+COPY deploy/litestream/litestream.yml /etc/litestream.yml
+# WORKDIR creates /data owned by the image's user (nonroot), so a named volume mounted there starts out writable.
+WORKDIR /data
+VOLUME /data
+ENV PORT=8080 \
+    STORE=sqlite:///data/murmur.db \
+    DIST_DIR=/usr/share/murmur/dist
+EXPOSE 8080
+# Litestream restores /data/murmur.db from the replica when the file is missing, starts the hub, copies each change,
+# and passes SIGTERM on to the hub.
+ENTRYPOINT ["/usr/local/bin/litestream", "replicate", "-restore-if-db-not-exists", "-exec", "/usr/local/bin/murmur-hub"]

@@ -5,10 +5,10 @@ webhook, the hub posts to your team's chat the agents left waiting (the person's
 branch) and a weekly report in team totals, which names the files changed in two checkouts at once most often.
 
 - **Everyone on the team**: your handle and name; for each agent its name, repo, branch, pull request and its
-  address, the title Claude Code gave its conversation, its status (busy, idle, waiting, or in a shell), whether it
-  waits for a permission or an answer and since when, where it runs (`vscode`, `desktop`, `sdk`), and what it does
-  now as a tool and a file, a command name, a skill, or an MCP server and tool ("Editing routes.go", "Running go",
-  "Using pdf", "github · create_issue"). Also the kind of each of its last 30 tool calls (read, edit, run, web,
+  address, the title its coding tool or its person gave its conversation, its status (busy, idle, waiting, or in a
+  shell), whether it waits for a permission or an answer and since when, where it runs (`vscode`, `desktop`, `sdk`,
+  or the coding tool, such as `codex`), and what it does now as a tool and a file, a command name, a skill, or an
+  MCP server and tool ("Editing routes.go", "Running go", "Using pdf", "github · create_issue"). Also the kind of each of its last 30 tool calls (read, edit, run, web,
   subagent, message) and whether the same command keeps coming back, how full its context window is, how many lines
   and files its branch changes, the local branch it is stacked on, a detached commit or a rebase in progress, the
   folder it runs in under its checkout, and the names of other repos it touched. Announcements you send to a repo
@@ -19,7 +19,7 @@ branch) and a weekly report in team totals, which names the files changed in two
   changes it.
 - **The people in a conversation**: its messages. A message kept for someone offline waits at most 7 days.
 - **You and your team's admins**: each laptop's name, sent at sign-in; its murmur version and when it was
-  last seen; and its self-check, once a day by default: OS and CPU, Claude Code's version, and the setup checks
-  `murmur doctor` runs.
+  last seen; and its self-check, once a day by default: OS and CPU, the versions of its coding tools, and the setup
+  checks `murmur doctor` runs.
 - **Never**: prompts, transcripts, code, diffs, command lines, search patterns, the web pages agents search or
   read, to-do lists or costs.

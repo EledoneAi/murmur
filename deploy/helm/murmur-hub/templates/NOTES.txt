@@ -5,9 +5,13 @@ Register this redirect URL with your identity provider:
 
 Laptops install with:
   curl -fsSL {{ .Values.publicURL }}/install.sh | sh
-{{- if not .Values.ingress.enabled }}
+{{- if .Values.httpRoute.enabled }}
 
-No Ingress was created. Route {{ .Values.publicURL }} to service {{ include "murmur-hub.fullname" . }} port {{ .Values.service.port }} yourself, or look at it from your machine with:
+The HTTPRoute {{ include "murmur-hub.fullname" . }} attaches the hub to your Gateway. Leave its request timeout unset: it would end every laptop's WebSocket at that age. On GKE, also raise the backend timeout with a GCPBackendPolicy (the chart's README shows one).
+{{- end }}
+{{- if not (or .Values.ingress.enabled .Values.httpRoute.enabled) }}
+
+No Ingress or HTTPRoute was created. Route {{ .Values.publicURL }} to service {{ include "murmur-hub.fullname" . }} port {{ .Values.service.port }} yourself, or look at it from your machine with:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "murmur-hub.fullname" . }} 8080:{{ .Values.service.port }}
 {{- end }}
 {{- if not (or .Values.existingSecret .Values.env.SESSION_SECRET .Values.env.DEV_LOGIN) }}

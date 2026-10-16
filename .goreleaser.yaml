@@ -8,6 +8,7 @@
 #   murmur-hub_<version>_<os>_<arch>   the hub, for linux (servers) and darwin (trying it locally)
 #   checksums.txt, checksums.txt.sig       SHA-256 of every file above, signed with the project's release key
 #   ghcr.io/eledoneai/murmur-hub       the hub image, carrying the laptop binaries and the signed checksums
+#                                      (tagged <version>-litestream: the same with Litestream, see deploy/litestream)
 #   a Homebrew cask in eledoneai/homebrew-tap
 version: 2
 project_name: murmur
@@ -93,6 +94,33 @@ dockers_v2:
       org.opencontainers.image.revision: "{{ .FullCommit }}"
       org.opencontainers.image.created: "{{ .Date }}"
 
+  # The same hub with Litestream, for one instance keeping sqlite on a platform without a lasting disk (see
+  # deploy/litestream): ghcr.io/eledoneai/murmur-hub:<version>-litestream, and :litestream for the latest release.
+  - id: murmur-hub-litestream
+    ids: [murmur-hub]
+    dockerfile: deploy/docker/Dockerfile.litestream
+    images: [ghcr.io/eledoneai/murmur-hub]
+    tags:
+      - "{{ .Version }}-litestream"
+      - "{{ if not (or .Prerelease .IsSnapshot) }}litestream{{ end }}"
+    platforms: [linux/amd64, linux/arm64]
+    extra_files:
+      - dist/client/murmur-darwin-amd64
+      - dist/client/murmur-darwin-arm64
+      - dist/client/murmur-linux-amd64
+      - dist/client/murmur-linux-arm64
+      - dist/checksums.txt
+      - dist/checksums.txt.sig
+      - deploy/litestream/litestream.yml
+    labels:
+      org.opencontainers.image.title: murmur-hub
+      org.opencontainers.image.description: The hub that links a team's murmur laptops, with Litestream
+      org.opencontainers.image.source: https://github.com/EledoneAi/murmur
+      org.opencontainers.image.licenses: Apache-2.0
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
 # GoReleaser publishes Homebrew installs of prebuilt binaries as casks (its formula support is deprecated).
 # People run brew install eledoneai/tap/murmur and murmur join https://<hub>, then
 # brew upgrade murmur.
@@ -105,7 +133,7 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Casks
     homepage: https://github.com/EledoneAi/murmur
-    description: Your team's Claude Code agents in one terminal console
+    description: Your team's coding agents in one terminal console
     skip_upload: auto
     # brew audit --strict wants the version interpolated in the URL rather than written out.
     url:
@@ -140,3 +168,4 @@ release:
 
     `ghcr.io/eledoneai/murmur-hub:{{ .Version }}` carries the laptop binaries of this release. Deploy it and
     every laptop connected to the hub follows. See docs/self-hosting.md.
+    `ghcr.io/eledoneai/murmur-hub:{{ .Version }}-litestream` is the same with Litestream: see deploy/litestream.

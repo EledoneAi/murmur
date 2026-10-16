@@ -26,6 +26,9 @@ and is changed in the hub's admin panel, without a restart: see [Admin settings]
 | `BUS` | `local://` | How hub instances pass events to each other. `local://` keeps them inside one instance. To run more than one instance, use `postgres://...` (or `postgresql://...`) or `redis://...` (`rediss://...` for TLS). Hubs that share one Postgres or Redis need a channel each: add `?channel=NAME` (default `murmur`). The Postgres bus needs a session of its own: point it at the server or a session pooler, not a transaction pooler. |
 
 More than one instance needs a networked bus and a networked store: not `sqlite://`, not `memory://`.
+
+The `<version>-litestream` image also reads `LITESTREAM_REPLICA_URL`, where it copies the sqlite store as it changes,
+and the credentials that storage needs: [deploy/litestream](../deploy/litestream).
 [self-hosting.md](self-hosting.md#choose-a-store-and-a-bus) helps you choose.
 
 ### Sign-in
@@ -88,7 +91,7 @@ apply at once on every instance.
 | Days a laptop stays signed in | 90 | Seeded from `TOKEN_DAYS`. 0 keeps laptops signed in until someone revokes them. |
 | Messages per minute | 20 | What one person or one agent can send. |
 | Messages between two agents | 12 in 10 minutes | Past that, a person must step in. |
-| Agents per laptop | 64 | Claude Code sessions one laptop can report. |
+| Agents per laptop | 64 | Agent sessions one laptop can report. |
 | Laptops per person | 10 | Laptops one person can have signed in at once. |
 | Downloads per hour | 120 | Installs and updates one network address can start. |
 | Ignored paths | none | Files that never count as an overlap, on top of each repo's `.gitattributes`: `traces/**` covers a folder, `*.lock` any file with that name, `docs/*.md` the files right in `docs`. |
@@ -112,6 +115,11 @@ apply at once on every instance.
 | `MURMUR_HUB` | the hub saved at sign-in | The team's hub, such as `https://murmur.example.com`. `murmur join` saves the hub it joins. Set this to point a laptop at another hub, as `make laptop` does for a test laptop. |
 | `MURMUR_HOME` | `~/.murmur` | Where murmur keeps its files on the laptop: config and sign-in token, the daemon's socket and log, message history. Point it elsewhere to keep a test laptop apart from your real one. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code's own setting for its folder. Murmur follows it: it reads Claude Code's sessions there and adds its hooks to `settings.json` there. |
+| `CODEX_HOME` | `~/.codex` | Codex's own setting for its folder, where murmur adds its hooks. |
+| `CURSOR_CONFIG_DIR` | `~/.cursor` | Cursor CLI's setting for its folder, where murmur adds its hooks and MCP server. |
+| `OPENCODE_CONFIG_DIR` | `~/.config/opencode` | A folder OpenCode loads plugins from besides its own, where murmur then writes its plugin. Without it, murmur follows `XDG_CONFIG_HOME`. |
+| `COPILOT_HOME` | `~/.copilot` | Copilot CLI's own setting for its folder, where murmur adds its hooks and MCP server. |
+| `GEMINI_CLI_HOME` | your home folder | Gemini CLI's own setting for the folder that holds `.gemini`, where murmur adds its hooks and MCP server. |
 | `MURMUR_THEME` | the terminal's background | The console's colours: `dark`, `light`, `ansi` (the terminal's 16 colours) or `contrast`. |
 | `MURMUR_MOTION` | on | `0` stops the console's animations. They are off over SSH anyway. |
 | `MURMUR_GLYPHS` | from the locale | `ascii` draws the console with ASCII only; `unicode` forces the symbols. |

@@ -1,4 +1,4 @@
-package claudecode
+package claude
 
 import (
 	"os"
@@ -8,7 +8,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/EledoneAi/murmur/internal/harness"
 )
+
+// reading is a transcript and what it read, as the daemon keeps them.
+type reading struct {
+	*Transcript
+	harness.Activity
+}
+
+func (r *reading) Read() bool { return r.Transcript.Read(&r.Activity) }
+
+// maxDirs is how many folders harness.Activity keeps.
+const maxDirs = 200
 
 func TestReadTranscript(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
@@ -19,15 +32,15 @@ func TestReadTranscript(t *testing.T) {
 	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s := &Transcript{Path: path}
-	if !s.Read() || s.Title() != "Rerun billing on staging" || s.PR != 1822 {
-		t.Fatalf("first read: title %q pr %d", s.Title(), s.PR)
+	s := &reading{Transcript: &Transcript{Path: path}}
+	if !s.Read() || s.Title != "Rerun billing on staging" || s.PR != 1822 {
+		t.Fatalf("first read: title %q pr %d", s.Title, s.PR)
 	}
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	_, _ = f.WriteString(`ten","sessionId":"s"}` + "\n" + `{"type":"custom-title","customTitle":"Mine","sessionId":"s"}` + "\n")
 	f.Close()
-	if !s.Read() || s.AITitle != "half written" || s.Title() != "Mine" {
-		t.Fatalf("second read: ai %q title %q", s.AITitle, s.Title())
+	if !s.Read() || s.aiTitle != "half written" || s.Title != "Mine" {
+		t.Fatalf("second read: ai %q title %q", s.aiTitle, s.Title)
 	}
 	if s.Read() {
 		t.Fatal("nothing new, yet changed")
@@ -85,7 +98,7 @@ func appendLines(t *testing.T, path string, lines ...string) {
 // Kinds keeps the last 30 counted tool calls as letters; tools it doesn't count leave no letter.
 func TestKinds(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
-	s := &Transcript{Path: path}
+	s := &reading{Transcript: &Transcript{Path: path}}
 	var lines []string
 	for _, c := range []struct{ tool, in string }{
 		{"Read", `{"file_path":"a.go"}`}, {"Grep", `{"pattern":"x"}`}, {"Glob", `{"pattern":"*"}`}, {"LS", `{"path":"."}`},
@@ -126,7 +139,7 @@ func TestLoop(t *testing.T) {
 		for _, b := range c.calls {
 			appendLines(t, path, answerLine(b, 1000))
 		}
-		s := &Transcript{Path: path}
+		s := &reading{Transcript: &Transcript{Path: path}}
 		if s.Read(); s.Loop != c.want {
 			t.Errorf("%d calls: loop %v, want %v", len(c.calls), s.Loop, c.want)
 		}
@@ -137,7 +150,7 @@ func TestLoop(t *testing.T) {
 // a 200k window, or until the conversation goes past 200k; a compaction brings it down at once.
 func TestContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "t.jsonl")
-	s := &Transcript{Path: path}
+	s := &reading{Transcript: &Transcript{Path: path}}
 	text := `{"type":"text","text":"done"}`
 	appendLines(t, path, answerLine(text, 50_000))
 	if !s.Read() || s.Context != 5 {
@@ -173,7 +186,7 @@ func TestDirs(t *testing.T) {
 		answerLine(toolBlock("NotebookEdit", `{"notebook_path":"/work/lab/a.ipynb"}`), 1000),
 		answerLine(toolBlock("Edit", `{"file_path":"relative/x.go"}`), 1000),
 		answerLine(toolBlock("Write", `{"file_path":"/work/api/client.go","content":"package api"}`), 1000))
-	s := &Transcript{Path: path}
+	s := &reading{Transcript: &Transcript{Path: path}}
 	if s.Read(); strings.Join(s.Dirs, ",") != "/work/web/src,/work/lab,/work/api" {
 		t.Fatalf("dirs: %q", s.Dirs)
 	}

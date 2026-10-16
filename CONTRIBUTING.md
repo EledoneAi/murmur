@@ -16,7 +16,8 @@ You need:
 - `make` and `git`
 - Docker, for the store and bus tests and for building images
 - Node and pnpm, only to change the hub's web pages in `web/`
-- Claude Code 2.1.224 or later, to try a laptop end to end (`npm install -g @anthropic-ai/claude-code`)
+- a coding tool, to try a laptop end to end: Claude Code 2.1.224 or later (`npm install -g @anthropic-ai/claude-code`),
+  or Codex, Cursor, OpenCode, Copilot CLI or Gemini CLI
 
 Then:
 
@@ -31,11 +32,11 @@ To run murmur while you work on it, open two terminals:
 
 ```sh
 make dev        # terminal 1: a hub on http://localhost:8080 that lets you sign in with any email
-make laptop     # terminal 2: a shell for a test laptop, then: murmur join, claude, murmur
+make laptop     # terminal 2: a shell for a test laptop, then: murmur join, claude (or codex…), murmur
 ```
 
-`make laptop` points murmur and Claude Code at `.dev/` inside the repo, so your own `~/.claude` and
-`~/.murmur` are never touched. `make demo` opens the console with made-up data and needs no hub.
+`make laptop` points murmur and every coding tool it connects at `.dev/` inside the repo, so your own `~/.murmur`,
+`~/.claude`, `~/.codex` and the others are never touched. `make demo` opens the console with made-up data and needs no hub.
 [docs/development.md](docs/development.md) explains all of this in more detail, and
 [docs/architecture.md](docs/architecture.md) explains how the code is laid out.
 

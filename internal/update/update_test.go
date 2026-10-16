@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-	"time"
 
 	"github.com/EledoneAi/murmur/internal/release"
 )
@@ -115,22 +114,5 @@ func TestNewerAndManaged(t *testing.T) {
 	}
 	if Managed("/opt/homebrew/Cellar/murmur/1.2.0/bin/murmur") != "Homebrew" || Managed("/Users/x/.local/bin/murmur") != "" {
 		t.Fatal("package managers not recognised")
-	}
-}
-
-// A version that failed is skipped, and named for status, for an hour.
-func TestSkipped(t *testing.T) {
-	t.Setenv("MURMUR_HOME", t.TempDir())
-	if Skipped("1.3.0") || Failed() != "" {
-		t.Fatal("skipped with no failure")
-	}
-	_ = os.WriteFile(skipped(), []byte("1.3.0"), 0o600)
-	if !Skipped("1.3.0") || Skipped("1.4.0") || Skipped("") || Failed() != "1.3.0" {
-		t.Fatal("a failure an instant ago")
-	}
-	old := time.Now().Add(-2 * skipFor)
-	_ = os.Chtimes(skipped(), old, old)
-	if Skipped("1.3.0") || Failed() != "" {
-		t.Fatal("a failure two hours ago")
 	}
 }

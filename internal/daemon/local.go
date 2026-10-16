@@ -2,18 +2,21 @@ package daemon
 
 import (
 	"bufio"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
+	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/ipc"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
-	"github.com/EledoneAi/murmur/internal/update"
+	"github.com/EledoneAi/murmur/internal/setup"
 )
 
 // ---------------------------------------------------------------- local requests
@@ -21,7 +24,8 @@ import (
 func (d *Daemon) serve(c net.Conn) {
 	defer c.Close()
 	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	line, err := bufio.NewReaderSize(c, 1<<16).ReadBytes('\n')
+	r := bufio.NewReaderSize(c, 1<<16)
+	line, err := r.ReadBytes('\n')
 	if err != nil {
 		return
 	}
@@ -33,7 +37,16 @@ func (d *Daemon) serve(c net.Conn) {
 	enc := json.NewEncoder(c)
 	switch req.Op {
 	case "hook":
-		_ = enc.Encode(ipc.Reply{OK: true, Text: d.onHook(req)})
+		var text, token string
+		if req.Hook != nil {
+			text, token = d.onHook(*req.Hook)
+		}
+		err := enc.Encode(ipc.Reply{OK: true, Text: text, Ack: token != ""})
+		if token != "" { // the messages leave once the hook printed them
+			_ = c.SetReadDeadline(time.Now().Add(3 * time.Second))
+			said, _ := r.ReadString('\n')
+			d.settle(token, err == nil && strings.TrimSpace(said) == "printed")
+		}
 	case "who":
 		d.mu.Lock()
 		snap := d.snapshotLocked()
@@ -66,9 +79,9 @@ func (d *Daemon) serve(c net.Conn) {
 		d.subscribe(c, enc)
 	case "status":
 		d.mu.Lock()
-		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d Claude Code sessions", len(d.sessions)), Version: release.Version,
+		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d agent sessions", len(d.sessions)), Version: release.Version,
 			Update: d.available}
-		if v := update.Failed(); v != "" {
+		if v := config.FailedUpdate(); v != "" {
 			r.Text += "; the update to " + v + " failed and was undone (see daemon.log)"
 		} else if d.available != "" {
 			r.Text += "; " + d.available + " is available: murmur update"
@@ -99,7 +112,7 @@ func (d *Daemon) serve(c net.Conn) {
 		var term map[string]string
 		for _, s := range d.sessions {
 			if s.name == req.To {
-				term = d.terms[s.id]
+				term = d.terms[procKey(s.harness, s.id, s.pid)]
 			}
 		}
 		d.mu.Unlock()
@@ -110,24 +123,28 @@ func (d *Daemon) serve(c net.Conn) {
 		b, _ := json.Marshal(term)
 		_ = enc.Encode(ipc.Reply{OK: true, Text: string(b)})
 	case "stop":
+		if req.Version != "" && req.Version != release.Version { // meant for a daemon that has gone since
+			_ = enc.Encode(ipc.Reply{Err: "this daemon runs " + release.Version})
+			break
+		}
 		_ = enc.Encode(ipc.Reply{OK: true})
 		d.shutdown()
 	}
 }
 
-// onHook takes what a Claude Code hook reports, and returns what the hook prints for the agent: the brief when a
-// session starts, a reason to turn an edit back, or nothing.
-func (d *Daemon) onHook(req ipc.Request) string {
-	var in claudecode.HookInput
-	_ = json.Unmarshal(req.Data, &in)
-	switch req.Event {
-	case "start":
-		d.mu.Lock()
+// onHook takes what a harness's hook reports, and returns murmur's text for the agent: the brief when a session
+// starts, a reason to turn an edit back, the messages waiting for a session whose harness murmur can't push to, or
+// nothing. Messages go only with an answer the harness reads, and a token says which, for settle.
+func (d *Daemon) onHook(ev harness.Event) (string, string) {
+	key := harness.Key(ev.Harness, ev.SessionID)
+	l, listed := setup.Harness(ev.Harness).(harness.Lister)
+	d.mu.Lock()
+	if ev.Kind == harness.Start {
 		if len(d.hints) > 500 {
 			clear(d.hints)
 		}
-		if in.SessionID != "" && in.Transcript != "" {
-			d.hints[in.SessionID] = in.Transcript
+		if ev.SessionID != "" && ev.Transcript != "" {
+			d.hints[key] = ev.Transcript
 		}
 		if len(d.sockets) > 500 {
 			clear(d.sockets)
@@ -135,31 +152,46 @@ func (d *Daemon) onHook(req ipc.Request) string {
 		if len(d.terms) > 500 {
 			clear(d.terms)
 		}
-		if in.SessionID != "" && len(req.Term) > 0 {
-			d.terms[in.SessionID] = req.Term
+		pk := procKey(ev.Harness, ev.SessionID, ev.PID)
+		if ev.SessionID != "" && len(ev.Term) > 0 {
+			d.terms[pk] = ev.Term
 		}
-		if in.SessionID != "" && req.Socket != "" {
-			d.sockets[in.SessionID] = req.Socket
-			if s := d.byIDLocked(in.SessionID); s != nil {
-				s.sock = req.Socket
+		if ev.SessionID != "" && ev.Socket != "" {
+			d.sockets[pk] = ev.Socket
+			for _, s := range d.sessions {
+				if procKey(s.harness, s.id, s.pid) == pk {
+					s.sock = ev.Socket
+				}
 			}
 		}
 		d.lastUse = time.Now()
-		d.mu.Unlock()
-		d.scanRegistry()
-		return d.brief(in)
-	case "edit":
-		return d.editCheck(in)
-	case "notify":
-		needs := map[string]string{"permission_prompt": "permission", "agent_needs_input": "input", "elicitation_dialog": "input", "elicitation_url_dialog": "input"}[in.Type]
-		d.mu.Lock()
-		if s := d.byIDLocked(in.SessionID); s != nil && needs != "" && s.needs != needs {
-			s.needs = needs
-			d.changed()
-		}
-		d.mu.Unlock()
 	}
-	return ""
+	if !listed {
+		d.hookedLocked(ev)
+	} else if s := d.sessions[key]; s != nil && ev.Kind == harness.Needs && ev.Needs != "" && s.needs != ev.Needs {
+		s.needs = ev.Needs // its status comes from the harness's registry
+		d.changed()
+	}
+	d.mu.Unlock()
+	switch ev.Kind {
+	case harness.Start:
+		if listed {
+			d.scan(ev.Harness, l)
+		}
+		brief := d.brief(ev)
+		if !ev.Carries {
+			return brief, ""
+		}
+		waiting, token := d.take(key)
+		return strings.TrimSpace(brief + "\n\n" + waiting), token
+	case harness.BeforeTool:
+		return d.editCheck(ev), ""
+	case harness.AfterTool, harness.Stop, harness.Prompt:
+		if ev.Carries {
+			return d.take(key)
+		}
+	}
+	return "", ""
 }
 
 func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
@@ -202,13 +234,10 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 	d.mu.Lock()
 	from := ""
 	if req.PID != 0 || req.Session != "" {
-		s := d.sessions[req.PID]
-		if s == nil && req.Session != "" {
-			s = d.byIDLocked(req.Session)
-		}
+		s := d.senderLocked(req)
 		if s == nil {
 			d.mu.Unlock()
-			return ipc.Reply{Err: "this Claude Code session is not on murmur yet; try again in a few seconds"}
+			return ipc.Reply{Err: "this session is not on murmur yet; try again in a few seconds"}
 		}
 		from = s.name
 	}
@@ -280,9 +309,7 @@ func whoText(s ipc.Snapshot) string {
 		b.WriteString(label + "\n")
 		for _, a := range p.Agents {
 			fmt.Fprintf(&b, "  %q · %s", p.Handle+"/"+a.Name, statusWord(a))
-			if a.App == "vscode" {
-				b.WriteString(" · in VS Code")
-			}
+			b.WriteString(appWords(a.App))
 			if a.Repo != "" {
 				fmt.Fprintf(&b, " · repo %q", a.Repo)
 				if a.Branch != "" {
@@ -303,6 +330,72 @@ func whoText(s ipc.Snapshot) string {
 		b.WriteString("\nMurmur is " + s.State + ".")
 	}
 	return b.String()
+}
+
+// appWords say where an agent runs, when that isn't Claude Code in a terminal, and when its harness only takes
+// messages while the agent works.
+func appWords(app string) string {
+	h := setup.Harness(app)
+	switch {
+	case app == "vscode":
+		return " · in VS Code"
+	case h == nil:
+		return ""
+	}
+	if _, push := h.(harness.Pusher); !push {
+		return " · in " + h.Title() + ", which takes messages while it works"
+	}
+	return " · in " + h.Title()
+}
+
+// senderLocked finds the session an MCP server speaks for: the session its harness names, in the harness process
+// that started the server or elsewhere; else the one session that process runs. Codex runs every session in one
+// process, so a process with several sessions and no name for the one at hand is no answer. Only a harness whose MCP
+// servers run apart from its sessions (Cursor) sends for its agent at work.
+func (d *Daemon) senderLocked(req ipc.Request) *session {
+	var found []*session
+	for _, s := range d.sessions {
+		if req.PID != 0 && s.pid == req.PID && (req.Harness == "" || s.harness == req.Harness) {
+			if req.Session != "" && s.id == req.Session {
+				return s
+			}
+			found = append(found, s)
+		}
+	}
+	if req.Session != "" {
+		if s := d.sessions[harness.Key(req.Harness, req.Session)]; s != nil {
+			return s
+		}
+		if s := d.byIDLocked(req.Session); s != nil {
+			return s
+		}
+		found = nil // the process runs other sessions than the one named
+	}
+	if len(found) == 1 {
+		return found[0]
+	}
+	found = nil
+	if a, ok := setup.Harness(req.Harness).(harness.Apart); ok && a.MCPApart() {
+		for _, s := range d.sessions {
+			if s.harness == req.Harness && s.status == protocol.StatusBusy {
+				found = append(found, s)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	slices.SortFunc(found, func(a, b *session) int {
+		return cmp.Or(cmp.Compare(boolInt(b.status == protocol.StatusBusy), boolInt(a.status == protocol.StatusBusy)), cmp.Compare(b.since, a.since))
+	})
+	return found[0]
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func statusWord(a protocol.Agent) string {

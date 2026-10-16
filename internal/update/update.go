@@ -179,24 +179,6 @@ func Install(exe string) error {
 // Restore puts the previous binary back.
 func Restore(exe string) error { return os.Rename(exe+".prev", exe) }
 
-// skipped marks a version that failed on this laptop: the daemon doesn't try it again for a while, people can.
-func skipped() string { return filepath.Join(config.Dir(), "update-skipped") }
-
-const skipFor = time.Hour
-
-// Skipped says whether version v failed on this laptop lately.
-func Skipped(v string) bool { return v != "" && Failed() == v }
-
-// Failed names a version that failed on this laptop in the last hour, for status and the console, or "".
-func Failed() string {
-	st, err := os.Stat(skipped())
-	if err != nil || time.Since(st.ModTime()) > skipFor {
-		return ""
-	}
-	b, _ := os.ReadFile(skipped())
-	return string(b)
-}
-
 // healthy is how long a new daemon has to reach the hub before the old version comes back.
 var healthy = time.Minute
 
@@ -218,7 +200,7 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 		say("Murmur " + release.Version + " is the team's version or newer: nothing to do")
 		return nil
 	}
-	if auto && Skipped(info.Version) {
+	if auto && config.UpdateSkipped(info.Version) {
 		return fmt.Errorf("%s failed on this laptop less than an hour ago", info.Version)
 	}
 	say("Downloading " + info.Version + " from " + cfg.Hub)
@@ -232,7 +214,7 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 	say("Installed " + v + ": restarting the daemon")
 	if err := restart(exe, v); err != nil {
 		say("The new daemon didn't come online (" + err.Error() + "): going back to " + release.Version)
-		_ = os.WriteFile(skipped(), []byte(v), 0o600)
+		config.SkipUpdate(v) // the daemon doesn't try it again for a while, people can
 		// the old binary goes back first, so a daemon started from exe from now on, by anyone, is the old version
 		if rerr := Restore(exe); rerr != nil {
 			return fmt.Errorf("%v, and %s could not be put back: %v", err, release.Version, rerr)

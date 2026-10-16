@@ -72,7 +72,7 @@ The repository's address, `https://github.com/EledoneAi/murmur`:
 ## The name
 
 Keep the binaries' name, `murmur`, unless you are ready to change Go code: the hub serves
-`murmur-<os>-<arch>` (`internal/hub/dist.go`, `internal/update/update.go`), Claude Code's settings get the
-`murmur` MCP server and its tool permissions (`internal/setup/setup.go`, `internal/claudecode/settings.go`),
-uninstall finds murmur's hooks by `murmur` in their command (`internal/claudecode/settings.go`), and the
+`murmur-<os>-<arch>` (`internal/hub/dist.go`, `internal/update/update.go`), the coding tools' settings get the
+`murmur` MCP server and its tool permissions (`internal/harness/claude/settings.go`, `internal/harness/hookish/specs.go`),
+uninstall finds murmur's hooks by `murmur` in their command (`internal/harness/harness.go`), and the
 laptop keeps its files in `~/.murmur` (`internal/config/config.go`).

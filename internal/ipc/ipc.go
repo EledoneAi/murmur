@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/EledoneAi/murmur/internal/config"
+	"github.com/EledoneAi/murmur/internal/harness"
 	"github.com/EledoneAi/murmur/internal/protocol"
 	"github.com/EledoneAi/murmur/internal/release"
 )
@@ -41,19 +42,16 @@ type Snapshot struct {
 // ---------------------------------------------------------------- talking to the daemon
 
 type Request struct {
-	Op      string          `json:"op"`
-	Event   string          `json:"event,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	PID     int             `json:"pid,omitempty"`
-	Session string          `json:"session,omitempty"`
-	To      string          `json:"to,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	ID      string          `json:"id,omitempty"`
-	IDs     []string        `json:"ids,omitempty"`
-	Socket  string          `json:"socket,omitempty"` // a session's inbox, from its SessionStart hook
-	// Term is where a session runs, from its SessionStart hook's environment: its tmux pane, iTerm2 session, WezTerm
-	// pane or kitty window, and the terminal program, so the console can switch to it.
-	Term map[string]string `json:"term,omitempty"`
+	Op      string         `json:"op"`
+	Hook    *harness.Event `json:"hook,omitempty"`    // what a harness's hook reports
+	Harness string         `json:"harness,omitempty"` // the harness of the agent that sends, from the MCP server
+	PID     int            `json:"pid,omitempty"`     // its process
+	Session string         `json:"session,omitempty"` // and its session id, when the harness gives the MCP server one
+	To      string         `json:"to,omitempty"`
+	Text    string         `json:"text,omitempty"`
+	ID      string         `json:"id,omitempty"`
+	IDs     []string       `json:"ids,omitempty"`
+	Version string         `json:"version,omitempty"` // on stop: the version of the daemon meant, which refuses if it isn't
 }
 
 type Reply struct {
@@ -64,6 +62,8 @@ type Reply struct {
 	State   string `json:"state,omitempty"`
 	Version string `json:"version,omitempty"` // the daemon's own, on status
 	Update  string `json:"update,omitempty"`  // on status: the team's version, when this laptop can update to it
+	// Ack, on a hook's reply, says the reply carries messages the daemon keeps until the hook says it printed them.
+	Ack bool `json:"ack,omitempty"`
 }
 
 func Dial() (net.Conn, error) { return net.DialTimeout("unix", config.SockPath(), time.Second) }
@@ -72,14 +72,44 @@ func Dial() (net.Conn, error) { return net.DialTimeout("unix", config.SockPath()
 // it aside to murmur.prev, os.Executable names the old version, which must not start again.
 var self = config.Exe()
 
-// EnsureDaemon starts the background process unless it already runs. It returns once the daemon answers.
+// replaced says this process already replaced an older daemon once: after an update that rolled back, the binary on
+// disk is the older one again, and replacing its daemon again would only start it again.
+var replaced bool
+
+// EnsureDaemon starts the background process unless it already runs. It returns once the daemon answers. A daemon
+// older than this binary, still running after an upgrade the daemon didn't make itself (Homebrew's), is stopped,
+// and this version's starts and sets the laptop up again: once per process, and never for a version that failed to
+// update on this laptop lately.
 func EnsureDaemon() error {
-	if c, err := Dial(); err == nil {
-		c.Close()
+	var r Reply
+	err := CallRunning(Request{Op: "status"}, &r, time.Second)
+	switch {
+	case err != nil:
+		if c, derr := Dial(); derr == nil { // it answers, but slowly: leave it be
+			c.Close()
+			return nil
+		}
+	case release.Dev() || r.Version == "" || !release.Older(r.Version, release.Version) || replaced ||
+		config.UpdateSkipped(release.Version):
 		return nil
+	default:
+		replaced = true
+		// the stop names the version seen: a daemon another process started meanwhile stays
+		_ = CallRunning(Request{Op: "stop", Version: r.Version}, &Reply{}, 2*time.Second)
+		for range 100 { // until it has let go of its socket
+			c, err := Dial()
+			if err != nil {
+				break
+			}
+			c.Close()
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
-	return StartDaemon(self)
+	return start(self)
 }
+
+// start starts a daemon; tests replace it.
+var start = StartDaemon
 
 // StartDaemon runs exe as the daemon and waits up to three seconds for its socket. When a daemon already runs, the
 // new one exits at once and that one answers.
@@ -124,6 +154,36 @@ func Call(req Request, out any, timeout time.Duration) error {
 		return err
 	}
 	return CallRunning(req, out, timeout)
+}
+
+// Hook sends a hook's request to a daemon that already runs, and reads its reply. When the reply carries messages
+// (Ack), the daemon keeps them until done(true) says the hook printed them; done(false), or a hook that never says,
+// leaves them waiting.
+func Hook(req Request, timeout time.Duration) (Reply, func(printed bool), error) {
+	var r Reply
+	c, err := Dial()
+	if err != nil {
+		return r, nil, err
+	}
+	_ = c.SetDeadline(time.Now().Add(timeout))
+	line, err := []byte(nil), json.NewEncoder(c).Encode(req)
+	if err == nil {
+		line, err = bufio.NewReaderSize(c, 1<<16).ReadBytes('\n')
+	}
+	if err == nil {
+		err = json.Unmarshal(line, &r)
+	}
+	if err != nil || !r.Ack {
+		c.Close()
+		return r, func(bool) {}, err
+	}
+	return r, func(printed bool) {
+		if printed {
+			_ = c.SetDeadline(time.Now().Add(time.Second))
+			_, _ = c.Write([]byte("printed\n"))
+		}
+		c.Close()
+	}, nil
 }
 
 // CallRunning is Call for a daemon that already runs: it never starts one.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/claudecode"
 	"github.com/EledoneAi/murmur/internal/gitscan"
+	"github.com/EledoneAi/murmur/internal/harness"
 )
 
 const (
@@ -21,14 +21,15 @@ const (
 // another checkout changes too, the messages waiting for it, and the team's agreements. What it says of teammates
 // keeps to five lines, and it is empty when there is nothing to say. Its checkout is what the daemon last read of the session's: git can
 // take seconds in a big repo, longer than the hook waits.
-func (d *Daemon) brief(in claudecode.HookInput) string {
+func (d *Daemon) brief(ev harness.Event) string {
+	key := harness.Key(ev.Harness, ev.SessionID)
 	deadline := time.Now().Add(briefWait)
-	for d.starting(in.SessionID) && time.Now().Before(deadline) {
+	for d.starting(key) && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	d.mu.Lock()
 	var r gitscan.Result
-	if s := d.byIDLocked(in.SessionID); s != nil {
+	if s := d.sessions[key]; s != nil {
 		r = gitscan.Result{Top: s.top, Repo: s.repo, Branch: s.branch, Tree: s.tree, Files: slices.Clone(s.files)}
 	}
 	d.mu.Unlock()
@@ -38,25 +39,25 @@ func (d *Daemon) brief(in claudecode.HookInput) string {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.briefLocked(in.SessionID, r, overlaps)
+	return d.briefLocked(key, r, overlaps)
 }
 
-// starting says whether the brief of session id is worth a short wait: a daemon this session just started is still
+// starting says whether the brief of session key is worth a short wait: a daemon this session just started is still
 // connecting, and the team is on its way, or it is reading the session's checkout for the first time.
-func (d *Daemon) starting(id string) bool {
+func (d *Daemon) starting(key string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	s := d.byIDLocked(id)
+	s := d.sessions[key]
 	return d.state == "connecting" || (s != nil && s.gitBusy && s.gitAt.IsZero())
 }
 
-// briefLocked writes the brief for session id in checkout r, given the hub's overlaps for the files r changes.
+// briefLocked writes the brief for session key in checkout r, given the hub's overlaps for the files r changes.
 // Teammates' agents name themselves, and their titles and branches come from their models and checkouts, so all of
 // it is quoted, as data, under a line that says so.
-func (d *Daemon) briefLocked(id string, r gitscan.Result, overlaps []string) string {
+func (d *Daemon) briefLocked(key string, r gitscan.Result, overlaps []string) string {
 	var b strings.Builder
 	self := ""
-	if s := d.byIDLocked(id); s != nil {
+	if s := d.sessions[key]; s != nil {
 		self = s.name
 	}
 	if r.Tree != "" { // a git checkout: outside one, the folder's name says nothing about who else works there
@@ -181,39 +182,45 @@ func shortAgreements(text string) string {
 	return string(short)
 }
 
-// editCheck is what the edit hook asks before an agent changes a file: whether another checkout of its repo changes
-// that file too. The first edit of such a file in a conversation is turned back once, with a reason that names the
+// editCheck is what the edit hook asks before an agent changes files: whether another checkout of its repo changes
+// them too. The first edit of such a file in a conversation is turned back once, with a reason that names the
 // other agents; the next attempt goes ahead. So does any edit the hub doesn't answer for in time, and any edit of a
 // file outside the session's checkout. It returns the reason, or "" to let the edit through.
-func (d *Daemon) editCheck(in claudecode.HookInput) string {
-	path := in.Path()
+func (d *Daemon) editCheck(ev harness.Event) string {
 	d.mu.Lock()
-	s := d.byIDLocked(in.SessionID)
-	if s == nil || s.tree == "" || path == "" {
+	s := d.sessions[harness.Key(ev.Harness, ev.SessionID)]
+	if s == nil || s.tree == "" {
 		d.mu.Unlock()
 		return ""
 	}
-	rel, ok := inCheckout(s.top, path)
-	if !ok || s.warned[rel] {
+	var rels []string
+	for _, p := range ev.Paths {
+		if rel, ok := inCheckout(s.top, p); ok && !s.warned[rel] && !slices.Contains(rels, rel) {
+			rels = append(rels, rel)
+		}
+	}
+	if len(rels) == 0 {
 		d.mu.Unlock()
 		return ""
 	}
 	repo, tree := s.repo, s.tree
 	d.mu.Unlock()
-	lines := d.check(repo, tree, []string{rel}, checkWait)
+	lines := d.check(repo, tree, rels, checkWait)
 	if len(lines) == 0 {
 		return ""
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if s.warned[rel] { // another edit of the file was turned back while this one waited
+	if slices.ContainsFunc(rels, func(rel string) bool { return s.warned[rel] }) { // turned back while this one waited
 		return ""
 	}
 	if s.warned == nil {
 		s.warned = map[string]bool{}
 	}
-	s.warned[rel] = true
-	return editReason(rel, lines)
+	for _, rel := range rels {
+		s.warned[rel] = true
+	}
+	return editReason(strings.Join(rels, ", "), lines)
 }
 
 // editReason tells an agent why its edit of file was turned back, and what to do about it. The other agents are

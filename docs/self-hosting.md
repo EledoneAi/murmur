@@ -7,8 +7,6 @@ talk only to it.
 This page helps you choose where to run it, which store and bus to use and how to set up sign-in. The folders in
 [deploy/](../deploy) hold step-by-step recipes. [configuration.md](configuration.md) lists every setting.
 
-Murmur is before 1.0. Read the release notes before you upgrade.
-
 ## What a hub needs
 
 - **An HTTPS address** that every laptop and browser on the team can reach, such as
@@ -17,6 +15,9 @@ Murmur is before 1.0. Read the release notes before you upgrade.
   proxy in front must allow WebSocket upgrades on `/ws` and leave connections open for many minutes.
 - **An identity provider** your team already signs in with.
 - **A place for its data**, the store. For one instance a sqlite file on a disk that survives restarts is enough.
+- **Nothing that signs people in before the hub.** Laptops, scripts and GitHub reach it without a browser, and the
+  hub signs people in itself. Leave the platform's own sign-in off: see
+  [managed-services.md](managed-services.md#three-rules).
 
 The hub is one Go binary in a small image.
 
@@ -36,11 +37,14 @@ Open http://localhost:8080 and sign in by typing any email. The hub refuses to s
 |---|---|---|
 | One server, Docker Compose | [deploy/compose](../deploy/compose) | The simplest real setup. Caddy gets the certificate. Also a two-instance variant with Postgres. |
 | One server, binary and systemd | [deploy/systemd](../deploy/systemd) | No Docker. Bring your own reverse proxy for HTTPS. |
-| Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | Set your ingress controller's timeouts for WebSockets. |
+| A VM at Hetzner, Lightsail, DigitalOcean, EC2 or Azure | [deploy/vm](../deploy/vm) | The Compose recipe on the cheapest real setup, from about €6 a month before VAT. |
+| Kubernetes | [deploy/helm/murmur-hub](../deploy/helm/murmur-hub) | An Ingress or a Gateway API HTTPRoute. Check your controller's or gateway's timeouts for WebSockets. |
 | Google Cloud Run | [deploy/cloudrun](../deploy/cloudrun) | Connections last at most an hour, then laptops reconnect. No local disk: use Firestore or Cloud SQL. |
 | Fly.io | [deploy/fly](../deploy/fly) | One Machine with a volume for sqlite. |
-| Azure Container Apps | [below](#azure-container-apps) | Use Azure Database for PostgreSQL for the store. |
-| AWS ECS on Fargate | [below](#aws-ecs-on-fargate) | Behind an Application Load Balancer with a longer idle timeout. |
+| Railway | [deploy/railway](../deploy/railway) | One service with a volume for sqlite. A redeploy disconnects laptops for a moment. |
+| Render | [deploy/render](../deploy/render) | One paid instance with a disk for sqlite. Free instances sleep. |
+| AWS: ECS Express Mode, or ECS on Fargate with your own load balancer | [deploy/aws](../deploy/aws) | No local disk: use RDS for PostgreSQL. |
+| Azure Container Apps, or App Service for Containers | [deploy/azure](../deploy/azure) | No disk safe for sqlite: use Azure Database for PostgreSQL. |
 
 ### Not supported
 
@@ -51,7 +55,10 @@ These platforms run code per request and can't hold the long-lived WebSocket eac
 - **Cloudflare Workers**: a Worker runs per request in Cloudflare's JavaScript and WebAssembly runtime. Holding
   WebSockets there takes Durable Objects, a different model from a Go server listening on a port.
 - **Vercel**: functions end after a time limit and don't accept WebSocket connections.
-- **AWS App Runner**: it doesn't support WebSockets.
+
+**AWS App Runner** has been closed to new customers since 30 April 2026
+([AWS](https://docs.aws.amazon.com/apprunner/latest/dg/apprunner-availability-change.html)), and it never supported
+WebSockets. ECS Express Mode is AWS's replacement for it: see [deploy/aws](../deploy/aws).
 
 ## Choose a store and a bus
 
@@ -64,17 +71,23 @@ memory (`local://`).
 | Looking around | `memory://` | `local://` |
 | One instance on a server or a VM with a disk (most teams) | `sqlite:///data/murmur.db` (the image's default) | `local://` (the default) |
 | One instance on a platform without a lasting disk, such as Cloud Run | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `local://` |
+| One instance without a lasting disk, on a platform that never runs two at once (ECS on Fargate with your own deployment settings) | `sqlite:///data/murmur.db` with the [Litestream image](../deploy/litestream) | `local://` |
 | More than one instance | `postgres://...` or `firestore://PROJECT[/DATABASE]` | `postgres://...`, `redis://...` or `rediss://...` |
 
 - **memory** loses everything when the hub stops: everyone signs in again.
 - **sqlite** is one file. It needs a disk that outlives the container, and only one instance may use it. Don't
-  put it on a network file system such as NFS, EFS or Azure Files.
+  put it on a network file system such as NFS, EFS or Azure Files. The image tagged `<version>-litestream` copies
+  it to object storage as it changes, and restores it into a new container: see
+  [deploy/litestream](../deploy/litestream).
 - **Postgres** can be both the store and the bus, so a two-instance hub needs nothing else. Any recent version
-  works, managed or not.
+  works, managed or not. The bus needs a direct connection or a session pooler, not a transaction pooler.
 - **Redis** works as the bus only. It keeps nothing, so it needs no persistence or backups.
 - **Firestore** is Google Cloud's document database, natural on Cloud Run. The hub finds its credentials the way
   Google's client libraries do: the service account on Google Cloud, or `GOOGLE_APPLICATION_CREDENTIALS`
   elsewhere.
+
+[managed-services.md](managed-services.md) goes through the clouds' managed Postgres and Redis services: which
+endpoint to use, and which poolers and flavours don't work.
 
 One instance is enough for a team: if it restarts, laptops reconnect within seconds and resend what was waiting.
 Run two when even that short gap matters, or to upgrade without one.
@@ -179,7 +192,8 @@ of a minute is enough; an hour leaves a wide margin. When a proxy does cut a con
 and resends what was not confirmed, so a cut costs a reconnection, not messages.
 
 - **Caddy** passes WebSockets through with no time limit. `reverse_proxy localhost:8080` is all it needs.
-- **nginx** needs the upgrade headers and longer timeouts than its 60-second default:
+- **nginx** needs the upgrade headers. Its 60-second timeouts are enough with the pings; this example raises them
+  to leave a margin:
 
   ```nginx
   map $http_upgrade $connection_upgrade {
@@ -206,39 +220,24 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
   }
   ```
 
-- **ingress-nginx** on Kubernetes: the Helm chart sets `proxy-read-timeout` and `proxy-send-timeout` to 3600.
-- **AWS Application Load Balancer**: raise the idle timeout from its 60-second default, to 3600 for example.
+- **Kubernetes with the Gateway API**: never set a request timeout on the hub's HTTPRoute, as it ends each
+  WebSocket at that age. GKE's Gateway also needs its backend timeout raised from 30 seconds. The
+  [Helm chart's README](../deploy/helm/murmur-hub#websockets-and-timeouts) covers these and the common controllers.
+- **ingress-nginx** on Kubernetes was archived on 24 March 2026
+  ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)) and gets no more fixes. Its
+  60-second timeouts work with the pings; the Helm chart's README shows the annotations that raise them.
+- **AWS Application Load Balancer** closes a connection when no data has been sent or received for its idle
+  timeout, 60 seconds by default, and AWS advises sending at least a byte before each timeout ends
+  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html#connection-idle-timeout)).
+  Laptops and the hub ping each other every 25 seconds. Raising the timeout, to 3600 for example, leaves a margin.
 - **Google Cloud Run** ends every request at its timeout, 60 minutes at most: deploy with `--timeout=3600`.
+- **Azure Container Apps and App Service** document a request timeout of 240 seconds, which App Service puts down
+  to the Azure Load Balancer's idle timeout of four minutes. The pings keep a connection from sitting idle; if one is
+  still cut, the laptop reconnects ([deploy/azure](../deploy/azure)).
 - **Other proxies and load balancers**: allow WebSocket upgrades and set the idle timeout to an hour or more.
 
 Hub instances don't need sticky sessions: each laptop's connection stays on the instance it reached, and the bus
 carries what the others need.
-
-## Azure Container Apps
-
-1. Create an Azure Database for PostgreSQL flexible server and a database for the hub.
-2. Create a container app from `ghcr.io/eledoneai/murmur-hub:<version>` with external ingress, target port
-   8080, and at least one replica (`--min-replicas 1`) so it never scales to zero.
-3. Store `SESSION_SECRET`, the client secret and the Postgres URL as secrets of the app, and reference them in
-   the environment: `STORE=postgres://...?sslmode=require`, `PUBLIC_URL` (the app's address or your domain), and
-   the sign-in settings.
-4. For more than one replica, also set `BUS` to the same Postgres URL, or to an Azure Redis instance with
-   `rediss://:<access key>@<host>:<port>`.
-
-Don't put sqlite on an Azure Files share: its file locking isn't safe for sqlite.
-
-## AWS ECS on Fargate
-
-1. Create an RDS for PostgreSQL database for the store. Fargate tasks have no lasting disk, and sqlite isn't safe
-   on EFS.
-2. Write a task definition for `ghcr.io/eledoneai/murmur-hub:<version>` with container port 8080, the
-   settings as environment variables, and `SESSION_SECRET`, the client secret and the Postgres URL from Secrets
-   Manager.
-3. Run it as a service behind an Application Load Balancer: an HTTPS listener with your certificate, a target
-   group on port 8080 with the health check path `/healthz`, and the load balancer's idle timeout raised to 3600
-   seconds.
-4. With one task, keep the default bus. With more, set `BUS` to the Postgres URL, or to ElastiCache for Redis
-   (`rediss://` when in-transit encryption is on).
 
 ## The admin panel
 
@@ -303,7 +302,8 @@ api.github.com and to that server.
 Back up the store. The bus holds nothing worth keeping.
 
 - **sqlite**: copy the file while the hub runs with `sqlite3 murmur.db ".backup copy.db"`. Each recipe shows
-  where the file is.
+  where the file is. For a copy that keeps up as the file changes, run the
+  [Litestream image](../deploy/litestream).
 - **Postgres**: `pg_dump`, or your provider's automated backups.
 - **Firestore**: scheduled backups or point-in-time recovery, which Google Cloud offers for each database.
 

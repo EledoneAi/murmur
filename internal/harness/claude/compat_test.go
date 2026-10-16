@@ -1,4 +1,4 @@
-package claudecode
+package claude
 
 import (
 	"context"
@@ -79,7 +79,7 @@ func TestCompat(t *testing.T) {
 	if path == "" {
 		t.Fatalf("no transcript for session %s under %s", entry.SessionID, filepath.Join(home, "projects"))
 	}
-	tr := Transcript{Path: path}
+	tr := reading{Transcript: &Transcript{Path: path}}
 	tr.Read()
 	if tr.Doing != "Running sleep" {
 		t.Errorf("the transcript's tool call reads as %q, want %q: Claude Code changed its transcripts", tr.Doing, "Running sleep")

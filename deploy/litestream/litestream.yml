@@ -1,0 +1,9 @@
+# Litestream's settings in the hub's Litestream image, which reads them from /etc/litestream.yml. README.md in this
+# folder walks through it. Litestream fills in ${NAME} from the container's environment before it reads the file.
+dbs:
+  # The image's default STORE is sqlite:///data/murmur.db. If you change one, change the other.
+  - path: /data/murmur.db
+    replica:
+      # Where the copy goes, for example s3://my-bucket/murmur, gs://my-bucket/murmur or
+      # abs://<account>@<container>/murmur. One hub, and only one, writes there.
+      url: ${LITESTREAM_REPLICA_URL}

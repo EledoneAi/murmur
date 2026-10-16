@@ -29,6 +29,11 @@ TEST_ENV := STORE_TEST_POSTGRES='postgres://postgres:postgres@localhost:15432/po
 	BUS_TEST_REDIS='redis://localhost:16379' \
 	FIRESTORE_EMULATOR_HOST='localhost:18086'
 
+# The test laptop's murmur, and the folder of each coding tool murmur connects. A development build connects a
+# tool only when its variable is set (see harness.Guard). OpenCode loads OPENCODE_CONFIG_DIR besides its own folder.
+LAPTOP_ENV := MURMUR_HOME='$(DEV)/home' MURMUR_HUB='$(HUB_URL)' CLAUDE_CONFIG_DIR='$(DEV)/claude' CODEX_HOME='$(DEV)/codex' \
+	GEMINI_CLI_HOME='$(DEV)/gemini' COPILOT_HOME='$(DEV)/copilot' CURSOR_CONFIG_DIR='$(DEV)/cursor' OPENCODE_CONFIG_DIR='$(DEV)/opencode'
+
 COMPOSE_DEV := MURMUR_IMAGE=$(IMAGE) PUBLIC_URL=http://localhost DEV_LOGIN=1 \
 	docker compose -f deploy/compose/docker-compose.yml
 
@@ -75,17 +80,16 @@ dev-dist: ## Cross-build the four laptop binaries and checksums.txt into .dev/di
 	done
 	@cd $(DEV)/dist && $(SHA256) murmur-darwin-* murmur-linux-* > checksums.txt
 
-laptop: ## Build bin/murmur and open a shell whose murmur and Claude Code live in .dev/
+laptop: ## Build bin/murmur and open a shell whose murmur and coding tools keep their settings in .dev/
 	@$(BUILD) -o bin/murmur ./cmd/murmur
-	@mkdir -p $(DEV)/home $(DEV)/claude
+	@mkdir -p $(DEV)/home $(DEV)/claude $(DEV)/codex $(DEV)/gemini $(DEV)/copilot $(DEV)/cursor $(DEV)/opencode
 	@if [ -t 1 ]; then \
-		echo "Test laptop shell: MURMUR_HOME=.dev/home, CLAUDE_CONFIG_DIR=.dev/claude, hub $(HUB_URL)."; \
-		echo "Run murmur join, then claude, and murmur for the console. Type exit to leave."; \
-		MURMUR_HOME='$(DEV)/home' CLAUDE_CONFIG_DIR='$(DEV)/claude' MURMUR_HUB='$(HUB_URL)' \
-			PATH="$(CURDIR)/bin:$$PATH" $${SHELL:-/bin/sh} -i; \
+		echo "Test laptop shell: MURMUR_HOME=.dev/home, each coding tool's settings in .dev/, hub $(HUB_URL)."; \
+		echo "Run murmur join, then claude or another coding tool, and murmur for the console. Type exit to leave."; \
+		$(LAPTOP_ENV) PATH="$(CURDIR)/bin:$$PATH" $${SHELL:-/bin/sh} -i; \
 		echo "Left the test laptop shell."; \
 	else \
-		echo "export MURMUR_HOME='$(DEV)/home' CLAUDE_CONFIG_DIR='$(DEV)/claude' MURMUR_HUB='$(HUB_URL)' PATH=\"$(CURDIR)/bin:\$$PATH\""; \
+		echo "export $(LAPTOP_ENV) PATH=\"$(CURDIR)/bin:\$$PATH\""; \
 	fi
 
 web: ## Build the hub's web pages (web/) into internal/hub/webdist, which the hub embeds
@@ -98,11 +102,16 @@ demo: ## Open the console with made-up teammates and agents, no hub needed
 	$(GO) run ./cmd/murmur demo
 
 compat: ## Check murmur against the Claude Code installed on this machine
-	MURMUR_COMPAT=1 $(GO) test ./internal/claudecode/ -run Compat -count=1 -v
+	MURMUR_COMPAT=1 $(GO) test ./internal/harness/claude/ -run Compat -count=1 -v
 
 image: ## Build the hub image from source, tagged IMAGE (default murmur-hub:dev)
 	docker build -f deploy/docker/Dockerfile --build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
 		-t $(IMAGE) .
+
+.PHONY: image-litestream
+image-litestream: ## Build the hub image with Litestream from source, tagged IMAGE-litestream (deploy/litestream)
+	docker build -f deploy/docker/Dockerfile --target litestream --build-arg GO_VERSION=$(GO_VERSION) \
+		--build-arg VERSION=$(VERSION) -t $(IMAGE)-litestream .
 
 snapshot: ## Build a whole release into dist/ with GoReleaser, without publishing anything
 	@[ -n "$$MURMUR_RELEASE_KEY" ] || echo "snapshot: signing with a throwaway key; set MURMUR_RELEASE_KEY to use yours"
