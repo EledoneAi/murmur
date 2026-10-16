@@ -280,11 +280,20 @@ func (h *Hub) countCollisions(ctx context.Context, now time.Time) {
 		return
 	}
 	h.count(weekOf(now, s.TimeZone), func(w *weekStats) { w.Collisions = sum(w.Collisions, files) })
+	// ponytail: past maxCollided pairs in a day the list in the store stops growing, so it stays one small document
+	// (Firestore takes 1 MB at most) instead of a bigger write every 30 s. A lease holder that starts later that day
+	// counts the pairs beyond it again; a store that adds to a set would keep them all.
+	if len(t.seen) > maxCollided {
+		return
+	}
 	c := collided{Day: day, Seen: slices.Sorted(maps.Keys(t.seen))}
 	if err := h.store.Put(ctx, collidedKey, mustJSON(c)); err != nil {
 		h.log.Error("database", "op", "save today's collisions", "error", err.Error())
 	}
 }
+
+// maxCollided is the most pairs of checkouts and files the store keeps for a day: about 200 KB.
+const maxCollided = 10000
 
 // collided is the collisions counted on one day: a hash of each pair of checkouts and file.
 type collided struct {
