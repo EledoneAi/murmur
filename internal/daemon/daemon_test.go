@@ -158,7 +158,7 @@ func TestOnlineOnceTheTeamArrives(t *testing.T) {
 }
 
 // A console hears the state when it subscribes, then each change, and nothing when a change leaves the state as it
-// was, such as the hub echoing this laptop's own agents.
+// was, such as the hub echoing this laptop's own agents. Changes coming faster than snapshotGap arrive together.
 func TestConsoleHearsChangesOnly(t *testing.T) {
 	d := newDaemon("alice")
 	go d.publishLoop()
@@ -168,7 +168,7 @@ func TestConsoleHearsChangesOnly(t *testing.T) {
 	r := bufio.NewReader(console)
 	next := func() (ipc.Snapshot, bool) {
 		t.Helper()
-		_ = console.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		_ = console.SetReadDeadline(time.Now().Add(2 * snapshotGap))
 		line, err := r.ReadBytes('\n')
 		var s ipc.Snapshot
 		return s, err == nil && json.Unmarshal(line, &s) == nil
@@ -183,6 +183,15 @@ func TestConsoleHearsChangesOnly(t *testing.T) {
 	d.setState("online")
 	if s, ok := next(); !ok || s.State != "online" {
 		t.Fatalf("after a change: %+v", s)
+	}
+	d.setState("reconnecting")
+	time.Sleep(snapshotGap / 4)
+	d.setState("online again")
+	if s, ok := next(); !ok || s.State != "online again" {
+		t.Fatalf("after two quick changes: %+v", s)
+	}
+	if s, ok := next(); ok {
+		t.Fatalf("two quick changes sent another snapshot: %+v", s)
 	}
 }
 
