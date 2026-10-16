@@ -74,6 +74,11 @@ const (
 	pruneEvery    = 100
 )
 
+// ValueLimit is a store whose Put keeps values of MaxValue bytes at most. Stores without a limit don't implement it.
+type ValueLimit interface {
+	MaxValue() int
+}
+
 type Store interface {
 	Users(ctx context.Context) ([]User, error)
 	PutUser(ctx context.Context, u User) error

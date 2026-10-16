@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -135,5 +136,55 @@ func TestMedian(t *testing.T) {
 	}
 	if reportText(time.Now(), weekStats{}, "https://hub.example.com") != "" {
 		t.Error("a quiet week has a report")
+	}
+}
+
+// limited keeps values of a hundred pairs at most, as Firestore keeps documents of 1 MiB.
+type limited struct{ *store.Memory }
+
+func (limited) MaxValue() int { return 64 + 100*pairSize }
+
+// The day's collisions are kept in the store, so the next lease holder doesn't count them again: all of them, past
+// 10,000 pairs, in a store without a limit; as many as fit in one with a limit, from the first look on, and the next
+// holder counts only the others again.
+func TestCollisionsKept(t *testing.T) {
+	for _, tc := range []struct {
+		st   store.Store
+		kept int
+	}{{store.NewMemory(), 12400}, {limited{store.NewMemory()}, 100}} {
+		ctx := context.Background()
+		at := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+		counted := func(name string) int {
+			h, err := newHub(t, Config{Secret: []byte("0123456789abcdef"), Instance: name}, tc.st)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files := make([]string, 25)
+			for f := range files {
+				files[f] = fmt.Sprintf("api/file%d.go", f)
+			}
+			for i := range 32 { // 32 checkouts change 25 files: 12,400 pairs
+				place(h, fmt.Sprintf("c%d", i), protocol.Agent{Name: "a1", Repo: "acme/big", Tree: fmt.Sprintf("t%d", i), Files: files})
+			}
+			h.followTeam(ctx, at)
+			at = at.Add(jobEvery)
+			n := 0
+			h.stats.mu.Lock()
+			defer h.stats.mu.Unlock()
+			for _, w := range h.stats.fresh {
+				for _, c := range w.Collisions {
+					n += c
+				}
+			}
+			return n
+		}
+		first := counted("one")
+		var c collided
+		if err := getJSON(ctx, tc.st, collidedKey, &c); err != nil || len(c.Seen) != tc.kept {
+			t.Fatalf("kept %d pairs of %d, want %d (%v)", len(c.Seen), first, tc.kept, err)
+		}
+		if again := counted("two"); first != 12400 || again != 12400-tc.kept {
+			t.Fatalf("counted %d, then %d by the next lease holder", first, again)
+		}
 	}
 }
