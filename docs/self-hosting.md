@@ -226,9 +226,10 @@ and resends what was not confirmed, so a cut costs a reconnection, not messages.
 - **ingress-nginx** on Kubernetes was archived on 24 March 2026
   ([Kubernetes](https://kubernetes.io/blog/2025/11/11/ingress-Nginx-retirement/)) and gets no more fixes. Its
   60-second timeouts work with the pings; the Helm chart's README shows the annotations that raise them.
-- **AWS Application Load Balancer**: its default idle timeout of 60 seconds works, because WebSocket pings count as
-  traffic. Raising it, to 3600 for example, is harmless but not needed
-  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).
+- **AWS Application Load Balancer** closes a connection when no data has been sent or received for its idle
+  timeout, 60 seconds by default, and AWS advises sending at least a byte before each timeout ends
+  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html#connection-idle-timeout)).
+  Laptops and the hub ping each other every 25 seconds. Raising the timeout, to 3600 for example, leaves a margin.
 - **Google Cloud Run** ends every request at its timeout, 60 minutes at most: deploy with `--timeout=3600`.
 - **Azure Container Apps and App Service** document a request timeout of 240 seconds, which App Service puts down
   to the Azure Load Balancer's idle timeout of four minutes. The pings keep a connection from sitting idle; if one is

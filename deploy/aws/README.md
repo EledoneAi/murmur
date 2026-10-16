@@ -4,8 +4,8 @@ Two ways to run the hub on Amazon ECS with Fargate, both with RDS for PostgreSQL
 
 - **ECS Express Mode**, the simple one. One command creates the service, a load balancer with a certificate, and
   an address. It is AWS's replacement for App Runner, which is closed to new customers.
-- **An ECS service behind your own Application Load Balancer**, for your own domain and full control over
-  deployments.
+- **An ECS service behind your own Application Load Balancer**, for full control over the load balancer and
+  deployments, and for sqlite copied to S3 instead of a database.
 
 Replace `REGION` and the example values with yours. [docs/self-hosting.md](../../docs/self-hosting.md) shows how to
 set up your identity provider.
@@ -17,9 +17,10 @@ set up your identity provider.
   Litestream image ([below](#sqlite-and-s3-instead-of-rds)).
 - **Give the hub a bus too.** Express Mode deploys with canaries: for a few minutes, old and new tasks run side by
   side. With `BUS` set to the same Postgres URL as the store, both see the whole team.
-- **Connections.** The load balancer's default idle timeout of 60 seconds works: laptops and the hub ping each
-  other every 25 seconds, and pings count as traffic
-  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)).
+- **Connections.** The load balancer closes a connection when no data has been sent or received for its idle
+  timeout, 60 seconds by default, and AWS advises sending at least a byte before each timeout ends
+  ([AWS](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html#connection-idle-timeout)).
+  Laptops and the hub ping each other every 25 seconds.
 - **No platform sign-in.** Don't add the load balancer's `authenticate-oidc` action in front of the hub: laptops
   can't get through it. The hub signs people in itself
   ([docs/managed-services.md](../../docs/managed-services.md#three-rules)).
@@ -39,13 +40,24 @@ VERSION=1.0.0           # a release from https://github.com/EledoneAi/murmur/rel
 
 ## 2. Create the database
 
-In the RDS console, create a PostgreSQL database:
+First, two security groups in your default VPC: `murmur-hub` for the hub's tasks, and `murmur-db` for the
+database, which lets PostgreSQL (port 5432) in from `murmur-hub` only.
+
+```sh
+VPC="$(aws ec2 describe-vpcs --filters Name=is-default,Values=true --query 'Vpcs[0].VpcId' --output text)"
+HUB_SG="$(aws ec2 create-security-group --group-name murmur-hub --description 'murmur hub tasks' \
+  --vpc-id "$VPC" --query GroupId --output text)"
+DB_SG="$(aws ec2 create-security-group --group-name murmur-db --description 'murmur database' \
+  --vpc-id "$VPC" --query GroupId --output text)"
+aws ec2 authorize-security-group-ingress --group-id "$DB_SG" --protocol tcp --port 5432 --source-group "$HUB_SG"
+```
+
+Then, in the RDS console, create a PostgreSQL database:
 
 - the smallest instance class is enough for a team, for example `db.t4g.micro`;
 - in your default VPC, **not** publicly accessible;
 - an initial database named `murmur`, and a master user and password you choose;
-- a security group that lets PostgreSQL (port 5432) in from the VPC's address range (`172.31.0.0/16` for a default
-  VPC). Once the hub runs, you can narrow it to the hub's own security group.
+- the `murmur-db` security group, in place of the VPC's default one.
 
 Note the database's endpoint. If you use Aurora PostgreSQL instead, use the cluster's writer endpoint.
 [docs/managed-services.md](../../docs/managed-services.md#postgres) says what to avoid, such as RDS Proxy for the
@@ -135,7 +147,8 @@ EOF
 ```
 
 Express Mode's defaults suit a web app, not the hub: it checks `/ping` on port 80. Set the health check path and
-the port, and keep at least one task:
+the port, and keep at least one task. `securityGroups` adds `murmur-hub` to the tasks, next to the group Express Mode
+creates for them, so the database lets them in:
 
 ```sh
 aws ecs create-express-gateway-service \
@@ -143,6 +156,7 @@ aws ecs create-express-gateway-service \
   --execution-role-arn "arn:aws:iam::$ACCOUNT:role/ecsTaskExecutionRole" \
   --infrastructure-role-arn "arn:aws:iam::$ACCOUNT:role/ecsInfrastructureRoleForExpressServices" \
   --primary-container file://container.json \
+  --network-configuration "securityGroups=$HUB_SG" \
   --health-check-path /healthz \
   --cpu 256 --memory 512 \
   --scaling-target minTaskCount=1,maxTaskCount=2 \
@@ -160,7 +174,20 @@ aws ecs describe-express-gateway-service --service-arn "$SERVICE_ARN" \
 If it differs from `PUBLIC_URL`, put the right one in `container.json` and in your identity provider, and run the
 update below. Then open `PUBLIC_URL`, sign in, and share the install line it shows.
 
-Express Mode gives no option for your own domain. To use one, take the manual path below.
+### Your own domain
+
+Express Mode has no setting for a domain of your own, but the load balancer it creates takes one
+([AWS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-advanced-customization.html#express-service-add-custom-domain)).
+With a certificate for the domain in ACM, in the same region:
+
+1. In the ECS console, open the service, then the listener rule on its **Resources** tab. Edit the rule's **Host
+   header** condition: keep the service's address, and add your domain as a second value.
+2. On the load balancer's HTTPS listener, under **Certificates**, add the domain's certificate.
+3. Point the domain at the load balancer: an alias record in Route 53, or a CNAME to the load balancer's DNS name
+   elsewhere.
+4. Set `PUBLIC_URL` to the new address in `container.json` and in your identity provider, and run the update below.
+
+Express Mode updates keep these changes, unless an update sets the same thing again.
 
 ### Upgrade
 
@@ -222,15 +249,24 @@ Steps 1 to 4 are the same, without the infrastructure role.
 2. In the EC2 console, create the load balancer:
    - a target group of type **IP addresses**, protocol HTTP, port 8080, health check path `/healthz`;
    - an internet-facing Application Load Balancer with an HTTPS listener on 443, a certificate for your domain
-     from ACM, and the target group as its default action. The default idle timeout of 60 seconds works.
-   - a security group for the tasks that lets port 8080 in from the load balancer's security group.
+     from ACM, and the target group as its default action. Keep its idle timeout at 60 seconds or more
+     ([Things to know first](#things-to-know-first)).
 
-3. Create the service, in the same subnets:
+   Then let the load balancer reach the tasks on port 8080:
 
    ```sh
+   aws ec2 authorize-security-group-ingress --group-id "$HUB_SG" --protocol tcp --port 8080 \
+     --source-group <the load balancer's security group>
+   ```
+
+3. Create the `default` cluster, unless the account already has one in this region (Express Mode creates it), and
+   the service, in the same subnets as the load balancer:
+
+   ```sh
+   aws ecs create-cluster --cluster-name default
    aws ecs create-service --cluster default --service-name murmur-hub \
      --task-definition murmur-hub --desired-count 1 --launch-type FARGATE \
-     --network-configuration "awsvpcConfiguration={subnets=[<subnet>,<subnet>],securityGroups=[<tasks security group>],assignPublicIp=ENABLED}" \
+     --network-configuration "awsvpcConfiguration={subnets=[<subnet>,<subnet>],securityGroups=[$HUB_SG],assignPublicIp=ENABLED}" \
      --load-balancers "targetGroupArn=<target group ARN>,containerName=hub,containerPort=8080"
    ```
 
