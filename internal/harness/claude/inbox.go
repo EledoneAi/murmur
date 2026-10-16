@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // MinVersion is the oldest Claude Code that takes messages from other sessions through its inbox.

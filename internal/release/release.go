@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Version is set at build time (-ldflags "-X github.com/EledoneAi/murmur/internal/release.Version=1.2.3").
+// Version is set at build time (-ldflags "-X github.com/EledoneAi/murmur/v2/internal/release.Version=1.2.3").
 var Version = "dev"
 
 // Dev says whether this is a build from source without a version: it never updates itself.

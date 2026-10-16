@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
 )
 
 // reading is a transcript and what it read, as the daemon keeps them.

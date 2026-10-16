@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 	"github.com/coder/websocket"
 )
 

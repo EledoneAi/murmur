@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // check answers a laptop that asks whether other checkouts of a repo change some files: before one of its agents

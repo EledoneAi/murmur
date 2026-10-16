@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/release"
-	"github.com/EledoneAi/murmur/internal/setup"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/setup"
 )
 
 // The MCP server gives agents two tools, `who` and `send`. A harness starts it as a child process, so its parent

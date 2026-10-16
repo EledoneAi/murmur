@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/EledoneAi/murmur/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
 )
 
 // Motion answers "what just changed, and where?": the m draws itself when murmur starts, a light crosses it when a

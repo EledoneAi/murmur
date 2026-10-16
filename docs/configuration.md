@@ -73,8 +73,8 @@ With an empty allowlist, only the people in `ADMINS` and the admins made in the 
 The version is set when the binaries are built, not at run time:
 
 ```sh
-go build -ldflags "-X github.com/EledoneAi/murmur/internal/release.Version=1.2.3" ./cmd/murmur-hub
-go build -ldflags "-X github.com/EledoneAi/murmur/internal/release.Version=1.2.3" ./cmd/murmur
+go build -ldflags "-X github.com/EledoneAi/murmur/v2/internal/release.Version=1.2.3" ./cmd/murmur-hub
+go build -ldflags "-X github.com/EledoneAi/murmur/v2/internal/release.Version=1.2.3" ./cmd/murmur
 ```
 
 Releases set it to the tag without its `v`. A build without it is version `dev`, and laptops built that way never

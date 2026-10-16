@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // Most harnesses keep no registry of live sessions, and murmur can't hand their sessions a message while they run.

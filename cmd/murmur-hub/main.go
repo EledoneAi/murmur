@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/auth"
-	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/hub"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/release"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/auth"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/hub"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 func main() {

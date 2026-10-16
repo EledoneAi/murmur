@@ -20,8 +20,8 @@ builds:
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/EledoneAi/murmur/internal/release.Version={{ .Version }}
-      - -X github.com/EledoneAi/murmur/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
+      - -s -w -X github.com/EledoneAi/murmur/v2/internal/release.Version={{ .Version }}
+      - -X github.com/EledoneAi/murmur/v2/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
     goos: [darwin, linux]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
@@ -37,8 +37,8 @@ builds:
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X github.com/EledoneAi/murmur/internal/release.Version={{ .Version }}
-      - -X github.com/EledoneAi/murmur/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
+      - -s -w -X github.com/EledoneAi/murmur/v2/internal/release.Version={{ .Version }}
+      - -X github.com/EledoneAi/murmur/v2/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"

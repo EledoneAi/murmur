@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // The weekly report counts team totals only. Every instance counts what passes through it (messages, merge

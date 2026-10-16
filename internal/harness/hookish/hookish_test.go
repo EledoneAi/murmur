@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // sandbox points every harness, and PATH, at folders of the test's own: these tests never touch a real harness.

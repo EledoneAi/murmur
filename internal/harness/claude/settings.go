@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
 )
 
 // Setup touches three things outside ~/.murmur, and uninstall removes exactly those:

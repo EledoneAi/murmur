@@ -15,7 +15,7 @@ Runs the hub binary from a release as a hardened systemd service, with the sqlit
 1. Download a release: the hub, the four laptop binaries it serves, and the signed checksums. Check them:
 
    ```sh
-   VERSION=1.0.0     # from https://github.com/EledoneAi/murmur/releases
+   VERSION=2.0.1     # from https://github.com/EledoneAi/murmur/releases
    ARCH=amd64        # or arm64
    BASE="https://github.com/EledoneAi/murmur/releases/download/v$VERSION"
    cd "$(mktemp -d)"

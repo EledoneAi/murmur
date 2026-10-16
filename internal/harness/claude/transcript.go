@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 var assistantLine = []byte(`"type":"assistant"`)

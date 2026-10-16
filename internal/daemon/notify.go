@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // tell shows this person a desktop notification about message m, unless they turned notifications off. It shows

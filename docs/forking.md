@@ -23,10 +23,10 @@ them again from a hub that serves yours.
 
 - `internal/release/release.go`: `Repo` is where hubs look for new releases once a day
   (`https://api.github.com/repos/<Repo>/releases/latest`). Set it to your repository, or build it in with
-  `-X github.com/EledoneAi/murmur/internal/release.Repo=<owner>/<name>`. `docs/configuration.md` names it
+  `-X github.com/EledoneAi/murmur/v2/internal/release.Repo=<owner>/<name>`. `docs/configuration.md` names it
   under Admin settings. `Tap` is the Homebrew cask the hub's front page tells people to install; build it in
-  the same way, with `-X github.com/EledoneAi/murmur/internal/release.Tap=<your org>/tap/murmur`.
-- `go.mod`: the module path, `github.com/EledoneAi/murmur`. Builds from a clone work without changing it; it
+  the same way, with `-X github.com/EledoneAi/murmur/v2/internal/release.Tap=<your org>/tap/murmur`.
+- `go.mod`: the module path, `github.com/EledoneAi/murmur/v2`. Builds from a clone work without changing it; it
   must match your repository only for `go install`. If you change it, change it everywhere at once: the imports in
   every `.go` file, `MODULE` in `Makefile`, the `ldflags` in `.goreleaser.yaml` and `deploy/docker/Dockerfile`,
   and the examples in `docs/configuration.md`, `docs/development.md` and `deploy/sign/main.go`.

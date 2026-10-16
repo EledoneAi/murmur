@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // follow runs the lease holder's look at the team every jobEvery, from one time to another.

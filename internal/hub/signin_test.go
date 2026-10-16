@@ -14,8 +14,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/auth"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/auth"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // fakeIdP signs in whoever it's told to, once the nonce matches the one sent with the sign-in.

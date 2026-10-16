@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/bus/bustest"
+	"github.com/EledoneAi/murmur/v2/internal/bus/bustest"
 	"github.com/jackc/pgx/v5"
 )
 

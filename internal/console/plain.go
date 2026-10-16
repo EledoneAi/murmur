@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // The plain mode says what the console shows, in sentences, one line at a time: no box drawing, no colour, nothing

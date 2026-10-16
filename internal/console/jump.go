@@ -9,7 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/EledoneAi/murmur/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
 )
 
 // g goes to the terminal where one of your agents runs, to answer it there: its tmux pane, iTerm2 session, WezTerm

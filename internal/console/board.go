@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // The board is the home screen read top to bottom: what needs you, oldest first; then each constellation, the agents

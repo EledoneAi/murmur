@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // serve is a hub with one release: its checksums, their signature and this laptop's binary.
