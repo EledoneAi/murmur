@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -23,6 +24,15 @@ var assistantLine = []byte(`"type":"assistant"`)
 // the conversation runs on, and compactions.
 var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"custom-title"`), []byte(`"type":"pr-link"`),
 	[]byte(`"type":"model"`), []byte(`"subtype":"compact_boundary"`)}
+
+// readers keeps the buffers transcripts are read through: each session's is read again at every line Claude Code adds.
+var readers = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 64<<10) }}
+
+// recentCalls is how much of a long transcript's end its tool calls are read from, when it is read from its start,
+// with the last answer before it.
+// ponytail: Kinds keeps 30 calls and the loop hint 12, which 4 MB holds unless the answers are huge; the folders
+// the calls named (Dirs, for the repos a session touched) lose what came before.
+const recentCalls = 4 << 20
 
 // Transcript reads one conversation's transcript as it grows.
 type Transcript struct {
@@ -56,15 +66,30 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		return false
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err != nil || st.Size() < t.Offset {
+	st, err := f.Stat()
+	if err != nil || st.Size() < t.Offset {
 		t.Offset = 0 // rewritten from scratch
 	}
 	if _, err := f.Seek(t.Offset, io.SeekStart); err != nil {
 		return false
 	}
-	r := bufio.NewReaderSize(f, 64<<10)
+	// read from its start, a long conversation's tool calls and context sizes are read from its last recentCalls
+	// bytes only: decoding its answers was most of the cost, and the newest calls are what Kinds and Doing keep
+	callsFrom := int64(0)
+	if t.Offset == 0 && st != nil {
+		callsFrom = st.Size() - recentCalls
+	}
+	r := readers.Get().(*bufio.Reader)
+	r.Reset(f)
+	defer func() {
+		r.Reset(nil)
+		readers.Put(r)
+	}()
 	changed := false
 	pos := t.Offset
+	// the last answer before callsFrom, decoded when the read gets past it: a long tool output can fill the window,
+	// and the session would show no activity and no context until its next answer
+	var before []byte
 	for {
 		line, err := r.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
@@ -83,8 +108,16 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 			break // EOF, possibly mid-line: that line is read again next time
 		}
 		pos += int64(len(line))
+		if len(before) > 0 && pos > callsFrom {
+			changed = t.assistant(before, a) || changed
+			before = before[:0]
+		}
 		if bytes.Contains(line, assistantLine) {
-			changed = t.assistant(line, a) || changed
+			if pos > callsFrom {
+				changed = t.assistant(line, a) || changed
+			} else {
+				before = append(before[:0], line...)
+			}
 			continue
 		}
 		head := line[:min(len(line), 200)]
@@ -140,6 +173,9 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		if title := t.title(); a.Title != title {
 			a.Title, changed = title, true
 		}
+	}
+	if len(before) > 0 { // nothing but lines too long to read came after it
+		changed = t.assistant(before, a) || changed
 	}
 	t.Offset = pos
 	return changed

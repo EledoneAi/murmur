@@ -115,6 +115,11 @@ func Run() error {
 	if syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 		return nil // another daemon already runs
 	}
+	if os.Getenv("GOMAXPROCS") == "" {
+		// it mostly waits: with a processor for every core, each wake-up woke idle threads too, a sixth of its CPU in
+		// a busy team; two still answer a hook while a roster decodes
+		runtime.GOMAXPROCS(2)
+	}
 	logPath := filepath.Join(config.Dir(), "daemon.log")
 	if st, err := os.Stat(logPath); err == nil && st.Size() > 1<<20 {
 		_ = os.Truncate(logPath, 0)
@@ -347,8 +352,12 @@ func (d *Daemon) gitLocked(s *session) {
 	}
 	s.gitBusy = true
 	cwd, dirs := s.cwd, slices.Clone(s.act.Dirs)
+	read := gitscan.Read
+	if s.gitAt.IsZero() { // the session's start brief waits for its first read: not behind another checkout's
+		read = gitscan.ReadNow
+	}
 	go func() {
-		r := gitscan.Read(cwd)
+		r := read(cwd)
 		also := d.alsoOf(dirs, r.Top, r.Repo)
 		d.mu.Lock()
 		defer d.mu.Unlock()

@@ -157,6 +157,44 @@ func TestOnlineOnceTheTeamArrives(t *testing.T) {
 	}
 }
 
+// A console hears the state when it subscribes, then each change, and nothing when a change leaves the state as it
+// was, such as the hub echoing this laptop's own agents. Changes coming faster than snapshotGap arrive together.
+func TestConsoleHearsChangesOnly(t *testing.T) {
+	d := newDaemon("alice")
+	go d.publishLoop()
+	console, end := net.Pipe()
+	defer console.Close()
+	go d.subscribe(end)
+	r := bufio.NewReader(console)
+	next := func() (ipc.Snapshot, bool) {
+		t.Helper()
+		_ = console.SetReadDeadline(time.Now().Add(2 * snapshotGap))
+		line, err := r.ReadBytes('\n')
+		var s ipc.Snapshot
+		return s, err == nil && json.Unmarshal(line, &s) == nil
+	}
+	if s, ok := next(); !ok || s.State != "connecting" {
+		t.Fatalf("on subscribing: %+v", s)
+	}
+	d.changed()
+	if s, ok := next(); ok {
+		t.Fatalf("a change that changes nothing sent %+v", s)
+	}
+	d.setState("online")
+	if s, ok := next(); !ok || s.State != "online" {
+		t.Fatalf("after a change: %+v", s)
+	}
+	d.setState("reconnecting")
+	time.Sleep(snapshotGap / 4)
+	d.setState("online again")
+	if s, ok := next(); !ok || s.State != "online again" {
+		t.Fatalf("after two quick changes: %+v", s)
+	}
+	if s, ok := next(); ok {
+		t.Fatalf("two quick changes sent another snapshot: %+v", s)
+	}
+}
+
 // History written before messages were cleaned is cleaned when the daemon loads it.
 func TestHistoryIsCleanedOnLoad(t *testing.T) {
 	dir := t.TempDir()

@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRepoName(t *testing.T) {
@@ -143,7 +145,7 @@ func TestOpOf(t *testing.T) {
 }
 
 // newRepo makes an empty git repo and returns it with a function that runs git in it.
-func newRepo(t *testing.T) (string, func(args ...string) string) {
+func newRepo(t testing.TB) (string, func(args ...string) string) {
 	t.Helper()
 	dir := t.TempDir()
 	git := func(args ...string) string {
@@ -159,7 +161,7 @@ func newRepo(t *testing.T) (string, func(args ...string) string) {
 	return dir, git
 }
 
-func write(t *testing.T, dir string, files map[string]string) {
+func write(t testing.TB, dir string, files map[string]string) {
 	t.Helper()
 	for p, c := range files {
 		_ = os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o755)
@@ -201,6 +203,125 @@ func TestState(t *testing.T) {
 	git("switch", "-q", "--detach", "feat-1")
 	if r := Read(dir); r.Branch != "detached" || r.Detached != git("rev-parse", "--short", "HEAD") || r.Base != "feat-1" {
 		t.Fatalf("detached: branch %q %+v", r.Branch, r.State)
+	}
+}
+
+// wrapGit puts a git on PATH that runs the real one, except as the files in its folder say: "fail" names a subcommand
+// that fails, "slow" a folder whose calls first wait two seconds.
+func wrapGit(t *testing.T) string {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git")
+	}
+	bin := t.TempDir()
+	script := `#!/bin/sh
+d=$(dirname "$0")
+if [ -f "$d/fail" ]; then case " $* " in *" $(cat "$d/fail") "*) exit 1;; esac; fi
+if [ -f "$d/slow" ]; then case " $* " in *" $(cat "$d/slow") "*) sleep 2;; esac; fi
+exec '` + real + `' "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return bin
+}
+
+// A read in which a git call failed isn't kept for the next one, which reads the checkout again in full.
+func TestFailedReadIsNotKept(t *testing.T) {
+	dir, git := newRepo(t)
+	write(t, dir, map[string]string{".gitattributes": "gen.go linguist-generated\n", "a.go": "a\n", "gen.go": "g\n"})
+	git("add", "-A")
+	git("commit", "-qm", "first")
+	git("switch", "-qc", "feat")
+	write(t, dir, map[string]string{"b.go": "b\n"})
+	git("add", "-A")
+	git("commit", "-qm", "b")
+	write(t, dir, map[string]string{"a.go": "a\na\n", "gen.go": "g\ng\n"})
+	want := Read(dir)
+	bin := wrapGit(t)
+	for i, cmd := range []string{"check-attr", "log", "diff"} {
+		_ = os.WriteFile(filepath.Join(bin, "fail"), []byte(cmd), 0o644)
+		at := time.Now().Add(time.Duration(i+1) * time.Second) // a.go as it was, at another time: the read can't hold
+		_ = os.Chtimes(filepath.Join(dir, "a.go"), at, at)
+		if r := Read(dir); reflect.DeepEqual(r, want) {
+			t.Fatalf("with %s failing, the read is whole: %+v", cmd, r)
+		}
+		_ = os.Remove(filepath.Join(bin, "fail"))
+		if r := Read(dir); !reflect.DeepEqual(r, want) {
+			t.Fatalf("after %s failed: %+v, want %+v", cmd, r, want)
+		}
+	}
+}
+
+// A session's first read doesn't wait for another checkout's slow read: the session's brief waits for it.
+func TestFirstReadSkipsTheQueue(t *testing.T) {
+	slow, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	fast, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	bin := wrapGit(t)
+	_ = os.WriteFile(filepath.Join(bin, "slow"), []byte(slow), 0o644)
+	go Read(slow)
+	time.Sleep(200 * time.Millisecond) // the slow read holds the queue
+	start := time.Now()
+	if r := ReadNow(fast); r.Branch != "main" {
+		t.Fatalf("read %+v", r)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Fatalf("a first read waited %v behind a slow one", took)
+	} else {
+		t.Logf("a first read took %v while another took 2 s", took)
+	}
+}
+
+// An origin added to a checkout, or to the main checkout of a linked worktree, names its repo at the next read.
+func TestOriginAddedShowsAtOnce(t *testing.T) {
+	dir, git := newRepo(t)
+	git("commit", "-q", "--allow-empty", "-m", "first")
+	wt := filepath.Join(t.TempDir(), "wt")
+	git("worktree", "add", "-q", "-b", "feat", wt)
+	if r := Read(dir); r.Repo != filepath.Base(dir) {
+		t.Fatalf("without an origin: %q", r.Repo)
+	}
+	Read(wt)
+	git("remote", "add", "origin", "git@github.com:acme/web.git")
+	if r := Read(dir); r.Repo != "acme/web" {
+		t.Fatalf("after git remote add: %q", r.Repo)
+	}
+	if r := Read(wt); r.Repo != "acme/web" {
+		t.Fatalf("in the worktree, after git remote add: %q", r.Repo)
+	}
+}
+
+// Reading a checkout that hasn't moved since starts git twice, and a read still sees every change: more lines in a
+// file already changed, a branch below renamed, a commit.
+func TestReadAgain(t *testing.T) {
+	dir, git := newRepo(t)
+	write(t, dir, map[string]string{"a.go": "one\n"})
+	git("add", "-A")
+	git("commit", "-qm", "first")
+	git("switch", "-qc", "feat-1")
+	git("switch", "-qc", "feat-2")
+	write(t, dir, map[string]string{"a.go": "one\ntwo\n"})
+	if r := Read(dir); r.Added != 1 || r.Base != "feat-1" {
+		t.Fatalf("first read: %+v", r.State)
+	}
+	if n := spawns(t, func() { Read(dir) }); n != 2 {
+		t.Fatalf("read again: git started %d times", n)
+	}
+	write(t, dir, map[string]string{"a.go": "one\ntwo\nthree\n"}) // git status still says " M a.go"
+	if r := Read(dir); r.Added != 2 {
+		t.Fatalf("after more lines: %+v", r.State)
+	}
+	git("branch", "-m", "feat-1", "feat-0")
+	if r := Read(dir); r.Base != "feat-0" {
+		t.Fatalf("after a rename: %+v", r.State)
+	}
+	git("commit", "-qam", "two")
+	if r := Read(dir); r.Added != 2 || r.Changed != 1 || r.Base != "feat-0" || len(r.Files) != 1 {
+		t.Fatalf("after a commit: %+v, files %v", r.State, r.Files)
 	}
 }
 

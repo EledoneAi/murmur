@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 )
@@ -79,37 +81,69 @@ func pickTheme(isDark bool) theme {
 // styles are the theme turned into lipgloss styles, once per theme.
 type styles struct {
 	t                                    theme
-	fg, dim, faint, name, bold, wordmark lipgloss.Style
-	teal, tealBold, thorn, link, sib     lipgloss.Style
-	hotkey, tab, label, italic           lipgloss.Style
-	run, web, lilac                      lipgloss.Style
-	clash                                lipgloss.Style // a file both sides of a dissonance change
+	fg, dim, faint, name, bold, wordmark ink
+	teal, tealBold, thorn, link, sib     ink
+	hotkey, tab, label, italic           ink
+	run, web, lilac                      ink
+	clash                                ink // a file both sides of a dissonance change
+	people                               [len(theme{}.people)]ink
+	selBg, tabBg                         string // the codes that tint the selected row and the current scope tab
 }
 
 func newStyles(t theme) styles {
 	s := lipgloss.NewStyle()
-	return styles{t: t,
-		fg: s.Foreground(t.fg), dim: s.Foreground(t.dim), faint: s.Foreground(t.faint), name: s.Foreground(t.bright),
-		bold: s.Foreground(t.bright).Bold(true), wordmark: s.Foreground(t.bright).Bold(true),
-		teal: s.Foreground(t.teal), tealBold: s.Foreground(t.teal).Bold(true), thorn: s.Foreground(t.thorn),
-		link: s.Foreground(t.link), sib: s.Foreground(t.sib),
-		hotkey: s.Foreground(t.hotkey).Bold(true).Underline(true), tab: s.Foreground(t.dim),
-		label: s.Foreground(t.dim).Bold(true), italic: s.Foreground(t.fg).Italic(true),
-		run: s.Foreground(t.run), web: s.Foreground(t.web), lilac: s.Foreground(t.lilac),
+	st := styles{t: t,
+		fg: newInk(s.Foreground(t.fg)), dim: newInk(s.Foreground(t.dim)), faint: newInk(s.Foreground(t.faint)),
+		name: newInk(s.Foreground(t.bright)), bold: newInk(s.Foreground(t.bright).Bold(true)), wordmark: newInk(s.Foreground(t.bright).Bold(true)),
+		teal: newInk(s.Foreground(t.teal)), tealBold: newInk(s.Foreground(t.teal).Bold(true)), thorn: newInk(s.Foreground(t.thorn)),
+		link: newInk(s.Foreground(t.link)), sib: newInk(s.Foreground(t.sib)),
+		hotkey: newInk(s.Foreground(t.hotkey).Bold(true).Underline(true)), tab: newInk(s.Foreground(t.dim)),
+		label: newInk(s.Foreground(t.dim).Bold(true)), italic: newInk(s.Foreground(t.fg).Italic(true)),
+		run: newInk(s.Foreground(t.run)), web: newInk(s.Foreground(t.web)), lilac: newInk(s.Foreground(t.lilac)),
 		// ponytail: no curly or coloured underline: Terminal.app misreads both and paints the rest of the row
-		clash: s.Foreground(t.thorn),
+		clash: newInk(s.Foreground(t.thorn)),
+		selBg: tint(t.sel), tabBg: tint(t.tab),
 	}
+	for i, c := range t.people {
+		st.people[i] = newInk(s.Foreground(c).Bold(true))
+	}
+	return st
+}
+
+// ink is a lipgloss style and the codes it puts around a line of text, worked out once: lipgloss works out a
+// style's borders, margins, padding and alignment on every Render, which was most of the cost of a frame.
+type ink struct {
+	lipgloss.Style
+	on, off string
+	perRune bool // underlined: lipgloss styles each rune apart, and spaces their own way
+}
+
+func newInk(s lipgloss.Style) ink {
+	on, off, _ := strings.Cut(s.Render("x"), "x")
+	return ink{Style: s, on: on, off: off, perRune: s.GetUnderline() || s.GetStrikethrough()}
+}
+
+// Render is lipgloss's Render, without its work on one line of text: the same codes around it. Several lines, tabs
+// and underlined words go through lipgloss.
+func (k ink) Render(strs ...string) string {
+	text := strings.Join(strs, " ")
+	r, n := utf8.DecodeRuneInString(text)
+	letter := n > 0 && n == len(text) && r != utf8.RuneError && !unicode.IsSpace(r)
+	if strings.ContainsAny(text, "\t\r\n") || k.perRune && !letter {
+		return k.Style.Render(text)
+	}
+	return k.on + text + k.off
 }
 
 // person is the style of someone's initial: their colour, bold.
-func (s styles) person(i int) lipgloss.Style {
-	n := len(s.t.people)
-	return lipgloss.NewStyle().Foreground(s.t.people[(i%n+n)%n]).Bold(true)
+func (s styles) person(i int) ink {
+	n := len(s.people)
+	return s.people[(i%n+n)%n]
 }
 
 // hot draws a label with the key to press inside it: the letter at i in the hotkey style, the rest in base. A label
 // that starts a phrase is capitalised; its key is the letter in lower case.
-func (s styles) hot(label string, i int, base lipgloss.Style) string {
+func (s styles) hot(label string, i int, base ink) string {
 	r := []rune(label)
 	if i < 0 || i >= len(r) {
 		return base.Render(label)

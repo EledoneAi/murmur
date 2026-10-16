@@ -94,12 +94,13 @@ func (m *model) onFrame() tea.Cmd {
 	return m.frame()
 }
 
-// noticeChanges plays what a new snapshot changed: messages sent, messages received, new needs. In the background
-// it also tells the terminal, which can show a notification.
-func (m *model) noticeChanges(old, now ipc.Snapshot) tea.Cmd {
+// noticeChanges plays what the new snapshot changed since old, whose needs were before: messages sent, messages
+// received, new needs. In the background it also tells the terminal, which can show a notification.
+func (m *model) noticeChanges(old ipc.Snapshot, before []need) tea.Cmd {
 	if !m.have {
 		return nil
 	}
+	now := m.snap
 	seen := map[string]bool{}
 	for _, x := range old.Msgs {
 		seen[x.ID] = true
@@ -119,12 +120,12 @@ func (m *model) noticeChanges(old, now ipc.Snapshot) tea.Cmd {
 	if sent {
 		cmds = append(cmds, m.play(animLight, ""))
 	}
-	before := map[string]bool{}
-	for _, n := range buildBoard(old, m.now(), m.currentScope()).needs {
-		before[n.key] = true
+	had := map[string]bool{}
+	for _, n := range before {
+		had[n.key] = true
 	}
-	for _, n := range buildBoard(now, m.now(), m.currentScope()).needs {
-		if before[n.key] {
+	for _, n := range m.board().needs {
+		if had[n.key] {
 			continue
 		}
 		cmds = append(cmds, m.play(animGlow, n.key))
@@ -231,7 +232,7 @@ func (m *model) glowing(key string, text string, owner int) string {
 		return text // the row carries "new" instead; see needLine
 	}
 	steps := lipgloss.Blend1D(5, m.st.t.people[owner%len(m.st.t.people)], m.background())
-	return tinted(text, steps[min(4, 1+int(p*4))])
+	return tinted(text, tint(steps[min(4, 1+int(p*4))]))
 }
 
 // background is the terminal's background as it told us, or the theme's own guess.

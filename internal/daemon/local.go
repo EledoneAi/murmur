@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"fmt"
@@ -76,7 +77,7 @@ func (d *Daemon) serve(c net.Conn) {
 		d.mu.Unlock()
 		_ = enc.Encode(snap)
 	case "sub":
-		d.subscribe(c, enc)
+		d.subscribe(c)
 	case "status":
 		d.mu.Lock()
 		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d agent sessions", len(d.sessions)), Version: release.Version,
@@ -194,7 +195,15 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 	return "", ""
 }
 
-func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
+// snapshotGap is the least time between two snapshots to a console. A busy team changes ten times a second, which a
+// console drawing every change pays for twice over, and nobody reads that fast. The first change after a quiet spell
+// goes at once.
+const snapshotGap = 200 * time.Millisecond
+
+// subscribe sends a console the state whenever it changes. A change that leaves the snapshot as the console has it
+// sends nothing: the hub's next roster mostly echoes this laptop's own change, and the console would decode and draw
+// it again for nothing.
+func (d *Daemon) subscribe(c net.Conn) {
 	ch := make(chan struct{}, 1)
 	ch <- struct{}{}
 	d.mu.Lock()
@@ -211,16 +220,34 @@ func (d *Daemon) subscribe(c net.Conn, enc *json.Encoder) {
 		_, _ = io.Copy(io.Discard, c)
 		close(closed)
 	}()
+	var last []byte
+	var sent time.Time
 	for {
 		select {
 		case <-closed:
 			return
 		case <-ch:
+			if wait := time.Until(sent.Add(snapshotGap)); wait > 0 {
+				select {
+				case <-closed:
+					return
+				case <-time.After(wait):
+				}
+				select { // a change in the meantime is in this snapshot
+				case <-ch:
+				default:
+				}
+			}
 			d.mu.Lock()
 			snap := d.snapshotLocked()
 			d.mu.Unlock()
+			b, err := json.Marshal(snap)
+			if err != nil || bytes.Equal(b, last) {
+				continue
+			}
+			last, sent = b, time.Now()
 			_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if enc.Encode(snap) != nil {
+			if _, err := c.Write(append(b, '\n')); err != nil {
 				return
 			}
 		}

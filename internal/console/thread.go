@@ -122,8 +122,6 @@ func (m *model) threadMsgs() (msgs []protocol.Msg, held map[string]bool) {
 func (m *model) threadScreen(b *board, room int) []line {
 	st, g, t := m.st, m.g, m.thread
 	msgs, held := m.threadMsgs()
-	var body []line
-	add := func(s string) { body = append(body, line{text: pad(s, m.w)}) }
 	who := func(addr string) string {
 		person, agent, _ := strings.Cut(addr, "/")
 		name := agent
@@ -137,7 +135,9 @@ func (m *model) threadScreen(b *board, room int) []line {
 		return s
 	}
 	textW := max(20, m.w-14)
-	for _, x := range msgs {
+	lines := func(x protocol.Msg) []line { // a message as the thread shows it
+		var out []line
+		add := func(s string) { out = append(out, line{text: pad(s, m.w)}) }
 		at := time.UnixMilli(x.At).Format("15:04")
 		arrow := st.dim.Render(g.sendArrow)
 		status := st.fg.Render(g.delivered)
@@ -158,12 +158,10 @@ func (m *model) threadScreen(b *board, room int) []line {
 			add("          " + voice.Render(l))
 		}
 		if held[x.ID] {
-			body = append(body, line{text: pad("          "+st.keyWord("y", "let through")+"   "+st.keyWord("x", "drop"), m.w), hot: []string{"y", "x"}})
+			out = append(out, line{text: pad("          "+st.keyWord("y", "let through")+"   "+st.keyWord("x", "drop"), m.w), hot: []string{"y", "x"}})
 		}
 		add("")
-	}
-	if len(msgs) == 0 {
-		add("   " + st.dim.Render("No messages yet. Write below to start the conversation."))
+		return out
 	}
 	// the composer: its recipient, the text, and when the recipient will read it
 	compose := []line{{text: pad(" "+st.faint.Render(strings.Repeat(g.h, max(0, m.w-2))), m.w)}}
@@ -181,7 +179,15 @@ func (m *model) threadScreen(b *board, room int) []line {
 	}
 	compose = append(compose, line{text: pad(" "+st.dim.Render(m.readsWhen(b, t.to)), m.w)})
 
-	room -= len(compose)
+	// the messages, newest at the bottom: only as many as the screen and the scroll show are drawn
+	room = max(0, room-len(compose)) // a terminal too short for both keeps the composer
+	var body []line
+	for i := len(msgs) - 1; i >= 0 && len(body) < room+t.scroll; i-- {
+		body = append(lines(msgs[i]), body...)
+	}
+	if len(msgs) == 0 {
+		body = []line{{text: pad("   "+st.dim.Render("No messages yet. Write below to start the conversation."), m.w)}}
+	}
 	t.scroll = max(0, min(t.scroll, len(body)-room))
 	start := max(0, len(body)-room-t.scroll)
 	shown := body[start:min(len(body), start+room)]

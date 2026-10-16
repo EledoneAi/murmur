@@ -42,6 +42,7 @@ type outcome struct {
 type model struct {
 	snap ipc.Snapshot
 	have bool
+	gen  int // counts the snapshots, for what is worked out from one
 	w, h int
 	st   styles
 	g    glyphs
@@ -79,6 +80,18 @@ type model struct {
 	exe        string      // the binary this console started from: an update replacing it restarts the console
 	bin        os.FileInfo // that binary, to notice the replacement
 	restart    bool
+
+	built    *board // the board on screen: a key and the frame it draws share it
+	builtFor boardFor
+	team     struct{ gen, size int } // you and everyone with agents, in the snapshot gen
+}
+
+// boardFor is what a board is built for: a snapshot, a scope, a filter, and the second, for what time changes.
+type boardFor struct {
+	gen    int
+	sc     scope
+	filter string
+	at     int64
 }
 
 func newModel() *model {
@@ -95,11 +108,21 @@ func newModel() *model {
 
 func (m *model) now() time.Time { return m.clock() }
 
+// oneProcessor runs the console's goroutines on one processor, unless GOMAXPROCS says otherwise. Bubble Tea wakes
+// the console 60 times a second to flush a frame, and with a processor for every core each wake-up woke idle threads
+// too: 0.47% of a core at rest, against about 0.35% on one. The console draws one frame at a time anyway.
+func oneProcessor() {
+	if os.Getenv("GOMAXPROCS") == "" {
+		runtime.GOMAXPROCS(1)
+	}
+}
+
 // Run opens the console on this laptop's daemon, starting it when it isn't running.
 func Run() error {
 	if err := ipc.EnsureDaemon(); err != nil {
 		return err
 	}
+	oneProcessor()
 	m := newModel()
 	go m.listen()
 	if _, err := tea.NewProgram(m).Run(); err != nil || !m.restart {
@@ -149,21 +172,35 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(m.wait(), m.tick(), tea.RequestBackgroundColor, m.play(animDraw, ""))
 }
 
+// board is the board for the snapshot, the scope and the filter, built once for them and again each second, for
+// what time changes: idle agents folding away, links older than a day.
 func (m *model) board() *board {
-	b := buildBoard(m.snap, m.now(), m.currentScope())
-	b.filterBy(m.filter)
-	return b
+	key := boardFor{gen: m.gen, sc: m.currentScope(), filter: m.filter, at: m.now().Unix()}
+	if m.built == nil || key != m.builtFor {
+		m.built, m.builtFor = buildBoard(m.snap, m.now(), key.sc), key
+		m.built.filterBy(m.filter)
+	}
+	return m.built
+}
+
+// setSnap takes a new snapshot from the daemon.
+func (m *model) setSnap(s ipc.Snapshot) {
+	m.snap = s
+	m.gen++
 }
 
 // currentScope is the scope chosen, when the team's size offers it, or the default for that size.
 func (m *model) currentScope() scope {
-	people := map[string]bool{m.snap.Me.Handle: true}
-	for _, p := range m.snap.People {
-		if len(p.Agents) > 0 {
-			people[p.Handle] = true
+	if m.team.gen != m.gen || m.team.size == 0 {
+		people := map[string]bool{m.snap.Me.Handle: true}
+		for _, p := range m.snap.People {
+			if len(p.Agents) > 0 {
+				people[p.Handle] = true
+			}
 		}
+		m.team.gen, m.team.size = m.gen, len(people)
 	}
-	offered := scopes(len(people))
+	offered := scopes(m.team.size)
 	if m.scopeSet && slices.Contains(offered, m.scope) {
 		return m.scope
 	}
@@ -213,8 +250,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.st = newStyles(pickTheme(msg.IsDark()))
 		}
 	case snapMsg:
-		changed := m.noticeChanges(m.snap, ipc.Snapshot(msg))
-		m.snap, m.have = ipc.Snapshot(msg), true
+		old, before := m.snap, m.board().needs
+		m.setSnap(ipc.Snapshot(msg))
+		changed := m.noticeChanges(old, before)
+		m.have = true
 		if m.replaced() {
 			m.restart = true
 			return m, tea.Quit
@@ -712,7 +751,7 @@ func (m *model) screen() (string, []line) {
 		text := l.text
 		if l.key != "" && l.key == m.selected {
 			text = m.st.bold.Render(m.g.sel) + ansi.TruncateLeft(text, 1, "")
-			text = tinted(text, m.st.t.sel)
+			text = tinted(text, m.st.selBg)
 		}
 		out.WriteString(text)
 		if i < len(lines)-1 {

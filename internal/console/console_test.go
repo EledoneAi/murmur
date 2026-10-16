@@ -22,7 +22,7 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 func demo(w, h int, t theme) *model {
 	m := newModel()
 	m.demo, m.have, m.w, m.h = true, true, w, h
-	m.snap = demoSnapshot(demoNow)
+	m.setSnap(demoSnapshot(demoNow))
 	m.clock = func() time.Time { return demoNow }
 	m.st, m.g = newStyles(t), unicodeGlyphs
 	m.outcome, m.motion = outcome{}, false
@@ -86,24 +86,31 @@ func golden(t *testing.T, name, got string) {
 	}
 }
 
-// Every screen fills the terminal exactly, at any size, whatever is selected.
+// Every screen fills the terminal exactly, at any size, whatever is selected, a thread too.
 func TestScreenFits(t *testing.T) {
-	for _, size := range [][2]int{{40, 10}, {60, 24}, {84, 30}, {110, 12}, {160, 50}, {200, 8}} {
+	for _, size := range [][2]int{{40, 10}, {60, 24}, {84, 30}, {110, 12}, {160, 50}, {200, 8}, {84, 5}} {
 		w, h := size[0], size[1]
 		m := demo(w, h, dark)
-		for range 12 {
+		fits := func(where string) {
+			t.Helper()
 			text, _ := m.screen()
 			lines := strings.Split(text, "\n")
 			if len(lines) != h {
-				t.Fatalf("%dx%d: %d lines", w, h, len(lines))
+				t.Fatalf("%dx%d, %s: %d lines", w, h, where, len(lines))
 			}
 			for _, l := range lines {
 				if ansi.StringWidth(l) != w {
-					t.Fatalf("%dx%d: a line is %d wide: %q", w, h, ansi.StringWidth(l), ansi.Strip(l))
+					t.Fatalf("%dx%d, %s: a line is %d wide: %q", w, h, where, ansi.StringWidth(l), ansi.Strip(l))
 				}
 			}
+		}
+		for range 12 {
+			fits("on " + m.selected)
 			press(m, "down")
 		}
+		m.selected = "agent:alice/api-9b"
+		press(m, "enter")
+		fits("in a thread")
 	}
 }
 
@@ -165,6 +172,24 @@ func TestConstellations(t *testing.T) {
 	for _, r := range mine.lone {
 		if !r.mine {
 			t.Fatalf("Mine shows %s", r.addr)
+		}
+	}
+}
+
+// A style draws exactly what lipgloss draws, whatever the text.
+func TestInkIsLipgloss(t *testing.T) {
+	for _, th := range []theme{dark, light, ansi16, contrast(dark)} {
+		st := newStyles(th)
+		inks := []ink{st.fg, st.dim, st.bold, st.hotkey, st.italic, st.label, st.person(3), st.tealBold}
+		for _, k := range inks {
+			for _, text := range []string{"", " ", "x", "esc", "a b", "é", "⏎", "x\ty", "one\ntwo", "\xff", " ", "r\r\nn"} {
+				if got, want := k.Render(text), k.Style.Render(text); got != want {
+					t.Errorf("%s: %q drew %q, lipgloss %q", th.name, text, got, want)
+				}
+			}
+			if got, want := k.Render("a", "b"), k.Style.Render("a", "b"); got != want {
+				t.Errorf("%s: two strings drew %q, lipgloss %q", th.name, got, want)
+			}
 		}
 	}
 }
@@ -258,12 +283,10 @@ func TestMotion(t *testing.T) {
 		t.Fatal("the m kept drawing")
 	}
 
-	old := demoSnapshot(demoNow)
 	next := demoSnapshot(demoNow)
 	next.Msgs = append(next.Msgs, protocol.Msg{ID: "new", From: "carol/billing-2", To: "alice/api-9b", Text: "pushed", At: now.UnixMilli()})
 	next.Asks = append(next.Asks, protocol.Msg{ID: "h2", From: "bob/main-1", To: "alice/api-1a", Text: "rebase?", At: now.UnixMilli()})
-	m.noticeChanges(old, next)
-	m.snap = next
+	m.Update(snapMsg(next))
 	if m.progress(animLight, "") < 0 || m.progress(animBold, "alice/api-9b") < 0 || m.progress(animGlow, "need:held:h2") < 0 {
 		t.Fatalf("a message and a new need played nothing: %+v", m.anims)
 	}
@@ -271,8 +294,7 @@ func TestMotion(t *testing.T) {
 	m = demo(110, 30, dark) // motion off: the new need says so
 	m.clock = func() time.Time { return now }
 	m.have = true
-	m.noticeChanges(old, next)
-	m.snap = next
+	m.Update(snapMsg(next))
 	if text, _ := m.screen(); !strings.Contains(ansi.Strip(text), "new held “rebase?”") {
 		t.Fatal("without motion, a new need isn't marked new")
 	}
@@ -305,7 +327,7 @@ func bigTeam() ipc.Snapshot {
 // A large team folds what is far from you into Elsewhere, near you first; All unfolds it.
 func TestLargeTeam(t *testing.T) {
 	m := demo(110, 40, dark)
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	b := m.board()
 	if !b.large || m.currentScope() != scopeNear {
 		t.Fatalf("large %v, scope %v", b.large, m.currentScope())
@@ -321,7 +343,7 @@ func TestLargeTeam(t *testing.T) {
 		t.Fatalf("All folds %d away", len(b.elsewhere))
 	}
 	m = demo(110, 40, dark)
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	text, _ := m.screen()
 	golden(t, "screen-large.txt", ansi.Strip(text))
 }
@@ -428,6 +450,38 @@ func TestJumpCmd(t *testing.T) {
 	}
 }
 
+// A long conversation opens on its newest messages and scrolls a line at a time, back to its first.
+func TestThreadScrolls(t *testing.T) {
+	m := demo(110, 30, dark)
+	s := demoSnapshot(demoNow)
+	for i := range 60 {
+		s.Msgs = append(s.Msgs, protocol.Msg{ID: fmt.Sprint("long-", i), From: "carol/billing-2", To: "alice/api-9b",
+			Text: fmt.Sprintf("message %d, long enough to wrap: %s", i, strings.Repeat("words ", 30)), At: demoNow.Add(time.Duration(i-60) * time.Second).UnixMilli()})
+	}
+	m.setSnap(s)
+	m.screen()
+	m.selected = "agent:alice/api-9b"
+	press(m, "enter")
+	body := func() []string { // the lines between the header and the composer's rule
+		text, _ := m.screen()
+		lines := strings.Split(ansi.Strip(text), "\n")
+		end := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, " ───") })
+		return lines[3:end]
+	}
+	newest := body()
+	if text := strings.Join(newest, "\n"); !strings.Contains(text, "message 59") || strings.Contains(text, "message 0,") {
+		t.Fatalf("the thread opens on:\n%s", text)
+	}
+	m.thread.scroll = 1
+	if up := body(); strings.Join(up[1:], "\n") != strings.Join(newest[:len(newest)-1], "\n") {
+		t.Fatalf("one line up shows:\n%s", strings.Join(up, "\n"))
+	}
+	m.thread.scroll = 100_000
+	if oldest := body(); !strings.Contains(strings.Join(oldest, "\n"), "message 0,") || m.thread.scroll == 100_000 {
+		t.Fatalf("scrolled to the top, scroll %d:\n%s", m.thread.scroll, strings.Join(oldest, "\n"))
+	}
+}
+
 // Enter on a constellation's header opens its conversation, written to a teammate's agent in it.
 func TestHeaderOpensThread(t *testing.T) {
 	m := demo(110, 30, dark)
@@ -471,7 +525,7 @@ func TestScopeKeys(t *testing.T) {
 			t.Fatalf("%s chose %s", c.key, scopeNames[m.currentScope()])
 		}
 	}
-	m.snap = bigTeam()
+	m.setSnap(bigTeam())
 	if head := m.header(m.board())[1]; !strings.Contains(ansi.Strip(head), " Near me ") || !strings.Contains(head, m.st.hotkey.Render("m")) {
 		t.Fatal("Near me doesn't draw the m of me as its key")
 	}
@@ -513,7 +567,7 @@ func TestHeaderShowsYou(t *testing.T) {
 		t.Fatalf("alone, the header says %q", got)
 	}
 	for _, snap := range []ipc.Snapshot{demoSnapshot(demoNow), bigTeam()} { // the tabs and you fit at every width
-		m.snap = snap
+		m.setSnap(snap)
 		for m.w = 64; m.w <= 140; m.w++ {
 			if got := ansi.Strip(m.header(m.board())[1]); !strings.Contains(got, " All ") || !strings.HasSuffix(got, "A   ● live  ") &&
 				!strings.HasSuffix(got, "alice   ● live  ") && !strings.HasSuffix(got, "agents   ● live  ") {
@@ -547,7 +601,7 @@ func TestFooterLeavesOutShownKeys(t *testing.T) {
 			for _, big := range []bool{false, true} {
 				m := demo(size[0], size[1], dark)
 				if big {
-					m.snap = bigTeam()
+					m.setSnap(bigTeam())
 				}
 				m.screen()
 				m.inspect = inspect
