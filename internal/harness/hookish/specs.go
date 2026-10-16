@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // homeDir is a harness's folder: its own variable when set, else a folder in the home folder.

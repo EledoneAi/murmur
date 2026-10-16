@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/console"
-	"github.com/EledoneAi/murmur/internal/daemon"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/mcp"
-	"github.com/EledoneAi/murmur/internal/release"
-	"github.com/EledoneAi/murmur/internal/setup"
-	"github.com/EledoneAi/murmur/internal/update"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/console"
+	"github.com/EledoneAi/murmur/v2/internal/daemon"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/mcp"
+	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/setup"
+	"github.com/EledoneAi/murmur/v2/internal/update"
 )
 
 const usage = `murmur: your team's coding agents, in one console.

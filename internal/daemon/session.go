@@ -4,9 +4,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/gitscan"
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/gitscan"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // A session is one agent session in a harness, read from what the harness writes anyway and from its hooks:

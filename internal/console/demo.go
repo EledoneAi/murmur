@@ -5,8 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // RunDemo opens the console on a made-up team that keeps working: no hub, no daemon, no Claude Code needed. It is

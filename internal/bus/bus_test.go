@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/bus/bustest"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/bus/bustest"
 )
 
 func TestLocal(t *testing.T) {

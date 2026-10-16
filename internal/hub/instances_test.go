@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // fanout is a bus shared by several instances in one process, as Redis or Postgres would be.

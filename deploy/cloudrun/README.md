@@ -23,7 +23,7 @@ the store. Replace `PROJECT`, `REGION` and the example values with yours.
 ```sh
 PROJECT=my-project
 REGION=europe-west1
-VERSION=1.0.0           # a release from https://github.com/EledoneAi/murmur/releases
+VERSION=2.0.1           # a release from https://github.com/EledoneAi/murmur/releases
 gcloud config set project "$PROJECT"
 gcloud services enable run.googleapis.com artifactregistry.googleapis.com \
   secretmanager.googleapis.com firestore.googleapis.com

@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // The hub serves the laptop binaries of its own release: the installer downloads one, and laptops update to it.

@@ -14,8 +14,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
 )
 
 // ---------------------------------------------------------------- Codex's MCP server, in config.toml

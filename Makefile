@@ -2,7 +2,7 @@
 
 GO         ?= go
 GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
-MODULE     := github.com/EledoneAi/murmur
+MODULE     := github.com/EledoneAi/murmur/v2
 # "dev" builds never update themselves, so a test laptop stays on the binary you just built.
 VERSION    ?= dev
 # MURMUR_RELEASE_PUBKEY builds a release key into the binaries: laptops then install only what it signs.

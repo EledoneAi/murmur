@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 func TestEditSettingsRoundTrip(t *testing.T) {

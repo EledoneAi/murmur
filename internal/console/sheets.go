@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/EledoneAi/murmur/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
 )
 
 // Sheets open over the board: the palette, one box for everything; the help, every key for where you are; the

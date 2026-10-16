@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
 )
 
 // Run checks what every bus does. open returns a new bus on the backend under test.

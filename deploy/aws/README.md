@@ -35,7 +35,7 @@ set up your identity provider.
 REGION=eu-west-1
 export AWS_DEFAULT_REGION="$REGION"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-VERSION=1.0.0           # a release from https://github.com/EledoneAi/murmur/releases
+VERSION=2.0.1           # a release from https://github.com/EledoneAi/murmur/releases
 ```
 
 ## 2. Create the database

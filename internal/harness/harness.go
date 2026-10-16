@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"unicode"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // Harness is one AI coding tool.

@@ -22,16 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/gitscan"
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/harness/claude"
-	"github.com/EledoneAi/murmur/internal/hub"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/setup"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/gitscan"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/harness/claude"
+	"github.com/EledoneAi/murmur/v2/internal/hub"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/setup"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // End-to-end tests: a real hub (in memory) and real daemons talking to it over WebSockets, as laptops do, with fake

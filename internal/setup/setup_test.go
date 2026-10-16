@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/harness/claude"
-	"github.com/EledoneAi/murmur/internal/harness/hookish"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/harness/claude"
+	"github.com/EledoneAi/murmur/v2/internal/harness/hookish"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // fakeClaude puts on PATH a claude that keeps the MCP server it registers in $CLAUDE_CONFIG_DIR/mcp, and every call

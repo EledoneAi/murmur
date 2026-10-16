@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // A daemon older than this binary, left running by an upgrade it didn't make, is stopped and this version's starts;

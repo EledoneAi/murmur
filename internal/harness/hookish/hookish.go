@@ -15,10 +15,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // Spec is one harness.

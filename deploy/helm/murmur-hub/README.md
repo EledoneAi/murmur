@@ -30,7 +30,7 @@ the sqlite store when there is one replica.
    publicURL: https://murmur.example.com
    existingSecret: murmur-hub
    image:
-     tag: "<a release, for example 1.0.0>"
+     tag: "<a release, for example 2.0.1>"
    env:
      OIDC_ISSUER: https://login.example.com
      OIDC_CLIENT_ID: murmur

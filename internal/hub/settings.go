@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // Settings are what a team tunes while its hub runs. They live in the store; environment variables only seed them

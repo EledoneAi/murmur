@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 var ErrNotFound = errors.New("not found")

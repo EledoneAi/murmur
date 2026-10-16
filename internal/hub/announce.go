@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // An announcement is news for every agent working in one repo: main is frozen, staging is down. It reaches the

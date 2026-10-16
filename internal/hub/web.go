@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // The web side is small on purpose: sign in, connect a laptop, see your laptops, the team page and the admin panel.

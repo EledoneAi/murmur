@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/config"
-	"github.com/EledoneAi/murmur/internal/ipc"
-	"github.com/EledoneAi/murmur/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/config"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
 // Info is what a hub says about the version its team runs.

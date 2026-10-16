@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/EledoneAi/murmur/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
 )
 
 // HookInput is what Claude Code sends a hook on stdin, as far as murmur reads it. Harnesses that copied Claude Code's

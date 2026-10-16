@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/release"
-	"github.com/EledoneAi/murmur/internal/store"
-	"github.com/EledoneAi/murmur/internal/transport"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/transport"
 	"github.com/coder/websocket"
 )
 

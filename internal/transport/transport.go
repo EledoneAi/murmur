@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 )

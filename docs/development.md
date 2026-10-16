@@ -186,7 +186,7 @@ A release is a `v*` tag. [.github/workflows/release.yml](../.github/workflows/re
 
 1. builds `murmur` for macOS and Linux on amd64 and arm64, and `murmur-hub` for Linux and macOS, with the
    version and the release key's public half stamped in
-   (`-X github.com/EledoneAi/murmur/internal/release.Version=<version>`, and `release.Key`);
+   (`-X github.com/EledoneAi/murmur/v2/internal/release.Version=<version>`, and `release.Key`);
 2. writes `checksums.txt` with the SHA-256 of every file, and signs it into `checksums.txt.sig` with
    `go run ./deploy/sign`;
 3. publishes the GitHub release with the changelog from the commits since the last tag;

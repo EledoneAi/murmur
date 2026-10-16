@@ -37,7 +37,7 @@ Replace the example values with yours. Sign-in with Microsoft Entra ID is set up
 ```sh
 RG=murmur
 LOCATION=westeurope
-VERSION=1.0.0           # a release from https://github.com/EledoneAi/murmur/releases
+VERSION=2.0.1           # a release from https://github.com/EledoneAi/murmur/releases
 az extension add --name containerapp --upgrade
 az group create --name "$RG" --location "$LOCATION"
 ```

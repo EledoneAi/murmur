@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/auth"
-	"github.com/EledoneAi/murmur/internal/bus"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/auth"
+	"github.com/EledoneAi/murmur/v2/internal/bus"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 type Config struct {

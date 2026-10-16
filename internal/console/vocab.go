@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // The vocabulary: a small set of signs, each with one meaning, used on every screen. Every state has a shape, a word

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // When a pull request merges, the agents still changing the same files on other branches hear of it before they

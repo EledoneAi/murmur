@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // checkout is one agent as the overlap index holds it.

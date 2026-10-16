@@ -32,7 +32,7 @@ ARG TARGETARCH
 ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build <<EOF
 set -eu
-ldflags="-s -w -X github.com/EledoneAi/murmur/internal/release.Version=${VERSION} -X github.com/EledoneAi/murmur/internal/release.Key=${RELEASE_PUBKEY}"
+ldflags="-s -w -X github.com/EledoneAi/murmur/v2/internal/release.Version=${VERSION} -X github.com/EledoneAi/murmur/v2/internal/release.Key=${RELEASE_PUBKEY}"
 mkdir -p /out/dist
 for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
   os=${t%/*} arch=${t#*/}

@@ -6,7 +6,7 @@ app = "murmur-hub-example"
 primary_region = "<region>"
 
 [build]
-  # Pin a release in production, for example ghcr.io/eledoneai/murmur-hub:1.0.0
+  # Pin a release in production, for example ghcr.io/eledoneai/murmur-hub:2.0.1
   image = "ghcr.io/eledoneai/murmur-hub:latest"
 
 [env]

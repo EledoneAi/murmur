@@ -3,7 +3,7 @@
 //
 //	go run ./deploy/sign -keygen
 //	    prints a new key pair. Build the public key into every binary (MURMUR_RELEASE_PUBKEY for make and
-//	    GoReleaser, which pass it as -X github.com/EledoneAi/murmur/internal/release.Key), and keep the
+//	    GoReleaser, which pass it as -X github.com/EledoneAi/murmur/v2/internal/release.Key), and keep the
 //	    private key only in your CI's secret store, for the release to read as MURMUR_RELEASE_KEY
 //	MURMUR_RELEASE_KEY=<private key> go run ./deploy/sign dist/checksums.txt
 //	    writes checksums.txt.sig next to it (GoReleaser runs this; see .goreleaser.yaml)

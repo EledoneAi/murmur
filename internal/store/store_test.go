@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/EledoneAi/murmur/internal/store"
-	"github.com/EledoneAi/murmur/internal/store/storetest"
+	"github.com/EledoneAi/murmur/v2/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/store/storetest"
 )
 
 func TestMemory(t *testing.T) {

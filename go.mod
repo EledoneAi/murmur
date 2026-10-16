@@ -1,4 +1,4 @@
-module github.com/EledoneAi/murmur
+module github.com/EledoneAi/murmur/v2
 
 go 1.27.2
 

@@ -1,6 +1,6 @@
 # sqlite with Litestream
 
-The hub image tagged `<version>-litestream`, such as `ghcr.io/eledoneai/murmur-hub:1.0.0-litestream`, is the hub
+The hub image tagged `<version>-litestream`, such as `ghcr.io/eledoneai/murmur-hub:2.0.1-litestream`, is the hub
 plus [Litestream](https://litestream.io). Litestream copies the sqlite store to object storage (Amazon S3, Google
 Cloud Storage, Azure Blob Storage and others) about once a second. When a container starts without the sqlite
 file, Litestream restores it from that copy before the hub starts. `ghcr.io/eledoneai/murmur-hub:litestream`

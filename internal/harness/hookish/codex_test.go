@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // A config.toml as people write it, with what trips a reader that goes line by line: comments and strings holding

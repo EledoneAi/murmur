@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/auth"
-	"github.com/EledoneAi/murmur/internal/protocol"
-	"github.com/EledoneAi/murmur/internal/store"
+	"github.com/EledoneAi/murmur/v2/internal/auth"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
 // safeNext keeps a page to return to after sign-in only when it is a path on this hub. Browsers drop tabs and line

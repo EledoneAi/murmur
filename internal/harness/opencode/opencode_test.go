@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/EledoneAi/murmur/internal/harness"
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // What the plugin sends murmur's hooks: an edit names its file, the session its socket and process.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/EledoneAi/murmur/internal/protocol"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // Messages reach this person's agents unless the person muted where they come from. A mute holds messages instead of
