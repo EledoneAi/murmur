@@ -109,6 +109,8 @@ The tools that wait for hooks wait for these, each bounded well under a second:
 
 Any failure prints nothing and lets the session go on.
 
+`murmur solo` sets a laptop up with no team: its daemon runs `internal/hub` itself, on 127.0.0.1, with the memory store, the local bus and no identity provider, so no page signs anyone in. At each start the daemon signs its person in with `Hub.Solo`, under their login name, and saves the token, which only that run's hub accepts. It keeps its port while the port is free. The laptop binary is built with the `laptop` tag, which leaves out the server-only stores and buses (`internal/store/laptop.go`, `internal/bus/laptop.go`).
+
 `murmur join` signs a laptop in with OAuth for native apps and PKCE: it opens the hub's `/cli/login`, and the browser comes back to a one-shot listener on 127.0.0.1 with a code the laptop trades for its token. Over SSH, or with `--no-browser`, it prints a link to `/cli/login` with port 0 instead: the page shows the code, and its person pastes it into the terminal. Only the laptop that started the sign-in can trade the code.
 
 ## Updates

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"net"
@@ -130,6 +131,11 @@ func Run() error {
 		return err
 	}
 	_ = os.Chmod(config.SockPath(), 0o600)
+	if config.Load().Solo {
+		if err := solo(context.Background()); err != nil {
+			return fmt.Errorf("murmur solo's hub: %w", err)
+		}
+	}
 	cfg := config.Load()
 	config.UseDirs(cfg) // the tools' folders as join saw them, whoever started this daemon
 	d := newDaemon(cfg.Handle)

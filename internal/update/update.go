@@ -192,6 +192,9 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 	if pm := Managed(exe); pm != "" {
 		return fmt.Errorf("%s installed this murmur: update it with %s", pm, map[string]string{"Homebrew": "brew upgrade murmur", "Nix": "your Nix configuration"}[pm])
 	}
+	if cfg.Solo {
+		return errors.New("murmur solo has no team to update with: install the newest release from github.com/EledoneAi/murmur/releases")
+	}
 	info, err := Check(cfg.Hub)
 	if err != nil {
 		return fmt.Errorf("asking the hub: %w", err)

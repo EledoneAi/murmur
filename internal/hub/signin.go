@@ -278,14 +278,34 @@ func (h *Hub) cliToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": fmt.Sprintf("you have %d laptops signed in, the most this team allows: revoke one on %s first", laptops, h.cfg.PublicURL)})
 		return
 	}
-	token := protocol.RandomHex(32)
-	d := store.Device{ID: protocol.RandomHex(8), Email: c.Email, Host: c.Host, TokenHash: hashToken(token), Created: time.Now()}
-	if err := h.putDevice(r.Context(), d); err != nil {
+	token, err := h.addLaptop(r.Context(), u, c.Host)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save this laptop; try again"})
 		return
 	}
-	h.event(r.Context(), "laptop signed in", u.Handle, d.ID, d.Host)
 	writeJSON(w, http.StatusOK, map[string]string{"token": token, "email": u.Email, "handle": u.Handle, "name": u.Name})
+}
+
+// addLaptop signs a laptop of u in and returns its token. Only the token's hash is kept.
+func (h *Hub) addLaptop(ctx context.Context, u *store.User, host string) (string, error) {
+	token := protocol.RandomHex(32)
+	d := store.Device{ID: protocol.RandomHex(8), Email: u.Email, Host: host, TokenHash: hashToken(token), Created: time.Now()}
+	if err := h.putDevice(ctx, d); err != nil {
+		return "", err
+	}
+	h.event(ctx, "laptop signed in", u.Handle, d.ID, d.Host)
+	return token, nil
+}
+
+// Solo signs in the one person of a hub that runs inside their own laptop's daemon (murmur solo), which has no
+// identity provider: whoever runs the daemon is that person. It returns them, and their laptop's token.
+func (h *Hub) Solo(ctx context.Context, email, name, host string) (store.User, string, error) {
+	u, err := h.ensureUser(ctx, email, name)
+	if err != nil {
+		return u, "", err
+	}
+	token, err := h.addLaptop(ctx, &u, host)
+	return u, token, err
 }
 
 // revoke signs a laptop out, when it belongs to email or by is an admin. It logs a failure to save it, and returns

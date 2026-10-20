@@ -46,7 +46,7 @@ help: ## List the targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 build: ## Build bin/murmur and bin/murmur-hub for this machine
-	$(BUILD) -o bin/murmur ./cmd/murmur
+	$(BUILD) -tags laptop -o bin/murmur ./cmd/murmur
 	$(BUILD) -o bin/murmur-hub ./cmd/murmur-hub
 
 test: ## Run the tests
@@ -78,13 +78,13 @@ dev-dist: ## Cross-build the four laptop binaries and checksums.txt into .dev/di
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; \
 		echo "building .dev/dist/murmur-$$os-$$arch"; \
-		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' -tags laptop \
 			-o $(DEV)/dist/murmur-$$os-$$arch ./cmd/murmur || exit 1; \
 	done
 	@cd $(DEV)/dist && $(SHA256) murmur-darwin-* murmur-linux-* > checksums.txt
 
 laptop: ## Build bin/murmur and open a shell whose murmur and coding tools keep their settings in .dev/
-	@$(BUILD) -o bin/murmur ./cmd/murmur
+	@$(BUILD) -tags laptop -o bin/murmur ./cmd/murmur
 	@mkdir -p $(DEV)/home $(DEV)/claude $(DEV)/codex $(DEV)/gemini $(DEV)/copilot $(DEV)/cursor $(DEV)/opencode
 	@if [ -t 1 ]; then \
 		echo "Test laptop shell: MURMUR_HOME=.dev/home, each coding tool's settings in .dev/, hub $(HUB_URL)."; \
