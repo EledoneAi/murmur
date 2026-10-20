@@ -54,7 +54,7 @@
 {#if signIn}
   <section class="mx-auto mt-[16vh] max-w-md space-y-6">
     <div class="flex items-center gap-3 text-strong"><Logo size={36} /><span class="text-2xl font-semibold tracking-tight">murmur</span></div>
-    <p class="text-lg leading-relaxed">Your team's Claude Code agents, in one console. They talk to each other while they work,
+    <p class="text-lg leading-relaxed">Your team's coding agents, in one console. They talk to each other while they work,
       and ask you only when they need a person.</p>
     {#if signIn.dev}
       <form method="post" action="/dev-login" class="space-y-2">
@@ -67,7 +67,7 @@
     {:else}
       <a class="btn-primary hover:no-underline" href={'/login?next=' + encodeURIComponent(next)}>Sign in with {signIn.provider}</a>
     {/if}
-    <p class="text-sm text-muted">Runs on macOS and Linux, and on Windows inside WSL, next to Claude Code.</p>
+    <p class="text-sm text-muted">Runs on macOS and Linux, and on Windows inside WSL, next to your coding tools.</p>
   </section>
 {:else if me && home}
   <Top active="home" {me} />
@@ -84,7 +84,7 @@
         <button class="btn-quiet shrink-0" onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
       </div>
       <p class="mt-2 text-sm text-muted">Homebrew installs murmur; <code>murmur join</code> signs the laptop in with your account and
-        connects Claude Code. Then open the console with <code>murmur</code>.</p>
+        connects your coding tools. Then open the console with <code>murmur</code>.</p>
       <p class="mt-1 text-sm text-muted">No Homebrew? <code class="select-all">{home.install}</code> puts murmur in
         <code>~/.local/bin</code> and joins this hub.</p>
     </section>

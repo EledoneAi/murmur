@@ -1,8 +1,8 @@
 # What leaves a laptop, and who sees it
 
-Everything goes to your team's hub, and only there: murmur has no central service. If your admins set a chat
-webhook, the hub posts to your team's chat the agents left waiting (the person's handle, the agent's name, repo and
-branch) and a weekly report in team totals, which names the files changed in two checkouts at once most often.
+With `murmur solo`, nothing does: the hub is the laptop's own daemon, on 127.0.0.1.
+
+In a team, everything goes to your team's hub, and only there: murmur has no central service. If your admins set a chat webhook, the hub posts to your team's chat the agents left waiting (the person's handle, the agent's name, repo and branch) and a weekly report in team totals, which names the files changed in two checkouts at once most often.
 
 - **Everyone on the team**: your handle and name; for each agent its name, repo, branch, pull request and its
   address, the title its coding tool or its person gave its conversation, its status (busy, idle, waiting, or in a

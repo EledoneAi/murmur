@@ -4,6 +4,7 @@ package setup
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -176,6 +177,9 @@ func signIn(cfg config.Config, noBrowser bool) (config.Config, error) {
 // the terminal.
 func Join(hub string, relogin, noBrowser bool) error {
 	cfg := config.Load()
+	if cfg.Solo { // its own hub signs nobody in: join asks for the team's
+		cfg.Hub, cfg.Token, cfg.Solo = "", "", false
+	}
 	if hub == "" && cfg.Hub == "" {
 		hub = askLine("Your team's hub (its address, such as murmur.example.com): ")
 	}
@@ -191,7 +195,6 @@ func Join(hub string, relogin, noBrowser bool) error {
 	if err := guardDev(); err != nil {
 		return err
 	}
-	exe := config.Exe()
 	fmt.Println("Murmur")
 	if cfg.Token != "" && !relogin && !TokenAccepted(cfg) {
 		step(false, "Signed out", "the hub no longer accepts this laptop: signing in again")
@@ -205,7 +208,36 @@ func Join(hub string, relogin, noBrowser bool) error {
 		}
 	}
 	step(true, "Signed in", fmt.Sprintf("%s (%s)", cfg.Handle, cfg.Email))
+	return connect(cfg)
+}
 
+// Solo sets this laptop up on its own, with no team and no hub to run: its daemon runs a hub of its own on
+// 127.0.0.1, which only this laptop reaches, and signs its person in under their login name. murmur join moves the
+// laptop to a team's hub.
+func Solo() error {
+	cfg := config.Load()
+	if cfg.Token != "" && !cfg.Solo {
+		return fmt.Errorf("this laptop is in the team at %s: murmur uninstall first, to use murmur on its own", cfg.Hub)
+	}
+	if err := guardDev(); err != nil {
+		return err
+	}
+	if !cfg.Solo {
+		cfg.Hub = "" // the daemon picks a free port
+	}
+	// the handle comes from the email: the login name, as the terminal knows its person
+	cfg.Solo, cfg.Token, cfg.Email = true, "", strings.ToLower(cmp.Or(os.Getenv("USER"), "me"))+"@localhost"
+	if out, err := exec.Command("git", "config", "--get", "user.name").Output(); err == nil {
+		cfg.Name = strings.TrimSpace(string(out))
+	}
+	fmt.Println("Murmur")
+	step(true, "On your own", "a hub of this laptop's own, which only it reaches: murmur join moves it to a team")
+	return connect(cfg)
+}
+
+// connect connects each coding tool installed here, saves the config and starts the daemon on it.
+func connect(cfg config.Config) error {
+	exe := config.Exe()
 	found := false
 	for _, h := range Harnesses { // each one installed here; the others are left alone
 		if h.Installed() {

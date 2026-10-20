@@ -15,7 +15,10 @@ import (
 )
 
 type Config struct {
-	Hub    string `json:"hub"`
+	Hub string `json:"hub"`
+	// Solo is set by murmur solo: the daemon runs a hub of its own at Hub, on this laptop only, and signs its person
+	// in to it whenever it starts.
+	Solo   bool   `json:"solo,omitempty"`
 	Token  string `json:"token,omitempty"`
 	Email  string `json:"email,omitempty"`
 	Handle string `json:"handle,omitempty"`
@@ -121,7 +124,7 @@ func Load() Config {
 	if b, err := os.ReadFile(filepath.Join(Dir(), "config.json")); err == nil {
 		_ = json.Unmarshal(b, &c)
 	}
-	if h := os.Getenv("MURMUR_HUB"); h != "" {
+	if h := os.Getenv("MURMUR_HUB"); h != "" && !c.Solo {
 		c.Hub = h
 	}
 	return c

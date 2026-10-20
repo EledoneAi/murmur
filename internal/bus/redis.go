@@ -1,3 +1,5 @@
+//go:build !laptop
+
 package bus
 
 import (

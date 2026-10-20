@@ -36,7 +36,7 @@ ldflags="-s -w -X github.com/EledoneAi/murmur/v2/internal/release.Version=${VERS
 mkdir -p /out/dist
 for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
   os=${t%/*} arch=${t#*/}
-  GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$ldflags" -o /out/dist/murmur-$os-$arch ./cmd/murmur
+  GOOS=$os GOARCH=$arch go build -trimpath -ldflags "$ldflags" -tags laptop -o /out/dist/murmur-$os-$arch ./cmd/murmur
 done
 (cd /out/dist && sha256sum murmur-* > checksums.txt)
 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "$ldflags" -o /out/murmur-hub ./cmd/murmur-hub

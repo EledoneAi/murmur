@@ -28,6 +28,8 @@ const usage = `murmur: your team's coding agents, in one console.
   murmur join HUB       join your team's hub (murmur.example.com): sign in and connect the coding tools on this
                         laptop (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI), once per laptop;
                         --relogin signs in again, --no-browser signs in with a code, as over SSH
+  murmur solo           use murmur on your own, with no team and no hub to run: the agents on this laptop see
+                        and message each other, whatever coding tool each runs in; join moves it to a team
   murmur who            list people and their agents
   murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
   murmur mute WHO [30m|2h|tomorrow]
@@ -49,7 +51,7 @@ const usage = `murmur: your team's coding agents, in one console.
 
 // options lists what each command accepts. send, hook, tool, mute and unmute take free text, so they are not checked.
 var options = map[string][]string{
-	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
+	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "solo": nil, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
 	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "mutes": nil,
 }
@@ -106,7 +108,7 @@ func main() {
 	var err error
 	switch cmd {
 	case "":
-		if config.Load().Token == "" { // not in a team yet: join one first, asking for its hub
+		if cfg := config.Load(); cfg.Token == "" && !cfg.Solo { // not in a team yet: join one first, asking for its hub
 			if err = setup.Join("", false, false); err != nil {
 				break
 			}
@@ -120,6 +122,8 @@ func main() {
 		err = console.RunDemo()
 	case "join":
 		err = setup.Join(hub, slices.Contains(args, "--relogin"), slices.Contains(args, "--no-browser"))
+	case "solo":
+		err = setup.Solo()
 	case "uninstall":
 		if !slices.Contains(args, "--yes") && !slices.Contains(args, "-y") && !confirm() {
 			fmt.Fprintln(os.Stderr, "murmur: nothing removed")

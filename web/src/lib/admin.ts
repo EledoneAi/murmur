@@ -392,7 +392,7 @@ export const settingFields: SettingField[] = [
   { name: 'loop_minutes', group: 'Limits', kind: 'number', min: 1, max: 1440, label: 'Loop window, in minutes' },
   {
     name: 'max_agents', group: 'Limits', kind: 'number', min: 1, max: 1000, label: 'Agents per laptop',
-    hint: 'Claude Code sessions one laptop can report.',
+    hint: 'Agent sessions one laptop can report.',
   },
   {
     name: 'max_laptops', group: 'Limits', kind: 'number', min: 1, max: 1000, label: 'Laptops per person',

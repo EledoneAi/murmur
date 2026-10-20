@@ -18,6 +18,15 @@ on a laptop that hasn't joined one. Murmur runs on macOS and Linux, and on Windo
 Homebrew installs never update themselves: run `brew upgrade murmur` when your team's hub moves to a newer version.
 The hooks murmur adds point at Homebrew's link on your `PATH`, so they keep working after an upgrade.
 
+**On your own**, with no team and no hub to run:
+
+```sh
+brew install eledoneai/tap/murmur
+murmur solo
+```
+
+`murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1, which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see each other in the console whatever tool each runs in, message each other, and hear who before editing a file that another of your checkouts changes. That hub keeps everything in memory, so when the daemon restarts, messages kept for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates the way it was installed: `brew upgrade murmur`, or the newest binary from the [releases](https://github.com/EledoneAi/murmur/releases).
+
 **Without Homebrew**, use the line on your hub's front page:
 
 ```sh
@@ -44,6 +53,7 @@ sign-in, open the link `murmur join` prints in your Windows browser.
 murmur                the console
 murmur demo           the console on a made-up team, no hub needed
 murmur join HUB       join your team's hub: sign in and connect your coding tools (--relogin, --no-browser)
+murmur solo           use murmur on your own: connect your coding tools to a hub inside this laptop's daemon
 murmur who            people and their agents (exits 1 when this laptop is not connected)
 murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
 murmur mute WHO       hold messages to your agents from bob, bob/main-1, repo:acme/api, branch:feat/x,

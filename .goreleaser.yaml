@@ -19,6 +19,8 @@ builds:
     binary: murmur
     env: [CGO_ENABLED=0]
     flags: [-trimpath]
+    # the laptop binary leaves out the hub's server-only stores and buses: see internal/store/laptop.go
+    tags: [laptop]
     ldflags:
       - -s -w -X github.com/EledoneAi/murmur/v2/internal/release.Version={{ .Version }}
       - -X github.com/EledoneAi/murmur/v2/internal/release.Key={{ envOrDefault "MURMUR_RELEASE_PUBKEY" "" }}
