@@ -322,3 +322,7 @@ The screenshots of the team page and the admin panel come from the pages' demo m
 cd web && pnpm demo              # in another terminal, from the repository root:
 uv run --with playwright python3 docs/tapes/pages.py
 ```
+
+The repository's social preview, which GitHub shows wherever its link is shared, is
+[tapes/social-preview.html](tapes/social-preview.html) at 1280×640; the file says how to take it again. GitHub takes
+it only from the repository's Settings, under Social preview.
