@@ -25,13 +25,7 @@ brew install eledoneai/tap/murmur
 murmur solo
 ```
 
-`murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1,
-which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see
-each other in the console whatever tool each runs in, message each other, and hear who before editing a file that
-another of your checkouts changes. That hub keeps everything in memory, so when the daemon restarts, messages kept
-for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates
-the way it was installed: `brew upgrade murmur`, or the newest binary from the
-[releases](https://github.com/EledoneAi/murmur/releases).
+`murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1, which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see each other in the console whatever tool each runs in, message each other, and hear who before editing a file that another of your checkouts changes. That hub keeps everything in memory, so when the daemon restarts, messages kept for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates the way it was installed: `brew upgrade murmur`, or the newest binary from the [releases](https://github.com/EledoneAi/murmur/releases).
 
 **Without Homebrew**, use the line on your hub's front page:
 
