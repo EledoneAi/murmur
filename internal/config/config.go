@@ -28,6 +28,9 @@ type Config struct {
 	Updates string `json:"updates,omitempty"`
 	// Notifications is "off" when this laptop's person doesn't want desktop notifications.
 	Notifications string `json:"notifications,omitempty"`
+	// BtwAnswers is how this laptop answers teammates' questions asked of its agents by the way: "" or "approve"
+	// (each answer waits for this person), "auto", or "off" (teammates can't ask).
+	BtwAnswers string `json:"btw_answers,omitempty"`
 	// Agreements are the team's, as its hub last sent them: sessions that start before the daemon reaches the hub
 	// get them too.
 	Agreements string `json:"agreements,omitempty"`

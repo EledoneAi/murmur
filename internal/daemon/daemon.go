@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -39,7 +40,8 @@ import (
 )
 
 // The daemon is the one long-lived murmur process on a laptop. It sleeps on file events and on its hub
-// connection, and exits on its own ten minutes after the last agent session and console are gone.
+// connection, and exits on its own ten minutes after the last agent session and console are gone, once no question
+// asked from the laptop waits for its answer.
 
 const (
 	idleExit   = 10 * time.Minute
@@ -88,6 +90,24 @@ type Daemon struct {
 	forced     bool          // the hub refuses this version: only an update brings this laptop back
 	updating   time.Time     // when this daemon last started an update
 	reportAt   time.Time     // when it last sent the hub its self-check
+
+	// questions by the way (btw.go)
+	asides     map[string]*aside   // by aside.key
+	forks      map[string]bool     // the session ids of the copies running, which are no sessions of this laptop's
+	lines      map[string]*line    // session key -> the questions at its copy
+	slots      chan struct{}       // each copy running on this laptop holds one
+	asideCh    chan struct{}       // closed when an aside changes, for whoever waits on one
+	waiters    map[string]int      // aside id -> the btw-waits showing its answer, which then needs no notification
+	btwAnswers string              // config.BtwAnswers: "" (approve), auto or off
+	hubBtw     bool                // the hub's last welcome said it carries questions by the way
+	solo       bool                // murmur solo: the hub is this daemon's own, with no teammates and no other laptop on it
+	welcomed   bool                // a hub welcomed this daemon
+	btwOut     chan protocol.Frame // the connection this person's open questions last went out on
+	// askers finds the harnesses that answer questions by the way. Tests replace setup's; nil uses them.
+	askers func(harness string) harness.Asker
+	// stopping is done once the daemon stops (stopCopies): the copies running stop with it, and no other starts
+	stopping   context.Context
+	stopCopies context.CancelFunc
 
 	// notify shows a desktop notification. Tests leave it nil, which shows none.
 	notify func(title, text string)
@@ -139,8 +159,13 @@ func Run() error {
 	}
 	cfg := config.Load()
 	config.UseDirs(cfg) // the tools' folders as join saw them, whoever started this daemon
+	sweepCopies()
 	d := newDaemon(cfg.Handle)
 	d.me.Name, d.ln, d.team.Agreements, d.notify, d.reapply, d.lock = cfg.Name, ln, cfg.Agreements, desktop, setup.Reapply, lock
+	if cfg.BtwAnswers != ipc.BtwApprove {
+		d.btwAnswers = cfg.BtwAnswers
+	}
+	d.solo = cfg.Solo
 	d.loadHistory()
 	d.mu.Lock()
 	d.running = true
@@ -160,6 +185,12 @@ func Run() error {
 	go d.publishLoop()
 	go d.tickLoop()
 	go d.hubLoop()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, os.Interrupt)
+	go func() {
+		log.Printf("stopped by %v", <-signals)
+		d.shutdown()
+	}()
 	log.Printf("murmur %s started (pid %d)", release.Version, os.Getpid())
 	for {
 		c, err := ln.Accept()
@@ -171,18 +202,23 @@ func Run() error {
 }
 
 func newDaemon(handle string) *Daemon {
+	stopping, stopCopies := context.WithCancel(context.Background())
 	return &Daemon{
 		sessions: map[string]*session{}, hints: map[string]string{}, sockets: map[string]string{}, terms: map[string]map[string]string{}, watched: map[string]string{},
 		seen: map[string]bool{}, handed: map[string]bool{}, held: map[string][]heldMsg{}, queued: map[string][]heldMsg{}, names: map[string]string{},
-		outbox: map[string]outMsg{},
+		outbox: map[string]outMsg{}, asides: map[string]*aside{},
 		failed: map[string]failure{}, repos: map[string]string{}, asks: map[string]protocol.Msg{},
 		answers: map[string]string{}, done: map[string]bool{}, subs: map[chan struct{}]bool{}, acks: map[string]chan protocol.Frame{},
 		checks: map[string]chan protocol.Frame{}, me: protocol.Person{Handle: handle}, state: "connecting", lastUse: time.Now(),
-		kick: make(chan struct{}, 1),
+		kick: make(chan struct{}, 1), stopping: stopping, stopCopies: stopCopies,
 	}
 }
 
+// shutdown stops the daemon: as it is replaced by a newer murmur, uninstalled, stopped by a signal, or idle. The copies
+// answering questions by the way stop first, with whatever they started: one left running would answer nobody, at its
+// person's cost. Until then the socket stays, so whoever stops the daemon waits for them before starting another.
 func (d *Daemon) shutdown() {
+	d.haltCopies(copyHalt)
 	_ = d.ln.Close()
 	_ = os.Remove(config.SockPath())
 	os.Exit(0)
@@ -232,6 +268,9 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 			writing[e.PID] = true // half-written: what the daemon has for it stays, and the next event reads it again
 			continue
 		}
+		if d.forks[e.ID] { // a copy answering a question by the way, registered as a session while it runs
+			continue
+		}
 		listed = append(listed, e)
 	}
 	slices.SortFunc(listed, func(a, b harness.Session) int { return a.PID - b.PID })
@@ -248,7 +287,7 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 			}
 		}
 		live[key] = true
-		d.listedLocked(e, key)
+		d.listedLocked(l, e, key)
 	}
 	for k, s := range d.sessions {
 		if s.harness == name && !live[k] && !writing[s.pid] {
@@ -260,15 +299,19 @@ func (d *Daemon) scan(name string, l harness.Lister) {
 // procKey names a session in one process: two processes may hold the same conversation.
 func procKey(harness, id string, pid int) string { return harness + "/" + id + "@" + strconv.Itoa(pid) }
 
-// listedLocked takes in a session as its harness lists it, under key.
-func (d *Daemon) listedLocked(e harness.Session, key string) {
+// listedLocked takes in a session as harness l lists it, under key.
+func (d *Daemon) listedLocked(l harness.Lister, e harness.Session, key string) {
 	s := d.sessions[key]
 	fresh := s == nil || s.started != e.Started || s.pid != e.PID
 	if fresh {
 		if s != nil {
 			d.removeLocked(key)
 		}
-		s = &session{harness: e.Harness, id: e.ID, pid: e.PID, started: e.Started}
+		// the harness's own record of the start time may be in its own format: what a harness checks is murmur's
+		s = &session{harness: e.Harness, id: e.ID, pid: e.PID, started: e.Started, proc: harness.StartTime(e.PID)}
+		if c, ok := l.(harness.StartChecker); ok && !c.SameStart(e.PID, e.Started) {
+			s.proc = "" // the session's process is gone, and another has its PID: a copy takes nothing from that one
+		}
 		if key != harness.Key(e.Harness, e.ID) {
 			s.k = key
 		}
@@ -452,6 +495,7 @@ func (d *Daemon) tickLoop() {
 			if out != nil {
 				go d.resend(out, 2*time.Minute)
 			}
+			go d.btwTick(askAgain)
 		}
 		d.mu.Lock()
 		for k, s := range d.sessions {
@@ -466,21 +510,32 @@ func (d *Daemon) tickLoop() {
 				d.gitLocked(s)
 			}
 		}
-		if len(d.sessions) > 0 || len(d.subs) > 0 {
-			d.lastUse = time.Now()
-		} else if time.Since(d.lastUse) > idleExit {
-			log.Print("no agent session or console for a while: exiting")
+		idle := d.idleLocked()
+		d.mu.Unlock()
+		if idle {
+			log.Print("no agent session, console or question for a while: exiting")
 			d.shutdown()
 		}
-		d.mu.Unlock()
 	}
+}
+
+// idleLocked says whether the daemon has had nothing to do for idleExit: no agent session, no console, and no
+// question asked from this laptop that waits for its answer, which only this daemon would hear.
+func (d *Daemon) idleLocked() bool {
+	if len(d.sessions) > 0 || len(d.subs) > 0 || d.askingLocked() {
+		d.lastUse = time.Now()
+		return false
+	}
+	return time.Since(d.lastUse) > idleExit
 }
 
 func (d *Daemon) localAgentsLocked(withFiles bool) []protocol.Agent {
 	var out []protocol.Agent
 	for _, s := range d.sessions {
 		if s.name != "" {
-			out = append(out, s.agent(withFiles))
+			a := s.agent(withFiles)
+			a.Btw = d.btwOfLocked(s)
+			out = append(out, a)
 		}
 	}
 	slices.SortFunc(out, func(a, b protocol.Agent) int { return strings.Compare(a.Name, b.Name) })
@@ -619,6 +674,22 @@ func (d *Daemon) snapshotLocked() ipc.Snapshot {
 		}
 	}
 	snap.Failed = failed
+	snap.Asides, snap.BtwAnswers = d.asidesLocked(), cmp.Or(d.btwAnswers, ipc.BtwApprove)
+	for _, s := range d.sessions { // the console takes an agent here for one on this laptop, which it can ask
+		switch why := d.unaskable(s); {
+		case s.name == "":
+		case why != "":
+			if snap.CantAsk == nil {
+				snap.CantAsk = map[string]string{}
+			}
+			snap.CantAsk[s.name] = why
+		default:
+			if snap.Said == nil {
+				snap.Said = map[string]string{}
+			}
+			snap.Said[s.name] = protocol.Clean(protocol.Cut(s.act.Said, 400), false)
+		}
+	}
 	slices.SortFunc(snap.Outbox, func(a, b protocol.Msg) int { return cmp.Or(cmp.Compare(a.At, b.At), strings.Compare(a.ID, b.ID)) })
 	return snap
 }
@@ -697,7 +768,8 @@ func (d *Daemon) connect(cfg config.Config) error {
 	agents := d.localAgentsLocked(true)
 	d.sentAgents, _ = json.Marshal(agents)
 	// hello first: the hub reads nothing before it, and nothing else reaches out before d.out names it
-	out <- protocol.Frame{T: protocol.FrameHello, Protocol: protocol.Version, Version: release.Version, Agents: agents}
+	out <- protocol.Frame{T: protocol.FrameHello, Protocol: protocol.Version, Version: release.Version, Agents: agents,
+		Can: []string{protocol.CanBtw}}
 	d.out = out // "online" once the team list arrives: until then who would show an empty team
 	d.mu.Unlock()
 	d.resend(out, 0)
@@ -822,7 +894,10 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 		if update.Newer(f.Version) { // never an older one: a hub can't take laptops back to a version with a known bug
 			d.available = f.Version
 		}
+		can := slices.Contains(f.Can, protocol.CanBtw)
+		d.hubBtw, d.welcomed = can, true // the agents published next say whether teammates can ask them
 		d.mu.Unlock()
+		d.btwWelcomed(can)
 		go d.maybeUpdate()
 		d.changed()
 	case protocol.FrameRoster:
@@ -857,6 +932,14 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 		d.mu.Unlock()
 		if ch == nil {
 			d.lateAck(f) // its sender stopped waiting
+		}
+	case protocol.FrameBtw:
+		if f.Btw != nil {
+			d.onBtw(*f.Btw)
+		}
+	case protocol.FrameBtwAnswer:
+		if f.Btw != nil {
+			d.onBtwAnswer(*f.Btw)
 		}
 	case protocol.FrameChecked:
 		for i := range f.Overlaps { // they reach an agent
@@ -1267,8 +1350,9 @@ func (d *Daemon) refused(cfg config.Config, why string) {
 }
 
 // maybeUpdate starts `murmur update --auto` when the hub runs a newer version and both the team's policy and
-// this laptop's allow it, or the hub refuses this version. It waits until none of this laptop's agents is working:
-// the update restarts the daemon, and a message arriving then would wait for the new one.
+// this laptop's allow it, or the hub refuses this version. It waits until none of this laptop's agents is working
+// and no copy answers a question: the update restarts the daemon, and a message arriving then would wait for the new
+// one.
 func (d *Daemon) maybeUpdate() {
 	cfg := config.Load()
 	exe := config.Exe()
@@ -1282,6 +1366,7 @@ func (d *Daemon) maybeUpdate() {
 	for _, s := range d.sessions {
 		ok = ok && s.status != protocol.StatusBusy
 	}
+	ok = ok && len(d.forks) == 0 // nor while a copy answers a question by the way: it would stop with the daemon
 	if !ok {
 		d.mu.Unlock()
 		return

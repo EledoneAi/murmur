@@ -1,21 +1,22 @@
  ╭─┬─╮
  ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live
 
- ◆ Needs you  3    ╭──────────────────────────────────────────────────────────────────────╮
+ ◆ Needs you  4    ╭──────────────────────────────────────────────────────────────────────╮
 ▌  A api-1a        │ › web▏                             agents · people · files · actions │   ━━╸───── 3:12   
-   D dave          │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:05
-   B main-1 ┄⇢ 9b  │   AGENTS                                                             │…” ╸─────── 0:40
-                   │ ▌ ● A web-4c                                          feat/search-ui │
- Billing   api · 3 │   ● C web-2                                          feat/search-api │e on certifier.go
-   ╭────◆ A api-1a │                                                                      │   ━━╸───── 3:12
- ╭─┴─┬┄┄● A api-9b │   REPOS                                                              │   ›▪·›››⇢›·▪››
- │   ╰┄┄● B main-1 │   acme/web                                                  2 agents │   ·▪···∿······
- ╰──────◇ C billing│                                                                      │   ━━━━━━━─ 8:40
-                   │ ⏎ go   esc close                                                     │
- Search   web · 2 p╰──────────────────────────────────────────────────────────────────────╯                ≈
- ╭──────● A web-4c     feat/search-ui          Search filters and empty states                ·▪▪▪▪··▪▪▪·▪
- ╰──────● C web-2      feat/search-api         Search endpoint pagination                     ››▪▪▪··▪▪››▪
-
+   C carol ↝ 9b    │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:30
+   D dave          │   AGENTS                                                             │   ━─────── 1:05
+   B main-1 ┄⇢ 9b  │ ▌ ● A web-4c                                          feat/search-ui │…” ╸─────── 0:40
+                   │   ● C web-2                                          feat/search-api │
+ Billing   api · 3 │                                                                      │e on certifier.go
+   ╭────◆ A api-1a │   REPOS                                                              │   ━━╸───── 3:12
+ ╭─┴─┬┄┄● A api-9b │   acme/web                                                  2 agents │   ›▪·›››⇢›·▪››
+ │   ╰┄┄● B main-1 │                                                                      │   ·▪···∿······
+ ╰──────◇ C billing│   TEAMMATES ASKING YOUR AGENTS BY THE WAY                            │   ━━━━━━━─ 8:40
+                   │   Each answer waits for you to share it    now · btw-answers approve │
+ Search   web · 2 p│   Answers go out on their own                       btw-answers auto │                ≈
+ ╭──────● A web-4c │                                                                      │   ·▪▪▪▪··▪▪▪·▪
+ ╰──────● C web-2  │ ⏎ go   esc close                                                     │   ››▪▪▪··▪▪››▪
+                   ╰──────────────────────────────────────────────────────────────────────╯
  Not in touch                                                                                × 1 out of tune
         ● A infra-3    chore/tf-providers      Upgrade the Terraform providers                ··▪›··▪››··›
         ● A notes      ⌂ notes                 Draft the weekly plan                          ···▪··▪∿···▪
@@ -28,5 +29,4 @@
 
 
 
-
- g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                                             ? keys
+ g terminal  ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute                               ? keys

@@ -53,7 +53,7 @@ func (d *Daemon) serve(c net.Conn) {
 		d.mu.Lock()
 		snap := d.snapshotLocked()
 		d.mu.Unlock()
-		_ = enc.Encode(ipc.Reply{OK: true, Text: whoText(snap), State: snap.State})
+		_ = enc.Encode(ipc.Reply{OK: true, Text: whoText(snap, req.Harness != ""), State: snap.State})
 	case "send":
 		_ = enc.Encode(d.send(req))
 	case "done":
@@ -109,6 +109,31 @@ func (d *Daemon) serve(c net.Conn) {
 		} else {
 			_ = enc.Encode(ipc.Reply{OK: true})
 		}
+	case "btw":
+		_ = enc.Encode(d.askBtw(req))
+	case "btw-wait":
+		gone := make(chan struct{}) // the asker stopped waiting
+		go func() {
+			_, _ = io.Copy(io.Discard, r)
+			close(gone)
+		}()
+		wait := btwWait
+		if req.PID != 0 || req.Session != "" || req.Harness != "" { // an agent's tool, which waits less
+			wait = agentWait
+		}
+		d.waitBtw(req.ID, wait, gone, func(r ipc.Reply) error { return enc.Encode(r) })
+	case "btw-approve", "btw-decline":
+		if err := d.btwVerdict(req.Op, req.ID); err != nil {
+			_ = enc.Encode(ipc.Reply{Err: err.Error()})
+		} else {
+			_ = enc.Encode(ipc.Reply{OK: true})
+		}
+	case "btw-answers":
+		if err := d.setBtwAnswers(req.Text); err != nil {
+			_ = enc.Encode(ipc.Reply{Err: err.Error()})
+		} else {
+			_ = enc.Encode(ipc.Reply{OK: true, Text: req.Text})
+		}
 	case "terminal": // where one of this laptop's agents runs, for the console to switch to it
 		d.mu.Lock()
 		var term map[string]string
@@ -143,6 +168,10 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 	key := harness.Key(ev.Harness, ev.SessionID)
 	l, listed := setup.Harness(ev.Harness).(harness.Lister)
 	d.mu.Lock()
+	if ev.SessionID != "" && d.forks[ev.SessionID] { // a copy answering a question by the way: no session, and told nothing
+		d.mu.Unlock()
+		return "", ""
+	}
 	if ev.Kind == harness.Start {
 		if len(d.hints) > 500 {
 			clear(d.hints)
@@ -343,9 +372,10 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 	}
 }
 
-// whoText is what the `who` tool and `murmur who` print. What teammates' agents and laptops say about
-// themselves (names, repos, branches, titles) is quoted: agents read it as data.
-func whoText(s ipc.Snapshot) string {
+// whoText is what the `who` tool and `murmur who` print: for an agent, which asks through its tools, or for its
+// person. What teammates' agents and laptops say about themselves (names, repos, branches, titles) is quoted: agents
+// read it as data.
+func whoText(s ipc.Snapshot, agent bool) string {
 	var b strings.Builder
 	for _, p := range s.People {
 		if p.Handle == "" {
@@ -380,7 +410,12 @@ func whoText(s ipc.Snapshot) string {
 			b.WriteString("\n")
 		}
 	}
-	b.WriteString("\nSend to person/agent (like bob/main-1) to reach an agent, or to a handle (bob) to reach the person.")
+	b.WriteString("\nSend to person/agent (like bob/main-1) to reach an agent, or to a handle (bob) to reach the person; ")
+	if agent {
+		b.WriteString("or ask an agent by the way with the btw tool, without interrupting it.")
+	} else {
+		b.WriteString("or ask an agent by the way with murmur btw, without interrupting it.")
+	}
 	if s.State != "online" {
 		b.WriteString("\nMurmur is " + s.State + ".")
 	}

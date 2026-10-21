@@ -1,14 +1,15 @@
  ╭─┬─╮                                                                                                        
  ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live  
                                                                                                               
- ◆ Needs you  3                                                                                               
+ ◆ Needs you  4                                                                                               
    A api-1a             approve running go test ./ocr/...                                     ━━╸───── 3:12   
+   C carol ↝ 9b         by the way “Does rerun.go still call the old certifier?”              ━─────── 1:30   
    D dave               asks you “ok to merge #1827 before v2?”                               ━─────── 1:05   
    B main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until F…” ╸─────── 0:40   
                                                                                                               
  Billing   api · 3 people                                                          ≈ in tune on certifier.go  
 ▌  ╭────◆ A api-1a     feat/billing-ocr ⟵ v2   approve running go test ./ocr/...              ━━╸───── 3:12   
-▌  │          ↳ Running go test ./ocr/... · +51 −4 in 3 files · context 31%                                   
+▌  │          ↳ Running go test ./ocr/... · +51 −4 in 3 files · context 31% · “The OCR fixtures changed, so…  
  ╭─┴─┬┄┄● A api-9b     feat/billing-v2²        Rerun billing on staging                       ›▪·›››⇢›·▪››    
  │   ╰┄┄● B main-1     main                    Review the billing config                      ·▪···∿······    
  ╰──────◇ C billing-2  feat/billing-certifier  waiting for carol                              ━━━━━━━─ 8:40   
@@ -28,5 +29,4 @@
  · 1 quiet agent, folded                                                                                      
                                                                                                               
                                                                                                               
-                                                                                                              
- g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                                             ? keys  
+ g terminal  ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute                               ? keys  

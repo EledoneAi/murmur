@@ -11,6 +11,8 @@
              ···›▪▪·›››▪›··⇢▪›››▪·›››⇢›·▪››                                         
              read 26% · edit 20% · run 46% · talk 6%                                
                                                                                     
+  LAST SAID  “The rerun passes locally; staging next, once carol's split lands.”    
+                                                                                    
   CHANGES    +214 −38 in 6 files · #1822                                            
   CONTEXT    ▆ 78% · compacts soon                                                  
                                                                                     
@@ -20,12 +22,10 @@
                                                                                     
   HARMONY    ≈ certifier.go · talking with billing-2                                
                                                                                     
-  write  copy  open #1822  go to terminal                                           
+  BY THE WAY teammates and agents can ask it; you share answers                     
+             ↝ carol 1m · answer held for you “Does rerun.go still call the old cer…
                                                                                     
-                                                                                    
-                                                                                    
-                                                                                    
-                                                                                    
+  write  by the way  copy  open #1822  go to terminal                               
                                                                                     
                                                                                     
                                                                                     

@@ -25,6 +25,7 @@ type glyphs struct {
 	tl, bl, tee, bottomTee, cross, leftTee   string
 	logoLine, logoOff, sel, ellipsis, arrow  string
 	sendArrow, heldArrow                     string
+	aside, answer                            string // a question by the way, and its answer
 }
 
 var unicodeGlyphs = glyphs{
@@ -35,6 +36,7 @@ var unicodeGlyphs = glyphs{
 	second: "²", stacked: "⟵", detached: "∅", folder: "⌂", also: "⊕",
 	h: "─", hDash: "┄", v: "│", vDash: "┆", tl: "╭", bl: "╰", tee: "┬", bottomTee: "┴", cross: "┼", leftTee: "├",
 	logoLine: "╭─┬─╮", logoOff: "╭┄┬┄╮", sel: "▌", ellipsis: "…", arrow: "─▸", sendArrow: "─▸", heldArrow: "┄⇢",
+	aside: "↝", answer: "↳",
 }
 
 var asciiGlyphs = glyphs{
@@ -45,6 +47,7 @@ var asciiGlyphs = glyphs{
 	second: "'", stacked: "<-", detached: "@", folder: "~", also: "+",
 	h: "-", hDash: ".", v: "|", vDash: ":", tl: ",", bl: "`", tee: "+", bottomTee: "+", cross: "+", leftTee: "+",
 	logoLine: ",-+-.", logoOff: ",.+..", sel: ">", ellipsis: "~", arrow: "->", sendArrow: "->", heldArrow: "..>",
+	aside: "~>", answer: "`-",
 }
 
 // pickGlyphs reads MURMUR_GLYPHS (unicode or ascii); otherwise a terminal without UTF-8 gets ASCII.
@@ -178,6 +181,18 @@ func ago(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// tokens is a count of tokens as people read it: 900, 41k, 1.2M. Costs are in tokens, never money: the same tokens
+// cost differently through each provider.
+func tokens(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprint(n)
+	case n < 999_500:
+		return fmt.Sprintf("%dk", (n+500)/1000)
+	}
+	return fmt.Sprintf("%.1fM", float64(n)/1e6)
 }
 
 // shares is how an agent spreads its last calls over reading, editing, running and talking, for the inspector.

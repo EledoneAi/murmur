@@ -90,7 +90,9 @@ apply at once on every instance.
 |---|---|---|
 | Days a laptop stays signed in | 90 | Seeded from `TOKEN_DAYS`. 0 keeps laptops signed in until someone revokes them. |
 | Messages per minute | 20 | What one person or one agent can send. |
-| Messages between two agents | 12 in 10 minutes | Past that, a person must step in. |
+| Messages between two agents | 12 in 10 minutes | Messages and questions by the way, either way. Past that, a person must step in. |
+| Questions by the way | on | People and their agents can ask teammates' agents, and their own on their other laptops, something by the way, through the hub ([using.md](using.md#asking-by-the-way)). Off, the hub carries no question; people and agents can still ask their person's agents on the laptop they ask from. Each person also chooses for their own agents (`murmur btw-answers`): with `off` there, the hub refuses teammates and their agents, and lets that person and their agents through. Only sessions of Claude Code 2.1.292 or later can be asked. |
+| Questions by the way per hour | 30 | What one person and their agents can ask, together. Each question also counts toward its sender's messages per minute, and an agent's question to an agent toward messages between two agents; a question asked again counts once, even after the hub restarts. A question to an agent on the laptop it is asked from never reaches the hub, and counts in none of these. Each laptop also answers at most 20 questions an hour from teammates and their agents, whatever this says. |
 | Agents per laptop | 64 | Agent sessions one laptop can report. |
 | Laptops per person | 10 | Laptops one person can have signed in at once. |
 | Downloads per hour | 120 | Installs and updates one network address can start. |
@@ -113,7 +115,7 @@ apply at once on every instance.
 | Variable | Default | What it does |
 |---|---|---|
 | `MURMUR_HUB` | the hub saved at sign-in | The team's hub, such as `https://murmur.example.com`. `murmur join` saves the hub it joins. Set this to point a laptop at another hub, as `make laptop` does for a test laptop. |
-| `MURMUR_HOME` | `~/.murmur` | Where murmur keeps its files on the laptop: config and sign-in token, the daemon's socket and log, message history. Point it elsewhere to keep a test laptop apart from your real one. |
+| `MURMUR_HOME` | `~/.murmur` | Where murmur keeps its files on the laptop: config and sign-in token, the daemon's socket and log, the history of messages and questions by the way. Point it elsewhere to keep a test laptop apart from your real one. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | Claude Code's own setting for its folder. Murmur follows it: it reads Claude Code's sessions there and adds its hooks to `settings.json` there. |
 | `CODEX_HOME` | `~/.codex` | Codex's own setting for its folder, where murmur adds its hooks. |
 | `CURSOR_CONFIG_DIR` | `~/.cursor` | Cursor CLI's setting for its folder, where murmur adds its hooks and MCP server. |

@@ -23,7 +23,8 @@ func init() {
 		protocol.KindRun:      {"Bash", "Shell", "run_shell_command", "bash", "shell", "exec_command", "powershell"},
 		protocol.KindWeb:      {"WebFetch", "WebSearch", "web_fetch", "google_web_search", "web_search", "webfetch", "websearch"},
 		protocol.KindSubagent: {"Task", "Agent", "Subagent", "spawn_agent", "invoke_agent", "task"},
-		protocol.KindMessage:  {"mcp__murmur__send", "mcp_murmur_send", "murmur-send", "murmur_send", "MCP:send"},
+		protocol.KindMessage: {"mcp__murmur__send", "mcp_murmur_send", "murmur-send", "murmur_send", "MCP:send",
+			"mcp__murmur__btw", "mcp_murmur_btw", "murmur-btw", "murmur_btw", "MCP:btw"},
 	} {
 		for _, n := range names {
 			toolKinds[n] = kind
@@ -109,6 +110,9 @@ func CallOf(cwd, tool string, input json.RawMessage) (Call, []string) {
 		c.Doing = "Delegating"
 	case protocol.KindMessage:
 		c.Doing = "murmur · send"
+		if strings.HasSuffix(tool, "btw") {
+			c.Doing = "murmur · btw"
+		}
 	}
 	switch {
 	case tool == "TodoWrite" || tool == "update_plan" || tool == "write_todos" || tool == "todowrite":

@@ -675,6 +675,8 @@ type settingsValues struct {
 	Weekdays         bool   `json:"weekdays"`
 	WeeklyReport     bool   `json:"weekly_report"`
 	CheckHours       int    `json:"check_hours"`
+	Btw              bool   `json:"btw"`
+	BtwPerHour       int    `json:"btw_per_hour"`
 }
 
 func valuesOf(s Settings) settingsValues {
@@ -683,7 +685,8 @@ func valuesOf(s Settings) settingsValues {
 		IgnoredPaths: strings.Join(s.IgnoredPaths, "\n"), UpdatePolicy: s.UpdatePolicy, MinVersion: s.MinVersion,
 		ReleaseCheck: s.ReleaseCheck, Agreements: s.Agreements, AnnounceHours: s.AnnounceHours, ChatWebhook: s.ChatWebhook,
 		ChatKind: s.ChatKind, WaitPingMinutes: s.WaitPingMinutes, WorkStart: s.WorkStart, WorkEnd: s.WorkEnd,
-		TimeZone: s.TimeZone, Weekdays: s.Weekdays, WeeklyReport: s.WeeklyReport, CheckHours: s.CheckHours}
+		TimeZone: s.TimeZone, Weekdays: s.Weekdays, WeeklyReport: s.WeeklyReport, CheckHours: s.CheckHours, Btw: s.Btw,
+		BtwPerHour: s.BtwPerHour}
 }
 
 // settingsView is the settings page: the values, whether GitHub's secret and token are set, which never leave the
@@ -725,6 +728,7 @@ func (f settingsSent) over(s Settings) Settings {
 	s.ChatWebhook, s.ChatKind = strings.TrimSpace(v.ChatWebhook), v.ChatKind
 	s.TimeZone = strings.TrimSpace(v.TimeZone)
 	s.Weekdays, s.WeeklyReport = v.Weekdays, v.WeeklyReport
+	s.Btw, s.BtwPerHour = v.Btw, v.BtwPerHour
 	for _, x := range []struct {
 		v      *string
 		typed  string

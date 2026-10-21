@@ -296,6 +296,8 @@ func TestAdminChangesSettings(t *testing.T) {
 		{"chat_kind", "irc", "Chat kind"},
 		{"agreements", strings.Repeat("a", 4001), "longer than 4000 characters"},
 		{"weekdays", "yes", "true or false"},
+		{"btw", "yes", "true or false"},
+		{"btw_per_hour", 0, "Questions by the way per hour must be between 1 and 1000."},
 		{"allowed_domains", "y.org", "doesn't know"}, // who may join is on the people page
 		{"github_secret_set", false, "doesn't know"},
 	} {
@@ -306,6 +308,34 @@ func TestAdminChangesSettings(t *testing.T) {
 		if !reflect.DeepEqual(tm.h.Settings(), s) {
 			t.Fatalf("%s=%v changed the settings", c.field, c.value)
 		}
+	}
+}
+
+// Admins turn questions by the way off and on, and set how many one person asks in an hour. The event log names
+// what changed.
+func TestAdminBtwSettings(t *testing.T) {
+	tm := newTeam(t, Config{}, nil)
+	var view settingsView
+	if tm.call(t, tm.alice, http.MethodGet, "/api/admin/settings", nil, &view); !view.Values.Btw || view.Values.BtwPerHour != 30 {
+		t.Fatalf("questions by the way before any change: %+v", view.Values)
+	}
+	var saved struct {
+		OK bool `json:"ok"`
+		settingsView
+	}
+	if status, _ := tm.call(t, tm.alice, http.MethodPost, "/api/admin/settings", map[string]any{"btw": false, "btw_per_hour": 5}, &saved); status != http.StatusOK {
+		t.Fatalf("save: %d", status)
+	}
+	if s := tm.h.Settings(); s.Btw || s.BtwPerHour != 5 || saved.Values.Btw || saved.Values.BtwPerHour != 5 {
+		t.Fatalf("saved %+v, answered %+v", s, saved.Values)
+	}
+	evs, _ := tm.st.Events(context.Background(), 1)
+	if len(evs) != 1 || evs[0].Kind != "settings changed" || evs[0].Actor != "alice" || evs[0].Detail != "btw, btw_per_hour" {
+		t.Fatalf("event: %+v", evs)
+	}
+	tm.call(t, tm.alice, http.MethodPost, "/api/admin/settings", map[string]any{"btw": true}, &saved)
+	if s := tm.h.Settings(); !s.Btw || s.BtwPerHour != 5 {
+		t.Fatalf("turned on again: %+v", s)
 	}
 }
 

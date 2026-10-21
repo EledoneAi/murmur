@@ -3,11 +3,15 @@ package claude
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
@@ -48,12 +52,12 @@ func TestEditSettingsRoundTrip(t *testing.T) {
 	}
 	b, _ := os.ReadFile(path)
 	s := string(b)
-	for _, want := range []string{"other-tool start", `"/home/me/.local/bin/murmur hook claude start"`, `"/home/me/.local/bin/murmur hook claude notify"`, "mcp__murmur__send", `"async": true`} {
+	for _, want := range []string{"other-tool start", `"/home/me/.local/bin/murmur hook claude start"`, `"/home/me/.local/bin/murmur hook claude notify"`, "mcp__murmur__send", "mcp__murmur__btw", `"async": true`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in\n%s", want, s)
 		}
 	}
-	if hooks, perms, _ := SetupState(path); !hooks || !perms {
+	if hooks, perms, _ := SetupState(path); !hooks || len(perms) != len(toolPermissions) {
 		t.Fatalf("doctor misses what join wrote: hooks %v, permissions %v", hooks, perms)
 	}
 	if strings.Index(s, `"permissions"`) > strings.Index(s, `"model"`) || strings.Index(s, `"model"`) > strings.Index(s, `"theme"`) {
@@ -294,5 +298,88 @@ func TestSettingsWithComments(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(path); string(b) != withOurs {
 		t.Fatal("a file with comments changed")
+	}
+}
+
+// A laptop set up before btw allows who and send only. It still counts as connected, so the daemon sets it up again
+// after the update, and doctor doesn't call its permissions missing. The next setup allows btw too, and uninstall
+// takes it out with the others.
+func TestBeforeBtw(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("PATH", "")
+	path := filepath.Join(dir, "settings.json")
+	if err := EditSettings(path, "/opt/murmur", true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(path)
+	before := strings.Replace(string(b), ",\n      \"mcp__murmur__btw\"", "", 1)
+	if strings.Contains(before, "btw") || !strings.Contains(before, "mcp__murmur__send") {
+		t.Fatalf("settings before btw:\n%s", before)
+	}
+	_ = os.WriteFile(path, []byte(before), 0o644)
+	perms := func() protocol.Check {
+		checks := (Claude{}).Checks()
+		return checks[slices.IndexFunc(checks, func(c protocol.Check) bool { return c.Name == "Permissions" })]
+	}
+	if c := perms(); !(Claude{}).Connected() || !(Claude{}).Holds() || !c.OK || !strings.Contains(c.Detail, "btw from the next setup") {
+		t.Fatalf("before btw: connected %v, %+v", (Claude{}).Connected(), c)
+	}
+	if err := EditSettings(path, "/opt/murmur", true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) == before || !strings.Contains(string(b), `"mcp__murmur__btw"`) {
+		t.Fatalf("set up again:\n%s", b)
+	}
+	if c := perms(); !c.OK || c.Detail != "who, send, btw allowed" {
+		t.Fatalf("set up again: %+v", c)
+	}
+	// without send, or with no permission of murmur's, they are missing
+	_ = os.WriteFile(path, []byte(strings.Replace(before, ",\n      \"mcp__murmur__send\"", "", 1)), 0o644)
+	if c := perms(); c.OK {
+		t.Fatalf("who only: %+v", c)
+	}
+	if c := permsCheck(nil); c.OK {
+		t.Fatalf("none: %+v", c)
+	}
+	// a laptop whose person took the hooks out by hand, and left who and send: uninstall still finds them
+	_ = os.WriteFile(path, []byte(`{"permissions": {"allow": ["Bash(ls:*)", "mcp__murmur__who", "mcp__murmur__send"]}}`), 0o644)
+	if !(Claude{}).Holds() {
+		t.Fatal("permissions without hooks: nothing to uninstall")
+	}
+	if err := EditSettings(path, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "murmur") || !strings.Contains(string(b), "Bash(ls:*)") {
+		t.Fatalf("after uninstall:\n%s", b)
+	}
+}
+
+// A session's procStart, as Claude Code records it, is its process's start: a PID another process has now started at
+// another time, and one no process has, aren't the session's. A procStart murmur can't read says nothing.
+func TestSameStart(t *testing.T) {
+	var c harness.StartChecker = Claude{}
+	pid := os.Getpid()
+	at := harness.StartedAt(pid).UTC()
+	gone := exec.Command("/usr/bin/true")
+	if err := gone.Run(); err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range []struct {
+		pid       int
+		procStart string
+		want      bool
+	}{
+		{pid, at.Format(lstart), true},
+		{pid, " " + at.Format("Mon Jan _2 15:04:05 2006") + "  ", true},
+		{pid, at.Add(-time.Hour).Format(lstart), false},
+		{pid, at.Add(3 * time.Second).Format(lstart), false},
+		{gone.Process.Pid, at.Format(lstart), false},
+		{pid, "1", true},
+		{pid, "", true},
+	} {
+		if got := c.SameStart(x.pid, x.procStart); got != x.want {
+			t.Errorf("pid %d, procStart %q: %v", x.pid, x.procStart, got)
+		}
 	}
 }

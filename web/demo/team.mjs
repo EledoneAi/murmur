@@ -102,7 +102,8 @@ export function adminSettings() {
     downloads_per_hour: 120, ignored_paths: 'traces/**\n*.lock', update_policy: 'auto', min_version: '1.0.0', release_check: true,
     agreements: 'Before you change a file another agent changes, message that agent and agree on who does what.\nAsk a person only for decisions, with options.',
     announce_hours: 24, chat_webhook: 'https://chat.googleapis.com/v1/spaces/AAAA/messages', chat_kind: 'google-chat',
-    wait_ping_minutes: 15, work_start: 9, work_end: 19, time_zone: 'Europe/Paris', weekdays: true, weekly_report: true, check_hours: 24 },
+    wait_ping_minutes: 15, work_start: 9, work_end: 19, time_zone: 'Europe/Paris', weekdays: true, weekly_report: true, check_hours: 24,
+    btw: true, btw_per_hour: 30 },
     github_secret_set: true, github_token_set: false, updated: iso(60 * 5), updated_by: 'alice' }
 }
 

@@ -13,6 +13,7 @@ import (
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/ipc"
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
@@ -36,6 +37,7 @@ type histLine struct {
 	Queued  *heldMsg       `json:"queued,omitempty"` // waiting for its session's next hook (Agent is the session key)
 	Took    *took          `json:"took,omitempty"`   // and taken, or dropped with its session
 	Failed  *failure       `json:"failed,omitempty"` // a message sent from here that failed
+	Aside   *aside         `json:"aside,omitempty"`  // a question by the way, as it stands now
 }
 
 // took is a message that left a session's queue.
@@ -48,6 +50,9 @@ func (d *Daemon) loadHistory() {
 	path := filepath.Join(config.Dir(), "history.jsonl")
 	if d.queued == nil {
 		d.queued = map[string][]heldMsg{}
+	}
+	if d.asides == nil {
+		d.asides = map[string]*aside{}
 	}
 	hooked := map[string]hookedSession{}
 	if f, err := os.Open(path); err == nil {
@@ -129,6 +134,9 @@ func (d *Daemon) loadHistory() {
 					delete(d.queued, h.Took.Key)
 				}
 			}
+			if h.Aside != nil {
+				d.asides[h.Aside.key()] = h.Aside
+			}
 		}
 		f.Close()
 	}
@@ -184,12 +192,16 @@ func (d *Daemon) loadHistory() {
 				_ = enc.Encode(histLine{Queued: &h})
 			}
 		}
+		for _, a := range d.asides {
+			_ = enc.Encode(histLine{Aside: a})
+		}
 		_ = os.Remove(path + ".tmp") // one an earlier crash left, maybe read-only
 		if os.WriteFile(path+".tmp", b.Bytes(), 0o600) == nil {
 			_ = os.Rename(path+".tmp", path)
 		}
 	}
 	d.hist = openHistory(path)
+	d.restartedLocked()
 	if d.sessions != nil { // what waited for a session that is gone leaves the queue in the history, once
 		for key := range d.queued {
 			if d.sessions[key] == nil {
@@ -201,7 +213,7 @@ func (d *Daemon) loadHistory() {
 
 // pruneLocked keeps what the daemon remembers about messages to those the history keeps: which it has seen, which
 // it handed over, which this person archived, and the verdicts on held ones. It also drops notes held for longer
-// than a day, and failures of a day ago.
+// than a day, failures of a day ago, and questions by the way that haven't changed for a day.
 // ponytail: a copy of a message the history no longer keeps can reach its agent once more. Copies come only from
 // their sender's outbox, which gives up after a day: only a laptop getting a thousand messages a day would see it.
 func (d *Daemon) pruneLocked() {
@@ -221,6 +233,9 @@ func (d *Daemon) pruneLocked() {
 	maps.DeleteFunc(d.done, func(k string, _ bool) bool { return gone(k) })
 	maps.DeleteFunc(d.handed, func(k string, _ bool) bool { return gone(k) })
 	maps.DeleteFunc(d.answers, func(k, _ string) bool { return gone(k) })
+	maps.DeleteFunc(d.asides, func(_ string, a *aside) bool { // one still asking fails first: btwTick
+		return a.State != ipc.AsideAsking && time.Since(time.UnixMilli(a.Last)) > asideTTL
+	})
 	for _, m := range []map[string][]heldMsg{d.held, d.queued} {
 		for k, q := range m {
 			if q = slices.DeleteFunc(q, func(h heldMsg) bool { return time.Since(h.At) > heldTTL }); len(q) > 0 {

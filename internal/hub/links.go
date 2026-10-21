@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,7 +71,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	hello.Version = protocol.Clean(protocol.Cut(hello.Version, 40), false)
 	l := &link{dev: dev.ID, email: user.Email, handle: user.Handle, version: hello.Version, out: conn.Out, roster: conn.Latest,
-		cancel: conn.Cancel}
+		cancel: conn.Cancel, btw: slices.Contains(hello.Can, protocol.CanBtw)}
 	h.attach(ctx, l, dev)
 	h.handle(l, hello)
 	start, reason := time.Now(), "closed by the hub"
@@ -209,6 +210,14 @@ func (h *Hub) handle(l *link, f protocol.Frame) {
 		if f.Report != nil {
 			go h.saveReport(l.dev, *f.Report)
 		}
+	case protocol.FrameBtw:
+		if f.Btw != nil {
+			h.ask(l, *f.Btw)
+		}
+	case protocol.FrameBtwAnswer:
+		if f.Btw != nil {
+			h.answered(l, *f.Btw)
+		}
 	case protocol.FrameDelivered:
 		// the recipient's laptop wrote that error: it reaches the sender's terminal and agent. Cleaned before the lock.
 		f.Err, f.Note = protocol.Clean(protocol.Cut(f.Err, 300), false), protocol.Clean(protocol.Cut(f.Note, 200), false)
@@ -239,20 +248,28 @@ func (h *Hub) saveReport(dev string, r protocol.Report) {
 }
 
 // welcomeLocked is what a laptop hears on connecting, and again whenever the team's settings change: who it is,
-// the team's version, and what the team asks of laptops.
+// the team's version, what the team asks of laptops, and whether the hub carries questions by the way, which the
+// team's admins can turn off.
 func (h *Hub) welcomeLocked(l *link) protocol.Frame {
 	set, name := h.settings, ""
 	if u := h.users[l.email]; u != nil {
 		name = u.Name
 	}
+	var can []string
+	if set.Btw {
+		can = []string{protocol.CanBtw}
+	}
 	return protocol.Frame{T: protocol.FrameWelcome, Version: h.cfg.Version, Me: &protocol.Person{Handle: l.handle, Name: name, Online: true,
 		Colour: h.coloursLocked()[l.email]},
-		Team: &protocol.Team{Updates: set.UpdatePolicy, MinVersion: set.MinVersion, CheckHours: set.CheckHours, Agreements: set.Agreements}}
+		Team: &protocol.Team{Updates: set.UpdatePolicy, MinVersion: set.MinVersion, CheckHours: set.CheckHours, Agreements: set.Agreements},
+		Can:  can}
 }
 
 // teamChangedLocked tells this instance's laptops the team's new settings, and lets go of those now older than the
-// oldest version the team accepts: they reconnect, are refused with the command to run, and update.
+// oldest version the team accepts: they reconnect, are refused with the command to run, and update. The roster goes
+// again too: it says which agents can be asked by the way.
 func (h *Hub) teamChangedLocked() {
+	h.markDirty()
 	for _, l := range h.links {
 		if !l.gone.IsZero() {
 			continue

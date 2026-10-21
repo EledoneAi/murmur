@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -116,8 +118,9 @@ func TestSetup(t *testing.T) {
 }
 
 // The plugin, run by Node as OpenCode's Bun would run it, with a fake murmur: the brief reaches the session's system
-// prompt and its subagents', an edit is turned back with murmur's reason, the tools speak for the session, and a
-// message murmur pushes prompts the session with its own agent.
+// prompt and its subagents', an edit is turned back with murmur's reason, the tools speak for the session, a btw whose
+// call is aborted stops murmur at once (the daemon then hands the answer to the agent as a message), and a message
+// murmur pushes prompts the session with its own agent.
 func TestPlugin(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -136,6 +139,10 @@ case "$3" in
 start) echo "the brief" ;;
 before-tool) case "$input" in *x.go*) echo "bob/b1 is also changing x.go" ;; esac ;;
 who) echo "alice, you" ;;
+btw) case "$input" in
+	*slow*) echo $$ > ` + filepath.Join(dir, "slow") + `; sleep 10; echo "too late" ;;
+	*) echo "On the login test." ;;
+	esac ;;
 esac
 `
 	exe := filepath.Join(dir, "murmur")
@@ -150,6 +157,9 @@ esac
 	var got struct {
 		First, System []string
 		Edit, Who     string
+		Btw           string
+		Aborted       string
+		AbortedIn     int
 		Sockets       int
 		Mode, Reply   string
 		Refused       string
@@ -165,21 +175,46 @@ esac
 		t.Fatalf("%v: %s", err, out)
 	}
 	if strings.Join(got.System, "|") != "the brief" || strings.Join(got.First, "|") != "the brief" || got.Edit != "bob/b1 is also changing x.go" ||
-		got.Who != "alice, you" || got.Sockets != 1 || got.Mode != "600" || got.Reply != "ok" ||
-		got.Refused != "error: session not found" {
+		got.Who != "alice, you" || got.Btw != "On the login test." || got.Sockets != 1 || got.Mode != "600" || got.Reply != "ok" ||
+		got.Refused != "error: session not found" || got.Aborted != "" || got.AbortedIn > 2000 {
 		t.Fatalf("got %+v", got)
+	}
+	slow, err := os.ReadFile(filepath.Join(dir, "slow"))
+	if pid, _ := strconv.Atoi(strings.TrimSpace(string(slow))); err != nil || pid == 0 || syscall.Kill(pid, 0) == nil {
+		t.Fatalf("the aborted btw's murmur %q still runs (%v)", slow, err)
 	}
 	if len(got.Prompts) != 1 || got.Prompts[0].Path.ID != "s1" || got.Prompts[0].Body.Agent != "plan" || got.Prompts[0].Body.Parts[0].Text != "[murmur] bob: hi, café" {
 		t.Fatalf("prompts: %+v", got.Prompts)
 	}
 	calls, _ := os.ReadFile(log)
 	for _, want := range []string{`hook opencode start {"session_id":"s1","cwd":"/work/app","pid":`, `hook opencode before-tool {"session_id":"s1"`,
-		`"tool":"edit","args":{"filePath":"/work/app/x.go"`, `tool opencode who {"session_id":"s1"`} {
+		`"tool":"edit","args":{"filePath":"/work/app/x.go"`, `tool opencode who {"session_id":"s1"`,
+		`tool opencode btw {"session_id":"s1","pid":`, `"to":"bob/b1","question":"what are you on?"}`} {
 		if !strings.Contains(string(calls), want) {
 			t.Errorf("murmur never got %s in:\n%s", want, calls)
 		}
 	}
 	if strings.Contains(string(calls), "hook opencode prompt") {
 		t.Errorf("a subagent's status reached murmur:\n%s", calls)
+	}
+}
+
+// A plugin an older version wrote, without btw, is murmur's: it counts as connected, so the daemon sets it up again
+// after the update, and the next setup writes this version's.
+func TestBeforeBtw(t *testing.T) {
+	t.Setenv("OPENCODE_CONFIG_DIR", t.TempDir())
+	t.Setenv("PATH", "")
+	old := strings.Replace(Source("/opt/murmur"), "murmur_btw", "murmur_old", 1)
+	_ = os.MkdirAll(filepath.Dir(pluginPath()), 0o755)
+	_ = os.WriteFile(pluginPath(), []byte(old), 0o644)
+	o := OpenCode{}
+	if !o.Connected() || !o.Checks()[0].OK {
+		t.Fatalf("before btw: %+v", o.Checks())
+	}
+	if c := o.Connect("/opt/murmur", nil); !c[0].OK || !strings.Contains(c[0].Detail, "btw") {
+		t.Fatalf("connect: %+v", c)
+	}
+	if b, _ := os.ReadFile(pluginPath()); !strings.Contains(string(b), "murmur_btw: {") || !strings.Contains(string(b), `tool("btw", ctx.sessionID, { to: args.to, question: args.question }, ctx.abort)`) {
+		t.Fatalf("set up again:\n%s", b)
 	}
 }

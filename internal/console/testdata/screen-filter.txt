@@ -1,15 +1,15 @@
  ╭─┬─╮                                                                                                        
  ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live  
                                                                                                               
- ◆ Needs you  3                                                                                               
+ ◆ Needs you  4                                                                                               
 ▌  A api-1a            approve running go test ./ocr/...                                      ━━╸───── 3:12   
+   C carol ↝ 9b        by the way “Does rerun.go still call the old certifier?”               ━─────── 1:30   
    D dave              asks you “ok to merge #1827 before v2?”                                ━─────── 1:05   
    B main-1 ┄⇢ 9b      held “Staging uses the shadow certifier too; keep the alias until Fr…” ╸─────── 0:40   
                                                                                                               
  Search   web · 2 people                                                                                   ≈  
  ╭──────● A web-4c    feat/search-ui          Search filters and empty states                 ·▪▪▪▪··▪▪▪·▪    
  ╰──────● C web-2     feat/search-api         Search endpoint pagination                      ››▪▪▪··▪▪››▪    
-                                                                                                              
                                                                                                               
                                                                                                               
                                                                                                               

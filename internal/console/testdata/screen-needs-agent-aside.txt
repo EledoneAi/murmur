@@ -1,0 +1,32 @@
+ ╭─┬─╮                                                                                                        
+ ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live  
+                                                                                                              
+ ◆ Needs you  6                                                                                               
+   A api-1a             approve running go test ./ocr/...                                     ━━╸───── 3:12   
+   C carol ↝ 9b         by the way “Does rerun.go still call the old certifier?”              ━─────── 1:30   
+   D dave               asks you “ok to merge #1827 before v2?”                               ━─────── 1:05   
+▌  B main-1 ↝ 9b        by the way “Which config keys does the rerun read? I'm checking eac…” ╸─────── 0:50   
+▌                       ↳ “billing.rerun.enabled, billing.retry_limit and b…”  y read  x drop                 
+   B main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until F…” ╸─────── 0:40   
+   D ingest-1 ↝ 2       by the way, cold “Does the API guide document the rerun queue's end…” ──────── 0:15   
+                                                                                                              
+ Billing   api · 3 people                                                          ≈ in tune on certifier.go  
+   ╭────◆ A api-1a     feat/billing-ocr ⟵ v2   approve running go test ./ocr/...              ━━╸───── 3:12   
+ ╭─┴─┬┄┄● A api-9b     feat/billing-v2²        Rerun billing on staging                       ›▪·›››⇢›·▪››    
+ │   ╰┄┄● B main-1     main                    Review the billing config                      ·▪···∿······    
+ ╰──────◇ C billing-2  feat/billing-certifier  waiting for carol                              ━━━━━━━─ 8:40   
+                                                                                                              
+ Queue v2   data ⊕ docs · 2 people                                                                         ≈  
+ ╭┄┄┄┄┄┄○ A docs-2     main                    Proofread the API guide                        idle 3h         
+ ╰┄┄┄┄┄┄● D ingest-1   queue-v2                looping? the same command again and again      ››››·›››››››    
+                                                                                                              
+ Search   web · 2 people                                                                                   ≈  
+ ╭──────● A web-4c     feat/search-ui          Search filters and empty states                ·▪▪▪▪··▪▪▪·▪    
+ ╰──────● C web-2      feat/search-api         Search endpoint pagination                     ››▪▪▪··▪▪››▪    
+                                                                                                              
+ Not in touch                                                                                × 1 out of tune  
+        ● A infra-3    chore/tf-providers      Upgrade the Terraform providers                ··▪›··▪››··›    
+        ● A notes      ⌂ notes                 Draft the weekly plan                          ···▪··▪∿···▪    
+                                                                                                              
+                                                                                                              
+ ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute  g terminal  o open #1822                 ? keys  

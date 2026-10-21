@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -33,5 +34,18 @@ func TestClean(t *testing.T) {
 		if got := Clean(c.in, c.lines); got != c.want {
 			t.Errorf("Clean(%q, %v) = %q, want %q", c.in, c.lines, got, c.want)
 		}
+	}
+}
+
+// A message's footer has its agent answer the sender with send. A late answer by the way names as its sender the agent
+// asked, which never saw the question: it gets no such footer, and says itself how to follow up.
+func TestPromptLateBtw(t *testing.T) {
+	m := Msg{ID: "m1", From: "bob/api-9a", Text: "Is the invoicer live?"}
+	if p := Prompt(m); !strings.HasSuffix(p, "\n\n(From bob's agent api-9a, through murmur. Answer with the murmur `send` tool, to \"bob/api-9a\".)") {
+		t.Fatalf("a message: %q", p)
+	}
+	m.ID, m.Text = LateBtw+"q1", "Answer to your question by the way (\"live?\"):\nYes.\n\n(From a copy of bob/api-9a's conversation.)"
+	if p := Prompt(m); p != "[murmur] bob/api-9a: Answer to your question by the way (\"live?\"):\nYes.\n\n(From a copy of bob/api-9a's conversation.)" {
+		t.Fatalf("a late answer: %q", p)
 	}
 }

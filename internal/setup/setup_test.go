@@ -391,7 +391,8 @@ func TestUpdateFrom101(t *testing.T) {
 			t.Errorf("%s after the update:\n%s\nafter a fresh join:\n%s", f, got, want)
 		}
 	}
-	if !strings.Contains(read(old, "mcp"), exe+" mcp claude") || strings.Count(logged.String(), "set up again for 1.1.0: Claude Code") != 1 {
+	if !strings.Contains(read(old, "mcp"), exe+" mcp claude") || strings.Count(logged.String(), "set up again for 1.1.0: Claude Code") != 1 ||
+		!strings.Contains(read(old, "settings.json"), `"mcp__murmur__btw"`) { // 1.0.1 allowed who and send only
 		t.Fatalf("mcp %q, log %q", read(old, "mcp"), logged.String())
 	}
 

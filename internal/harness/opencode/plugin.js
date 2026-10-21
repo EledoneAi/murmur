@@ -1,7 +1,7 @@
 // murmur's plugin for OpenCode. murmur join writes it and murmur uninstall removes it; edits here don't last.
 // It tells murmur when a session starts, works, waits for its person and ends, asks murmur before each tool call
-// (an edit of a file another agent changes is turned back once), gives the agent murmur's who and send tools, and
-// hands a session the messages murmur sends to the socket it listens on.
+// (an edit of a file another agent changes is turned back once), gives the agent murmur's who, send and btw tools,
+// and hands a session the messages murmur sends to the socket it listens on.
 import { spawn } from "node:child_process"
 import { createServer } from "node:net"
 import { chmodSync, rmSync } from "node:fs"
@@ -11,20 +11,30 @@ const MURMUR = "__MURMUR__"
 const SOCKETS = "__SOCKETS__"
 
 // run runs murmur with these arguments and input as JSON on its stdin, and resolves to what it prints. It never
-// fails: a murmur that doesn't answer must not hold a session up.
-function run(args, input) {
+// fails: a murmur that doesn't answer must not hold a session up. Once signal aborts (its person stopped the agent),
+// murmur is stopped and it resolves at once: a btw that stops waiting so has its answer come as a message instead.
+function run(args, input, signal) {
   return new Promise((resolve) => {
     let out = ""
     let child
+    if (signal?.aborted) return resolve("")
     try {
       child = spawn(MURMUR, args, { stdio: ["pipe", "pipe", "ignore"] })
     } catch {
       resolve("")
       return
     }
+    const stop = () => {
+      child.kill()
+      resolve("")
+    }
+    signal?.addEventListener("abort", stop, { once: true })
     child.stdout.on("data", (d) => (out += d))
     child.on("error", () => resolve(""))
-    child.on("close", () => resolve(out.trim()))
+    child.on("close", () => {
+      signal?.removeEventListener("abort", stop)
+      resolve(out.trim())
+    })
     child.stdin.on("error", () => {})
     child.stdin.end(JSON.stringify(input))
   })
@@ -40,7 +50,8 @@ export const Murmur = async ({ client, directory }) => {
   const sock = `${SOCKETS}/opencode-${process.pid}-${randomBytes(4).toString("hex")}.sock`
   const hook = (event, id, more = {}) =>
     run(["hook", "opencode", event], { session_id: id, cwd: directory, pid: process.pid, socket: sock, title: title.get(id), ...more })
-  const tool = (name, id, more = {}) => run(["tool", "opencode", name], { session_id: top(id), pid: process.pid, ...more })
+  const tool = (name, id, more = {}, signal) =>
+    run(["tool", "opencode", name], { session_id: top(id), pid: process.pid, ...more }, signal)
 
   // murmur ends its side once the message is written, and waits for the answer
   const server = createServer({ allowHalfOpen: true }, (conn) => {
@@ -135,6 +146,18 @@ export const Murmur = async ({ client, directory }) => {
           text: { type: "string", description: "the message; plain text" },
         },
         execute: async (args, ctx) => tool("send", ctx.sessionID, { to: args.to, text: args.text }),
+      },
+      murmur_btw: {
+        description:
+          'Ask a coding agent a quick question by the way (to: "bob/main-1"), without interrupting it: a copy of its conversation answers, ' +
+          "and the agent itself never sees the question. Use it to learn what another agent is doing, has found or knows. The answer comes back " +
+          "within a minute, or later as a [murmur] message when it takes longer (a teammate may approve answers first). Use murmur_send " +
+          "instead when the other agent must act on something or answer itself.",
+        args: {
+          to: { type: "string", description: "person/agent: the agent to ask" },
+          question: { type: "string", description: "the question; plain text" },
+        },
+        execute: async (args, ctx) => tool("btw", ctx.sessionID, { to: args.to, question: args.question }, ctx.abort),
       },
     },
   }

@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -12,8 +13,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
@@ -71,6 +74,59 @@ type Reader interface {
 	Open(s Session) (path string, read func(a *Activity) bool)
 }
 
+// Asker is a harness that can answer a question by the way from a throwaway copy of a session, which the session
+// never sees (Claude Code, which forks a conversation). The copy runs no tool, writes nothing the harness keeps,
+// and signs in as the session does. Ask returns once the copy has answered, failed, or ctx is done.
+type Asker interface {
+	Ask(ctx context.Context, s Session, q Question) (Answer, error)
+}
+
+// AskChecker is an Asker that can tell before a question comes that no copy can run on this laptop (Claude Code whose
+// managed settings turn hooks off): CanAsk says why, or nil. It answers from what it read lately, quickly: the daemon
+// asks whenever it tells the team which agents can be asked.
+type AskChecker interface {
+	CanAsk() error
+}
+
+// CopyChecker is an Asker that can tell a session it doesn't copy from what its Lister lists of it: one whose coding
+// tool is older than any version copies were checked with. CanCopy says why, in words its person can act on, or nil.
+// The daemon offers such a session to nobody, and runs no copy of it.
+type CopyChecker interface {
+	CanCopy(s Session) error
+}
+
+// CopySweeper is an Asker whose copies leave files while they run (Claude Code's: the copy's settings, which hold its
+// person's sign-in). SweepCopies removes those of copies that no longer run, as the daemon starts: a daemon that
+// stopped before its copies were done left them.
+type CopySweeper interface {
+	SweepCopies()
+}
+
+// Question is a question by the way, as the daemon hands it to a harness.
+type Question struct {
+	From string // who asks, as the copy is told: "alice", or "your person"
+	Text string
+	// State is what the session is doing now, in a few words, so the copy doesn't take its own unfinished last turn
+	// for a finished one: "in the middle of Running go", "waiting for its person", "idle for 3h".
+	State string
+	// Fork is the session id the copy runs under. The caller chooses it before the copy starts, so it can tell the
+	// copy from a real session when the harness lists it.
+	Fork string
+	// Tokens is the size of the conversation the copy reads, in tokens, as the session's last request sent it
+	// (Activity.Tokens); 0 when it isn't known. The harness sizes the copy's spending cap from it.
+	Tokens int
+}
+
+// Answer is a copy's answer to a question by the way.
+type Answer struct {
+	Text   string
+	Tokens int // the conversation the copy read, in tokens: what it cost, beside its short answer
+	Took   time.Duration
+}
+
+// ErrSignIn is the error, wrapped, of a copy that could not sign in. Its message says what its person can do.
+var ErrSignIn = errors.New("the copy could not sign in")
+
 // Event kinds: what a hook reports, in murmur's words.
 const (
 	Start      = "start"       // a session starts, or resumes: murmur briefs it
@@ -106,12 +162,22 @@ type Event struct {
 // Key names a session across harnesses.
 func Key(harness, id string) string { return harness + "/" + id }
 
-// Session is one live session as its harness lists it.
+// StartChecker is a Lister whose sessions record when their process started (Session.Started) in a way murmur can
+// read: SameStart says whether that record may be the start of the process that has the PID now. A session that ended
+// without its harness noticing leaves its PID to whichever process the system gives it next, and the daemon trusts
+// nothing of that one (its program, its environment).
+type StartChecker interface {
+	SameStart(pid int, started string) bool
+}
+
+// Session is one live session as its harness lists it. Started, when its process started, tells a reused PID apart:
+// as the harness records it, in what a Lister lists; as StartTime read it when the daemon took the session in, in what
+// the daemon hands a harness, which an Asker compares with StartTime before it trusts the process with the PID.
 type Session struct {
 	Harness    string
 	ID         string
 	PID        int
-	Started    string // when its process started, as the harness records it: tells a reused PID apart
+	Started    string
 	Name       string // the harness's name for it; the daemon names the sessions of harnesses that don't
 	Cwd        string
 	Status     string // protocol.Status*
@@ -139,10 +205,27 @@ type Activity struct {
 	Kinds   string   // the kinds of the last tool calls, oldest first, one letter each (see protocol.Kind*)
 	Loop    bool     // the same command in most of the last tool calls
 	Context int      // how full the context window is, in percent
+	Tokens  int      // the size of the conversation as its last request sent it, in tokens
+	Said    string   // the first line of what the agent last said in its own words, for its own person only
 	Dirs    []string // folders the tool calls named by absolute path, the most recent last
+	// Turn is where the agent's turn stands, as its transcript says (Turn*), for a question by the way: a copy finds
+	// its own last turn cut short. TurnCall is the tool call it is about, in Doing's words: the one the agent waits
+	// for, or the one whose result it works on. Neither shows anywhere, so neither counts as a change.
+	Turn     string
+	TurnCall string
 
 	recent []uint64 // the last tool calls, for Loop: Call.Shell
 }
+
+// Where an agent's turn stands, as its transcript says (Activity.Turn). A harness writes an answer down once the
+// model has written it, and a prompt or a tool's result at once: what came last says what the model does now.
+const (
+	TurnUnknown = ""       // the transcript doesn't say
+	TurnTool    = "tool"   // it called a tool, whose result hasn't come
+	TurnReply   = "reply"  // it writes its reply to a prompt: its person's, or a message handed to the session
+	TurnResult  = "result" // it works on what a tool returned
+	TurnEnded   = "ended"  // its last answer ended its turn, or its person stopped it
+)
 
 const (
 	maxKinds = 30  // tool calls in Kinds
@@ -311,6 +394,10 @@ func Quote(text string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// Relayed is text the hub or another laptop wrote, as murmur passes it on to an agent in a note of its own (why a
+// question by the way got no answer, where it stands): quoted, on one line, so it can't speak in murmur's voice.
+func Relayed(text string) string { return "relayed by murmur: " + strconv.Quote(text) }
 
 // ErrDev is a development build's refusal to touch a harness's own settings.
 var ErrDev = errors.New("development build")

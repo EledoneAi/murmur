@@ -18,10 +18,10 @@ import (
 // Edge cases: answers that come as a send stops waiting, connections that drop mid-send, requests no client should
 // make, history files a crash left behind, and text that tries to pass for something else.
 
-// eventually waits up to two seconds for ok.
+// eventually waits up to five seconds for ok: a copy answering by the way, under the race detector, can take a few.
 func eventually(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(2 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
+	for deadline := time.Now().Add(5 * time.Second); !ok(); time.Sleep(5 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
 		}

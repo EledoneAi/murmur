@@ -1,0 +1,32 @@
+ ╭─┬─╮
+ ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live
+
+ ◆ Needs you  4    ╭──────────────────────────────────────────────────────────────────────╮
+   A api-1a        │ › btw▏                             agents · people · files · actions │   ━━╸───── 3:12
+   C carol ↝ 9b    │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:30
+   D dave          │   ACTIONS                                                            │   ━─────── 1:05
+   B main-1 ┄⇢ 9b  │ ▌ Ask main-1 by the way; it won't see the question                 b │…” ╸─────── 0:40
+                   │                                                                      │
+ Billing   api · 3 │   TEAMMATES ASKING YOUR AGENTS BY THE WAY                            │e on certifier.go
+   ╭────◆ A api-1a │   Each answer waits for you to share it    now · btw-answers approve │   ━━╸───── 3:12
+ ╭─┴─┬┄┄● A api-9b │   Answers go out on their own                       btw-answers auto │   ›▪·›››⇢›·▪››
+▌│   ╰┄┄● B main-1 │   Teammates can't ask; you still can                 btw-answers off │   ·▪···∿······    
+▌│            ↳ Rea│                                                                      │                   
+ ╰──────◇ C billing│ ⏎ go   esc close                                                     │   ━━━━━━━─ 8:40
+                   ╰──────────────────────────────────────────────────────────────────────╯
+ Search   web · 2 people                                                                                   ≈
+ ╭──────● A web-4c     feat/search-ui          Search filters and empty states                ·▪▪▪▪··▪▪▪·▪
+ ╰──────● C web-2      feat/search-api         Search endpoint pagination                     ››▪▪▪··▪▪››▪
+
+ Not in touch                                                                                × 1 out of tune
+        ● A infra-3    chore/tf-providers      Upgrade the Terraform providers                ··▪›··▪››··›
+        ● A notes      ⌂ notes                 Draft the weekly plan                          ···▪··▪∿···▪
+        ○ A api-2f     feat/billing-v2         Billing fixtures for the rerun                 idle 40m
+        ● D ingest-1   queue-v2                looping? the same command again and again      ››››·›››››››
+        ○ D infra-1    pilot/terraform-6       Pilot Terraform 6                              idle 1h
+            × main.tf  infra-3 and infra-1 both change it, never talked  introduce
+
+ · 1 quiet agent, folded
+
+
+ ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute                                           ? keys

@@ -50,6 +50,8 @@ type model struct {
 	g    glyphs
 	demo bool // a made-up team, no daemon: murmur demo, the README's recording and the golden tests
 
+	heard func(ipc.Request) // in the demo, hears what the console asks of the daemon: for the tests
+
 	scope     scope
 	scopeSet  bool            // t, m or a chose the scope; else the team's size does
 	selected  string          // the selected item's key, which stays put while the board changes
@@ -63,6 +65,7 @@ type model struct {
 	sheet     *sheet          // the open sheet, over everything
 	filter    string          // what the board is filtered by
 	pinned    map[string]bool // constellations pinned to the top
+	read      map[string]bool // held answers by the way, by id, that have been on screen whole: y shares only those
 	compact   bool            // no blank line between constellations
 	lastClick struct {
 		at  time.Time
@@ -99,7 +102,8 @@ type boardFor struct {
 
 func newModel() *model {
 	m := &model{st: newStyles(pickTheme(true)), g: pickGlyphs(), folded: map[string]bool{}, unfolded: map[string]bool{}, pinned: map[string]bool{},
-		resending: map[string]bool{}, clock: time.Now, sub: make(chan tea.Msg, 16), themeFixed: os.Getenv("MURMUR_THEME") != "", motion: motionOn()}
+		resending: map[string]bool{}, read: map[string]bool{}, clock: time.Now, sub: make(chan tea.Msg, 16), themeFixed: os.Getenv("MURMUR_THEME") != "",
+		motion: motionOn()}
 	m.exe = config.Exe()
 	m.bin, _ = os.Stat(m.exe)
 	if from := os.Getenv("MURMUR_UPDATED_FROM"); from != "" {
@@ -192,9 +196,9 @@ func (m *model) setSnap(s ipc.Snapshot) {
 	m.gen++
 }
 
-// cleanSnap makes the messages a snapshot holds safe to print, and keeps only web links to open. The daemon cleans
-// what other laptops send, not what this laptop's own agents send: a message one sends waits in the outbox, or
-// fails, as the agent wrote it, and the note saying it failed quotes its address.
+// cleanSnap makes the messages and questions by the way a snapshot holds safe to print, and keeps only web links to
+// open. The daemon cleans what other laptops send, not what this laptop's own agents send: a message one sends waits
+// in the outbox, or fails, as the agent wrote it, and the note saying it failed quotes its address.
 func cleanSnap(s ipc.Snapshot) ipc.Snapshot {
 	for _, msgs := range [][]protocol.Msg{s.Msgs, s.Outbox, s.Asks} {
 		for i := range msgs {
@@ -204,6 +208,9 @@ func cleanSnap(s ipc.Snapshot) ipc.Snapshot {
 	}
 	for id, why := range s.Failed {
 		s.Failed[id] = protocol.Clean(why, false)
+	}
+	for i := range s.Asides { // a question one of this laptop's agents asks by the way, to an address it wrote
+		s.Asides[i].Clean()
 	}
 	for i := range s.Mutes {
 		s.Mutes[i] = protocol.Clean(s.Mutes[i], false)
@@ -240,6 +247,9 @@ func (m *model) currentScope() scope {
 func (m *model) call(req ipc.Request, timeout time.Duration) (ipc.Reply, error) {
 	var r ipc.Reply
 	if m.demo {
+		if m.heard != nil {
+			m.heard(req)
+		}
 		return ipc.Reply{OK: true, Note: "delivered"}, nil
 	}
 	err := ipc.Call(req, &r, timeout)
@@ -364,6 +374,8 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.openThread(b, false)
 	case "w", "r":
 		return m, m.openThread(b, true)
+	case "b":
+		return m, m.ask(b)
 	case "t", "m", "a": // the scope tabs; in a large team m is Near me
 		for _, sc := range scopes(len(b.colours)) {
 			if scopeKeys[sc] == k.String() {
@@ -429,8 +441,15 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, m.introduce(d)
 		}
 	case "y":
-		if n, ok := m.selectedNeed(b); ok && n.kind == needHeld {
-			return m, m.do(ipc.Request{Op: "approve", ID: n.msg.ID}, "Let through to "+n.to)
+		if n, ok := m.selectedNeed(b); ok {
+			switch n.kind {
+			case needHeld:
+				return m, m.do(ipc.Request{Op: "approve", ID: n.msg.ID}, "Let through to "+n.to)
+			case needAsideHeld:
+				return m, m.share(b, n)
+			case needAsideCold:
+				return m, m.settle(n.btw, true)
+			}
 		}
 	case "x":
 		if n, ok := m.selectedNeed(b); ok {
@@ -439,6 +458,8 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, m.do(ipc.Request{Op: "decline", ID: n.msg.ID}, "Dropped; "+n.who+" is told")
 			case needQuestion, needFailed:
 				return m, m.do(ipc.Request{Op: "done", ID: n.msg.ID}, "Marked done")
+			case needAsideHeld, needAsideCold:
+				return m, m.settle(n.btw, false)
 			}
 		}
 	}
@@ -835,13 +856,7 @@ func (m *model) threadView(b *board, head []string) (string, []line) {
 	lines = append(lines, line{text: pad("", m.w)})
 	room := m.h - len(lines) - 3
 	lines = append(lines, m.threadScreen(b, room)...)
-	keys := []string{"w", "write", "⇥", "recipient", "[ ]", "constellation", "x", "done", "esc", "back"}
-	if m.thread.writing {
-		keys = []string{"⏎", "send", "⇥", "recipient", "esc", "stop writing"}
-	} else if _, held := m.threadMsgs(); len(held) > 0 { // x drops the held message; its line shows y and x
-		keys = []string{"y", "let through", "x", "drop", "w", "write", "⇥", "recipient", "[ ]", "constellation", "esc", "back"}
-	}
-	footer := m.footer(keys, hotIn(lines))
+	footer := m.footer(m.threadKeys(b), hotIn(lines))
 	lines = append(lines, line{text: m.outcomeLine()}, line{text: pad("", m.w)}, line{text: footer})
 	lines = lines[:min(len(lines), m.h)]
 	var out []string
@@ -849,6 +864,39 @@ func (m *model) threadView(b *board, head []string) (string, []line) {
 		out = append(out, l.text)
 	}
 	return strings.Join(out, "\n"), lines
+}
+
+// threadKeys are the keys that act in the thread, in pairs of a key and a word: the composer's while it has them;
+// else y and x when something in it waits for you, the newest first, and b when one of its agents can be asked by the
+// way.
+func (m *model) threadKeys(b *board) []string {
+	t := m.thread
+	switch {
+	case t.writing && t.aside:
+		return []string{"⏎", "ask", "⇥", "recipient", "esc", "stop asking"}
+	case t.writing:
+		return []string{"⏎", "send", "⇥", "recipient", "esc", "stop writing"}
+	}
+	var keys []string
+	msgs, held := m.threadMsgs()
+	switch a, x := m.waiting(msgs, held, m.threadAsides()); { // x settles what waits; its line shows y and x
+	case a != nil && a.State == ipc.AsideHeld:
+		keys = append(keys, "y", m.shareWord(*a), "x", "drop")
+	case a != nil:
+		keys = append(keys, "y", "go", "x", "decline")
+	case x != nil:
+		keys = append(keys, "y", "let through", "x", "drop")
+	}
+	waiting := len(keys) > 0
+	keys = append(keys, "w", "write")
+	if m.canAskHere(b) {
+		keys = append(keys, "b", "by the way")
+	}
+	keys = append(keys, "⇥", "recipient", "[ ]", "constellation")
+	if !waiting { // x marks the conversation done
+		keys = append(keys, "x", "done")
+	}
+	return append(keys, "esc", "back")
 }
 
 // withInspector lays the inspector beside a narrowed board, or over the whole body on a narrow terminal.
@@ -890,7 +938,7 @@ func (m *model) withInspector(b *board, pinned, body []line, room int) []line {
 
 // footerKeys are the keys that act where the focus is, in pairs of a key and a word: what only this selection does
 // first, then what any agent's row does. The footer leaves out those the screen shows already: the scope tabs, n
-// beside Needs you, i on a dissonance, the inspector's actions, a held message's y and x.
+// beside Needs you, i on a dissonance, the inspector's actions, a held message's y and x, an aside's.
 func (m *model) footerKeys(b *board) []string {
 	if m.typing {
 		return []string{"/", m.filter + "▏", "⏎", "keep", "esc", "clear"}
@@ -935,6 +983,10 @@ func (m *model) footerKeys(b *board) []string {
 		keys = append(keys, "y", "let through", "x", "drop")
 	case isNeed && n.kind == needQuestion:
 		keys = append(keys, "r", "reply", "x", "done")
+	case isNeed && n.kind == needAsideHeld:
+		keys = append(keys, "y", m.shareWord(n.btw), "x", "drop")
+	case isNeed && n.kind == needAsideCold:
+		keys = append(keys, "y", "go", "x", "decline")
 	case r != nil && r.mine && r.st == needsYou:
 		keys = append(keys, "g", "terminal")
 	case r != nil && r.st == waitsOwner:
@@ -949,6 +1001,9 @@ func (m *model) footerKeys(b *board) []string {
 	keys = append(keys, "⏎", "thread", "␣", inspect)
 	if !isNeed || n.kind != needQuestion {
 		keys = append(keys, "w", "write")
+	}
+	if b.askable(r) {
+		keys = append(keys, "b", "by the way")
 	}
 	keys = append(keys, "c", "copy", "z", "mute")
 	if r.mine && r.st != needsYou {

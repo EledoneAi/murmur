@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"image/color"
 	"os"
 	"strings"
@@ -109,9 +110,9 @@ func (m *model) noticeChanges(old ipc.Snapshot, before []need) tea.Cmd {
 		seen[x.ID] = true
 	}
 	var cmds []tea.Cmd
-	sent := false
+	sent, delivered := false, m.board().delivered
 	for _, x := range append(now.Msgs, now.Asks...) {
-		if seen[x.ID] {
+		if seen[x.ID] || delivered[x.ID] {
 			continue
 		}
 		sent = true
@@ -136,6 +137,7 @@ func (m *model) noticeChanges(old ipc.Snapshot, before []need) tea.Cmd {
 			cmds = append(cmds, notify(needSentence(n)))
 		}
 	}
+	cmds = append(cmds, m.noticeAnswers(old))
 	return tea.Batch(cmds...)
 }
 
@@ -154,6 +156,11 @@ func needSentence(n need) string {
 		return n.who + " asks you: " + n.text
 	case needHeld:
 		return "a mute holds a message from " + n.who + " to " + n.to
+	case needAsideHeld:
+		return n.asker + " asked your " + agentName(n.to) + " by the way; the answer waits for you"
+	case needAsideCold:
+		return fmt.Sprintf("%s asked your %s by the way, idle long: its copy would read %s tokens, and waits for your go",
+			n.asker, agentName(n.to), tokens(n.btw.Cold))
 	}
 	return "not delivered to " + n.who + ": " + n.why
 }

@@ -32,6 +32,12 @@ const usage = `murmur: your team's coding agents, in one console.
                         and message each other, whatever coding tool each runs in; join moves it to a team
   murmur who            list people and their agents
   murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
+  murmur btw AGENT QUESTION
+                        ask an agent (bob/main-1, or your own main-1) something by the way: a copy of its
+                        conversation answers, and the agent never sees the question
+  murmur btw-answers [approve|auto|off]
+                        how teammates' questions to your agents are answered: each answer waits for you to share
+                        it, answers go on their own, or teammates can't ask
   murmur mute WHO [30m|2h|tomorrow]
                         hold messages for your agents from a person (bob), an agent (bob/main-1), repo:acme/api,
                         branch:feat/x or group:bob/main-1 (that agent and those it talks with); held ones wait in
@@ -49,11 +55,12 @@ const usage = `murmur: your team's coding agents, in one console.
   murmur uninstall      undo join and sign this laptop out (asks first; --yes skips the question)
 `
 
-// options lists what each command accepts. send, hook, tool, mute and unmute take free text, so they are not checked.
+// options lists what each command accepts. send, btw, hook, tool, mute and unmute take free text, so they are not
+// checked.
 var options = map[string][]string{
 	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "solo": nil, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
-	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "mutes": nil,
+	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "mutes": nil, "btw-answers": {"approve", "auto", "off"},
 }
 
 // harnesses are the names of the coding tools murmur connects: the MCP server is started for one of them.
@@ -133,21 +140,18 @@ func main() {
 	case "daemon":
 		err = daemon.Run()
 	case "hook":
-		if len(args) > 2 {
-			setup.Hook(args[1], args[2])
-		} else {
-			// an older version's hook, which names no harness: it answers nothing, but this version's daemon, once it
-			// runs, sets the laptop's hooks up again
-			_ = ipc.EnsureDaemon()
-		}
+		hook(args)
 	case "mcp":
+		if inCopy() { // no MCP server of murmur's speaks for a copy
+			break
+		}
 		name := ""
 		if len(args) > 1 {
 			name = args[1]
 		}
 		err = mcp.Serve(name)
 	case "tool":
-		if len(args) > 2 {
+		if len(args) > 2 && !inCopy() {
 			mcp.Tool(args[1], args[2], os.Stdin)
 		}
 	case "who":
@@ -169,6 +173,16 @@ func main() {
 		if err == nil {
 			fmt.Println("Sent to " + args[1] + ". " + note)
 		}
+	case "btw":
+		var to, question, answer, note string
+		if to, question, err = btwArgs(args); err != nil {
+			break
+		}
+		if answer, note, err = ipc.Btw(to, question); err == nil {
+			fmt.Println(btwSays(to, answer, note))
+		}
+	case "btw-answers":
+		err = setBtwAnswers(args[1:])
 	case "status":
 		if slices.Contains(args, "--json") {
 			err = console.Status(os.Stdout)
@@ -297,5 +311,65 @@ func setNotifications(args []string) error {
 	} else {
 		fmt.Println("This laptop shows a desktop notification when someone messages you, and when a mute holds a message for your agents.")
 	}
+	return nil
+}
+
+// hookFor answers a coding tool's hook; tests replace it.
+var hookFor = setup.Hook
+
+// inCopy says this process runs for a copy of a session, which murmur runs to answer a question by the way: no
+// session of murmur's, whatever settings it loaded. Its hooks, MCP server and tools do nothing.
+func inCopy() bool { return os.Getenv("MURMUR_BTW") != "" }
+
+// hook answers a coding tool's hook, except a copy's.
+func hook(args []string) {
+	switch {
+	case inCopy():
+	case len(args) > 2:
+		hookFor(args[1], args[2])
+	default:
+		// an older version's hook, which names no harness: it answers nothing, but this version's daemon, once it
+		// runs, sets the laptop's hooks up again
+		_ = ipc.EnsureDaemon()
+	}
+}
+
+// btwArgs reads murmur btw AGENT QUESTION: the question may come in one argument or several.
+func btwArgs(args []string) (to, question string, err error) {
+	if len(args) < 3 || strings.TrimSpace(args[1]) == "" || strings.TrimSpace(strings.Join(args[2:], "")) == "" {
+		return "", "", errors.New("usage: murmur btw AGENT QUESTION, like murmur btw bob/main-1 what are you stuck on?")
+	}
+	return args[1], strings.Join(args[2:], " "), nil
+}
+
+// btwSays is what murmur btw prints: the answer, or where the question stands when the answer is late.
+func btwSays(to, answer, note string) string {
+	if answer != "" {
+		return answer
+	}
+	return fmt.Sprintf("No answer from %s yet (%s). The console (murmur) shows it when it comes.", to, note)
+}
+
+// btwAnswersSaid says what each setting for teammates' questions by the way means.
+var btwAnswersSaid = map[string]string{
+	"approve": "Teammates can ask your agents by the way. Each answer waits for you to share it, in the console.",
+	"auto": "Teammates can ask your agents by the way, and the answers go to them on their own. A question to an agent " +
+		"idle for over an hour still waits for you.",
+	"off": "Teammates can't ask your agents by the way. You still can.",
+}
+
+// setBtwAnswers shows or changes how this laptop answers teammates' questions by the way.
+func setBtwAnswers(args []string) error {
+	setting := config.Load().BtwAnswers
+	if len(args) == 1 {
+		if err := ipc.SetBtwAnswers(args[0]); err != nil {
+			return err
+		}
+		setting = args[0]
+	}
+	if setting == "" {
+		setting = "approve"
+	}
+	fmt.Println(btwAnswersSaid[setting])
 	return nil
 }

@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -104,12 +105,12 @@ func TestKinds(t *testing.T) {
 		{"Read", `{"file_path":"a.go"}`}, {"Grep", `{"pattern":"x"}`}, {"Glob", `{"pattern":"*"}`}, {"LS", `{"path":"."}`},
 		{"Edit", `{}`}, {"MultiEdit", `{}`}, {"Write", `{}`}, {"NotebookEdit", `{}`}, {"Bash", `{"command":"ls"}`},
 		{"WebFetch", `{}`}, {"WebSearch", `{}`}, {"Task", `{}`}, {"Agent", `{}`}, {"mcp__murmur__send", `{}`},
-		{"TodoWrite", `{}`}, {"mcp__claude_ai_Notion__notion-fetch", `{}`}, {"mcp__murmur__who", `{}`},
+		{"mcp__murmur__btw", `{}`}, {"TodoWrite", `{}`}, {"mcp__claude_ai_Notion__notion-fetch", `{}`}, {"mcp__murmur__who", `{}`},
 	} {
 		lines = append(lines, answerLine(toolBlock(c.tool, c.in), 1000))
 	}
 	appendLines(t, path, lines...)
-	if !s.Read() || s.Kinds != "rrrreeeexwwssm" {
+	if !s.Read() || s.Kinds != "rrrreeeexwwssmm" {
 		t.Fatalf("kinds %q", s.Kinds)
 	}
 	lines = lines[:0]
@@ -174,6 +175,42 @@ func TestContext(t *testing.T) {
 	appendLines(t, path, `{"parentUuid":null,"logicalParentUuid":"l","isSidechain":false,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compactMetadata":{"trigger":"manual","preTokens":400000,"postTokens":20000}}`+"\n")
 	if s.Read(); s.Context != 2 {
 		t.Fatalf("after compacting: %d%%", s.Context)
+	}
+}
+
+// Tokens is the size of the conversation as its last request sent it, which alone is no change; Said is the first line
+// of what the agent last said in its own words, clean and short.
+func TestTokensAndSaid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	s := &reading{Transcript: &Transcript{Path: path}}
+	text := func(s string) string {
+		b, _ := json.Marshal(map[string]string{"type": "text", "text": s})
+		return string(b)
+	}
+	appendLines(t, path, answerLine(text("\n  \nDone: the billing rerun passes.\nNext I'll open the PR."), 50_000))
+	if !s.Read() || s.Said != "Done: the billing rerun passes." || s.Tokens != 50_000 {
+		t.Fatalf("said %q, tokens %d", s.Said, s.Tokens)
+	}
+	appendLines(t, path, answerLine(text("Done: the billing rerun passes."), 50_400))
+	if s.Read() || s.Tokens != 50_400 {
+		t.Fatalf("only the tokens changed, yet changed; tokens %d", s.Tokens)
+	}
+	sidechain := strings.Replace(answerLine(text("A subagent's report"), 190_000), `"isSidechain":false`, `"isSidechain":true`, 1)
+	synthetic := `{"message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"No response requested."}],` +
+		`"usage":{"input_tokens":0,"output_tokens":0}},"type":"assistant"}` + "\n"
+	appendLines(t, path, answerLine(toolBlock("Bash", `{"command":"go test ./..."}`), 60_000), sidechain, synthetic,
+		answerLine(text("  \n\t"), 60_000))
+	if s.Read(); s.Said != "Done: the billing rerun passes." || s.Tokens != 60_000 {
+		t.Fatalf("after a tool call, a subagent's text, Claude Code's note and an empty text: said %q, tokens %d", s.Said, s.Tokens)
+	}
+	appendLines(t, path, answerLine(text("\x1b[31mRed\x1b[0m\ttext "+strings.Repeat("é", 300)+"\nmore"), 61_000))
+	if !s.Read() || s.Said != "Red text "+strings.Repeat("é", 191) {
+		t.Fatalf("said %q", s.Said)
+	}
+	appendLines(t, path, `{"parentUuid":null,"isSidechain":false,"type":"system","subtype":"compact_boundary",`+
+		`"compactMetadata":{"trigger":"auto","preTokens":61000,"postTokens":20000}}`+"\n")
+	if s.Read(); s.Tokens != 20_000 {
+		t.Fatalf("after compacting: tokens %d", s.Tokens)
 	}
 }
 

@@ -25,7 +25,7 @@ func mcpArgs(exe, name string) map[string]any {
 }
 
 // Codex: hooks in $CODEX_HOME/hooks.json, which Codex runs once its person trusts them; the MCP server in a block of
-// murmur's own in config.toml, its two tools approved. Its hooks fire in a shared background server rather than the
+// murmur's own in config.toml, its tools approved. Its hooks fire in a shared background server rather than the
 // terminal's process, and its edits are patches.
 var Codex = &Spec{
 	name: "codex", title: "Codex", command: "codex", dirVar: "CODEX_HOME", dir: homeDir("CODEX_HOME", ".codex"),
@@ -63,9 +63,9 @@ var Gemini = &Spec{
 	mcpFile: "settings.json",
 	mcpEntry: func(exe string) map[string]any {
 		e := mcpArgs(exe, "gemini")
-		// its two tools run without a confirmation. Gemini CLI merges a project's mcpServers over the person's by
-		// name, whole, so a project's own server called murmur doesn't get this trust
-		e["trust"], e["includeTools"] = true, []string{"who", "send"}
+		// its tools run without a confirmation. Gemini CLI merges a project's mcpServers over the person's by name,
+		// whole, so a project's own server called murmur doesn't get this trust
+		e["trust"], e["includeTools"] = true, []string{"who", "send", "btw"}
 		return e
 	},
 	minVersion: "0.26.0", // hooks on by default
@@ -97,14 +97,14 @@ func geminiTrust(s *Spec) []protocol.Check {
 // Copilot CLI: a hooks file of murmur's own in ~/.copilot/hooks. Its PascalCase events take Claude Code's input and
 // answers; it has no PascalCase notification or end, so those two are camelCase. It drops what a prompt hook prints,
 // so messages leave after a tool call or at the end of a turn. It asks before every MCP tool and remembers an answer
-// per folder only, so the before-tool hook, on edits and murmur's two tools, allows those two.
+// per folder only, so the before-tool hook, on edits and murmur's tools, allows murmur's.
 var Copilot = &Spec{
 	name: "copilot", title: "Copilot CLI", command: "copilot", dirVar: "COPILOT_HOME", dir: homeDir("COPILOT_HOME", ".copilot"),
 	hooksFile: filepath.Join("hooks", "murmur.json"), layout: ownFile, timeoutUnit: 1, dialect: copilotStyle,
 	hooks: []hook{
 		{event: "SessionStart", kind: harness.Start},
 		{event: "UserPromptSubmit", kind: harness.Prompt},
-		{event: "PreToolUse", kind: harness.BeforeTool, matcher: "Edit|Write|MultiEdit|edit|create|apply_patch|str_replace_editor|murmur-who|murmur-send"},
+		{event: "PreToolUse", kind: harness.BeforeTool, matcher: "Edit|Write|MultiEdit|edit|create|apply_patch|str_replace_editor|murmur-who|murmur-send|murmur-btw"},
 		{event: "PostToolUse", kind: harness.AfterTool, carries: true},
 		{event: "Stop", kind: harness.Stop, carries: true},
 		{event: "notification", kind: harness.Needs},
@@ -118,11 +118,11 @@ var Copilot = &Spec{
 		return e
 	},
 	sessionVar: "COPILOT_AGENT_SESSION_ID",
-	allowTools: []string{"murmur-who", "murmur-send"},
+	allowTools: []string{"murmur-who", "murmur-send", "murmur-btw"},
 	minVersion: "1.0.72", // PascalCase events with Claude Code's input (1.0.21), stop_hook_active (1.0.72)
 }
 
-// Cursor: hooks in ~/.cursor/hooks.json, the MCP server in mcp.json, and murmur's two tools in the allowlists of the
+// Cursor: hooks in ~/.cursor/hooks.json, the MCP server in mcp.json, and murmur's tools in the allowlists of the
 // editor and the CLI where the person keeps one. It reads nothing a prompt hook prints but whether to go on, and its
 // start hook's context misses the first message in some windows: messages leave after a tool call or at the end of
 // a turn. Its MCP servers run apart from its sessions. Cursor also runs the hooks in ~/.claude/settings.json; murmur's
@@ -143,7 +143,7 @@ var Cursor = &Spec{
 	apart:    true,
 	allow: []allowList{
 		// an MCP allowlist in permissions.json replaces the editor's own: murmur adds to one that is there
-		{file: "permissions.json", path: []string{"mcpAllowlist"}, entries: []string{"murmur:who", "murmur:send"}, ifList: true},
-		{file: "cli-config.json", path: []string{"permissions", "allow"}, entries: []string{"Mcp(murmur:who)", "Mcp(murmur:send)"}},
+		{file: "permissions.json", path: []string{"mcpAllowlist"}, entries: []string{"murmur:who", "murmur:send", "murmur:btw"}, ifList: true},
+		{file: "cli-config.json", path: []string{"permissions", "allow"}, entries: []string{"Mcp(murmur:who)", "Mcp(murmur:send)", "Mcp(murmur:btw)"}},
 	},
 }

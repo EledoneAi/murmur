@@ -10,12 +10,13 @@ import (
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/harness"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
 // Setup touches three things outside ~/.murmur, and uninstall removes exactly those:
 //   - three hooks in ~/.claude/settings.json: SessionStart starts the daemon and briefs the session, PreToolUse
 //     checks a file before an agent edits it, Notification reports "needs you"
-//   - permission for the two murmur tools in the same file, so agents can use them without a prompt
+//   - permission for murmur's tools in the same file, so agents can use them without a prompt
 //   - the murmur MCP server, registered with `claude mcp add --scope user`
 
 // hookArgs are what murmur's hook commands end with.
@@ -44,7 +45,11 @@ func hookGroup(ev, exe string) json.RawMessage {
 	return harness.Marshal(g)
 }
 
-var toolPermissions = []string{"mcp__murmur__who", "mcp__murmur__send"}
+var toolPermissions = []string{"mcp__murmur__who", "mcp__murmur__send", btwPermission}
+
+// btwPermission is the permission for the tool murmur added last. A settings.json set up before it lacks it until the
+// next setup, which the daemon makes after an update: doctor doesn't count it as missing.
+const btwPermission = "mcp__murmur__btw"
 
 // EditSettings adds (or with add=false removes) murmur's entries in Claude Code's settings.json. A hook of murmur's
 // is rewritten where it was. Removing touches no file that holds none of murmur's entries.
@@ -100,7 +105,7 @@ func EditSettings(path, exe string, add bool) error {
 		// Error, so the person has the file to fix either way
 		if !add {
 			return fmt.Errorf("%s isn't valid JSON, which Claude Code needs too: take out the hooks whose command runs "+
-				"murmur hook claude, and %s in permissions.allow, by hand", config.Tildify(path), strings.Join(toolPermissions, " and "))
+				"murmur hook claude, and %s in permissions.allow, by hand", config.Tildify(path), strings.Join(toolPermissions, ", "))
 		}
 		mine := map[string]any{}
 		for _, ev := range hookEvents {
@@ -114,11 +119,12 @@ func EditSettings(path, exe string, add bool) error {
 	return nil
 }
 
-// SetupState says whether settings.json holds murmur's hooks and tool permissions, and its crossSessionInbound.
-func SetupState(path string) (hooks, perms bool, inbound string) {
+// SetupState says whether settings.json holds murmur's hooks, which of murmur's tool permissions it holds, and its
+// crossSessionInbound.
+func SetupState(path string) (hooks bool, perms []string, inbound string) {
 	o, b, err := harness.ReadObject(path)
 	if err != nil || b == nil {
-		return false, false, ""
+		return false, nil, ""
 	}
 	hooks = true
 	for _, ev := range hookEvents {
@@ -128,9 +134,18 @@ func SetupState(path string) (hooks, perms bool, inbound string) {
 	}
 	var allow []string
 	_ = json.Unmarshal(o.Sub("permissions").Get("allow"), &allow)
-	perms = !slices.ContainsFunc(toolPermissions, func(p string) bool { return !slices.Contains(allow, p) })
+	perms = slices.DeleteFunc(slices.Clone(toolPermissions), func(p string) bool { return !slices.Contains(allow, p) })
 	_ = json.Unmarshal(o.Get("crossSessionInbound"), &inbound)
 	return hooks, perms, inbound
+}
+
+// permsCheck is doctor's check of the tool permissions settings.json holds. Only btw's missing is a settings.json an
+// older version set up, which the next setup completes.
+func permsCheck(perms []string) protocol.Check {
+	if len(perms) == len(toolPermissions)-1 && !slices.Contains(perms, btwPermission) {
+		return protocol.Check{Name: "Permissions", OK: true, Detail: "who, send allowed; btw from the next setup, or run murmur join"}
+	}
+	return harness.Check(len(perms) == len(toolPermissions), "Permissions", "who, send, btw allowed", "missing: run murmur join")
 }
 
 // InboundNote says when Claude Code's own settings keep murmur's messages from agents, or "" when they don't.

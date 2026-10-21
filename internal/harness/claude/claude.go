@@ -51,7 +51,7 @@ func (Claude) Connect(exe string, ask func(string) bool) []protocol.Check {
 	}
 	checks := []protocol.Check{
 		{Name: "Hooks", OK: true, Detail: "SessionStart, PreToolUse (edits), Notification in " + config.Tildify(path)},
-		{Name: "Permissions", OK: true, Detail: "who, send allowed without a prompt"},
+		{Name: "Permissions", OK: true, Detail: "who, send, btw allowed without a prompt"},
 	}
 	if note := InboundNote(path); note != "" {
 		c := protocol.Check{Name: "Messages", Detail: note}
@@ -72,7 +72,7 @@ func (Claude) Connect(exe string, ask func(string) bool) []protocol.Check {
 	if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "murmur", "--", exe, "mcp", Name).CombinedOutput(); err != nil {
 		return append(checks, protocol.Check{Name: "MCP server", Detail: strings.TrimSpace(string(out))})
 	}
-	return append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur (user scope): who, send"})
+	return append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur (user scope): who, send, btw"})
 }
 
 // Disconnect takes murmur's entries out of settings.json, and its MCP server out of Claude Code when it is there.
@@ -94,7 +94,7 @@ func (c Claude) Holds() bool {
 	if err != nil || c.Connected() {
 		return true
 	}
-	var allow []string // either of the two permissions, the other one taken out by hand
+	var allow []string // any of murmur's permissions, the others taken out by hand
 	_ = json.Unmarshal(o.Sub("permissions").Get("allow"), &allow)
 	if slices.ContainsFunc(allow, func(p string) bool { return slices.Contains(toolPermissions, p) }) {
 		return true
@@ -127,7 +127,7 @@ func (Claude) Checks() []protocol.Check {
 	}
 	checks := []protocol.Check{
 		harness.Check(hooks, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(path), fix),
-		harness.Check(perms, "Permissions", "who, send allowed", "missing: run murmur join"),
+		permsCheck(perms),
 		harness.Check(note == "", "Messages", "agents take messages from other sessions", note),
 	}
 	claude, err := exec.LookPath("claude")
@@ -137,5 +137,5 @@ func (Claude) Checks() []protocol.Check {
 	v := Version()
 	return append(checks,
 		harness.Check(!TooOld(v), "Version", v, v+": messages between sessions need "+MinVersion+" or later; run claude update"),
-		harness.Check(exec.Command(claude, "mcp", "get", "murmur").Run() == nil, "MCP server", "murmur: who, send", "missing: run murmur join"))
+		harness.Check(exec.Command(claude, "mcp", "get", "murmur").Run() == nil, "MCP server", "murmur: who, send, btw", "missing: run murmur join"))
 }
