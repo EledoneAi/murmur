@@ -15,7 +15,7 @@
 # Releases don't use this file: GoReleaser builds the published image from its own binaries with Dockerfile.release,
 # and its -litestream variant with Dockerfile.litestream. Here, --target litestream builds that variant.
 
-ARG GO_VERSION=1.27.2
+ARG GO_VERSION=1.27.3
 
 # The build stage runs on the machine's own platform and cross-compiles, which is much faster than emulating
 # another CPU when building a multi-platform image.
