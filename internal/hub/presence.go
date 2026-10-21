@@ -37,6 +37,9 @@ type presence struct {
 	Handle string           `json:"handle"`
 	Agents []protocol.Agent `json:"agents,omitempty"` // files included: every instance answers checks and lists overlaps
 	Online bool             `json:"online"`           // false while it reconnects, or once it's gone
+	// Seq orders one instance's presence events: each goes out on a goroutine of its own, so a newer one can arrive
+	// first. Nanoseconds, so an instance that restarts under the same name goes on after its last.
+	Seq int64 `json:"seq"`
 
 	instance string
 	seen     time.Time
@@ -153,7 +156,8 @@ func (h *Hub) onChanged(ctx context.Context, what string) {
 
 // publishLinkLocked tells the other instances about one of this instance's laptops.
 func (h *Hub) publishLinkLocked(ctx context.Context, l *link) {
-	p := presence{Device: l.dev, Email: l.email, Handle: l.handle, Agents: l.agents, Online: l.gone.IsZero()}
+	h.seq = max(h.seq+1, time.Now().UnixNano())
+	p := presence{Device: l.dev, Email: l.email, Handle: l.handle, Agents: l.agents, Online: l.gone.IsZero(), Seq: h.seq}
 	go h.publish(context.WithoutCancel(ctx), evPresence, p, "")
 }
 
@@ -165,6 +169,10 @@ func (h *Hub) onPresence(from string, p presence) {
 	p.instance, p.seen = from, time.Now()
 	old := h.remote[p.Device]
 	switch {
+	case old != nil && old.instance == from && p.Seq < old.Seq:
+		// that instance said something newer about this laptop already
+		h.mu.Unlock()
+		return
 	case !p.Online && old != nil && old.Online && old.instance != from:
 		// the laptop moved to another instance, which holds it now: what the one it left says is old news
 		h.mu.Unlock()
@@ -611,8 +619,14 @@ func (h *Hub) rosterLocked() []protocol.Person {
 	type placed struct {
 		p *protocol.Person
 		a *protocol.Agent // as its laptop said, which nothing changes
+		x holder
 	}
 	var all []placed
+	type address struct {
+		p    *protocol.Person
+		name string
+	}
+	first := map[address]placed{} // two laptops of one person can run agents of one name
 	for x := range h.holdersOfLocked("") {
 		p := byEmail[x.email]
 		if p == nil {
@@ -620,9 +634,15 @@ func (h *Hub) rosterLocked() []protocol.Person {
 		}
 		p.Online = p.Online || x.online
 		for i := range x.agents {
-			all = append(all, placed{p, &x.agents[i]})
+			at := placed{p, &x.agents[i], x}
+			all = append(all, at)
+			if y, ok := first[address{p, at.a.Name}]; !ok || sooner(*at.a, x, *y.a, y.x) {
+				first[address{p, at.a.Name}] = at
+			}
 		}
 	}
+	// the one messages to that name reach
+	all = slices.DeleteFunc(all, func(at placed) bool { return first[address{at.p, at.a.Name}].a != at.a })
 	slices.SortFunc(all, func(a, b placed) int { return cmp.Compare(b.a.Since, a.a.Since) })
 	size := 1024 * len(byEmail)
 	for _, x := range all {

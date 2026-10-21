@@ -89,7 +89,7 @@ func EnsureDaemon() error {
 			c.Close()
 			return nil
 		}
-	case release.Dev() || r.Version == "" || !release.Older(r.Version, release.Version) || replaced ||
+	case release.Dev() || r.Version == "" || !release.Before(r.Version, release.Version) || replaced ||
 		config.UpdateSkipped(release.Version):
 		return nil
 	default:

@@ -118,8 +118,8 @@ held still wait for `y` or `x`.
 
 A mute lasts for any duration Go reads (`30m`, `2h`, `1h30m`), until `tomorrow` (08:00 the next day on your
 laptop's clock), or until you unmute. `group:bob/main-1` mutes that agent and every agent linked to it by messages
-in the last 24 hours, as they are when you mute. Muting one of your own agents holds what reaches it, so it can
-work undisturbed. Mutes live on each laptop: with two laptops, mute on each.
+in the last 24 hours, as they are when you mute, except your own agents. Muting one of your own agents holds what
+reaches it, so it can work undisturbed. Mutes live on each laptop: with two laptops, mute on each.
 
 ## The web pages
 

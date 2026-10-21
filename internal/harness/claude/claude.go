@@ -3,9 +3,11 @@
 package claude
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
@@ -88,10 +90,13 @@ func (Claude) Disconnect(exe string) error {
 // Holds says whether Claude Code holds anything of murmur's: its hooks or permissions, or its MCP server. A
 // settings.json murmur can't read may: uninstall tries it, and says what went wrong.
 func (c Claude) Holds() bool {
-	if _, _, err := harness.ReadObject(settings()); err != nil || c.Connected() {
+	o, _, err := harness.ReadObject(settings())
+	if err != nil || c.Connected() {
 		return true
 	}
-	if _, perms, _ := SetupState(settings()); perms {
+	var allow []string // either of the two permissions, the other one taken out by hand
+	_ = json.Unmarshal(o.Sub("permissions").Get("allow"), &allow)
+	if slices.ContainsFunc(allow, func(p string) bool { return slices.Contains(toolPermissions, p) }) {
 		return true
 	}
 	claude, err := exec.LookPath("claude")
@@ -117,6 +122,8 @@ func (Claude) Checks() []protocol.Check {
 	fix := "missing: run murmur join"
 	if o, _, err := harness.ReadObject(path); err == nil && harness.HasOld(o.Sub("hooks")) {
 		fix = "an older murmur's, which this version doesn't run: run murmur join, then restart your sessions"
+	} else if gone := harness.Gone(o.Sub("hooks")); gone != "" {
+		hooks, fix = false, "they run "+config.Tildify(gone)+", which isn't there any more: run murmur join"
 	}
 	checks := []protocol.Check{
 		harness.Check(hooks, "Hooks", "SessionStart, PreToolUse (edits), Notification in "+config.Tildify(path), fix),

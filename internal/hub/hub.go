@@ -74,6 +74,7 @@ type Hub struct {
 	newLinks []*link                        // said hello since the last roster: the next one goes to them first
 	out      handout                        // where rosters leave for the laptops here
 	changes  uint64                         // agents reports from laptops here, counted: what a roster has
+	seq      int64                          // the latest presence this instance published: publishLinkLocked
 	colours  map[string]int                 // by email, until people change: coloursLocked
 	news     []announcement                 // announcements to repos, newest first, as the store had them
 	newsMu   sync.Mutex                     // one change to the stored announcements at a time

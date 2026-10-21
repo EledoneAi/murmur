@@ -34,8 +34,9 @@ func safeNext(n string) string {
 	return n
 }
 
-// devLoginOn says whether people may sign in by typing an email: only on a hub that serves this computer alone.
-func (h *Hub) devLoginOn() bool { return h.cfg.DevLogin && Local(h.cfg.PublicURL) }
+// devLoginOn says whether people may sign in by typing an email: only on a hub that serves this computer alone, with
+// no identity provider. With one, the team's lists apply to everyone it signs in.
+func (h *Hub) devLoginOn() bool { return h.cfg.DevLogin && h.cfg.Auth == nil && Local(h.cfg.PublicURL) }
 
 // Local says whether a hub's address is this computer only: http on localhost or a loopback address.
 func Local(publicURL string) bool {

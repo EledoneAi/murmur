@@ -34,6 +34,8 @@ func Run(t *testing.T, open func(t *testing.T) store.Store) {
 		{"TakeCodeOnce", takeCodeOnce},
 		{"Documents", documents},
 		{"Events", events},
+		{"EventsByTime", eventsByTime},
+		{"ConcurrentWrites", concurrentWrites},
 		{"Lease", lease},
 		{"LeaseRunsOut", leaseRunsOut},
 		{"LeaseOnce", leaseOnce},
@@ -257,6 +259,56 @@ func events(t *testing.T, s store.Store) {
 		got, err := s.Events(ctx, limit)
 		must(t, err)
 		same(t, fmt.Sprint("events, limit ", limit), got, newest[:min(limit, len(newest))])
+	}
+}
+
+// Events come newest first by when they happened, not by when they were added: two instances add theirs in any
+// order.
+func eventsByTime(t *testing.T, s store.Store) {
+	ctx := t.Context()
+	at := now()
+	for _, i := range []int{1, 3, 0, 2} {
+		must(t, s.AddEvent(ctx, store.Event{At: at.Add(time.Duration(i) * time.Second), Kind: fmt.Sprint("kind-", i)}))
+	}
+	got, err := s.Events(ctx, 3)
+	must(t, err)
+	var kinds []string
+	for _, e := range got {
+		kinds = append(kinds, e.Kind)
+	}
+	if strings.Join(kinds, " ") != "kind-3 kind-2 kind-1" {
+		t.Errorf("events %v, want kind-3 kind-2 kind-1", kinds)
+	}
+}
+
+// Instances write at once: each write lands, none fails.
+func concurrentWrites(t *testing.T, s store.Store) {
+	ctx := t.Context()
+	at := now()
+	together(func(i int) {
+		for j := range 10 {
+			id := fmt.Sprint("m", i, "-", j)
+			for _, err := range []error{
+				s.AddPending(ctx, store.Pending{Msg: msg(id), Email: "alice@example.com", Created: at, Expires: at.Add(time.Hour)}),
+				s.Put(ctx, fmt.Sprint("doc-", i), []byte(id)),
+				s.AddEvent(ctx, store.Event{At: at, Kind: id}),
+				s.SeenDevice(ctx, "d-mac", "1.0.0", at),
+			} {
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Error(err)
+				}
+			}
+		}
+	})
+	got, err := s.Pending(ctx, "alice@example.com")
+	must(t, err)
+	if len(got) != 80 {
+		t.Errorf("%d of 80 messages kept", len(got))
+	}
+	evs, err := s.Events(ctx, 100)
+	must(t, err)
+	if len(evs) != 80 {
+		t.Errorf("%d of 80 events kept", len(evs))
 	}
 }
 

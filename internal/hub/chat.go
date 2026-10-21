@@ -15,8 +15,10 @@ import (
 )
 
 // chatClient posts to the team's chat. A chat that doesn't answer quickly misses the post: the hub never retries,
-// so a slow chat can't get the same ping twice or hold up the jobs.
-var chatClient = &http.Client{Timeout: 5 * time.Second}
+// so a slow chat can't get the same ping twice or hold up the jobs. It never follows a redirect: chats' webhooks
+// answer where they are, and one that sends the hub on could send it into its own network.
+var chatClient = &http.Client{Timeout: 5 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 // post sends text to the team's chat, in the format its kind expects.
 func (h *Hub) post(ctx context.Context, text string) error {

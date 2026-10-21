@@ -284,7 +284,10 @@ func setupMarker() string { return filepath.Join(config.Dir(), "setup-version") 
 // hubAddress is a hub's address as people type it, with its scheme: https://, or http:// for this machine.
 func hubAddress(s string) string {
 	s = strings.TrimRight(strings.TrimSpace(s), "/")
-	if s == "" || strings.Contains(s, "://") {
+	if scheme, rest, ok := strings.Cut(s, "://"); ok { // HTTPS:// as some type it: the daemon makes wss:// of https://
+		return strings.ToLower(scheme) + "://" + rest
+	}
+	if s == "" {
 		return s
 	}
 	if host, _, err := net.SplitHostPort(s); loopback(s) || (err == nil && loopback(host)) {
@@ -300,6 +303,10 @@ func checkHub(hub string) error {
 	switch {
 	case err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http"):
 		return fmt.Errorf("%q is not a hub address: it starts with https://", hub)
+	case u.User != nil: // hub.acme.com@evil.example is evil.example; a password would be shown and saved
+		return fmt.Errorf("%s is the hub at %s, with a user name before the @: give the hub's address alone", u.Redacted(), u.Host)
+	case strings.ContainsAny(hub, "?#"): // a page's address, copied from the browser: murmur adds its paths after it
+		return fmt.Errorf("%q is a page's address: use the hub's own, %s://%s", hub, u.Scheme, u.Host)
 	case u.Scheme == "http" && !loopback(u.Hostname()):
 		return fmt.Errorf("%s is not encrypted: this laptop's sign-in and its updates would cross the network in clear. "+
 			"Use the hub's https:// address; http:// is only for a hub on this machine", hub)
@@ -497,7 +504,8 @@ func Hook(name, event string) {
 // objection, and exits 0: a harness may refuse a tool when its hook fails.
 func hook(h harness.Harness, event string, stdin io.Reader, out io.Writer) {
 	defer func() { _ = recover() }()
-	data, _ := io.ReadAll(io.LimitReader(stdin, 1<<20))
+	// a tool call's input and output come whole: a file written at once, a command's output, megabytes of it
+	data, _ := io.ReadAll(io.LimitReader(stdin, 64<<20))
 	var cursor struct {
 		Version string `json:"cursor_version"`
 	}

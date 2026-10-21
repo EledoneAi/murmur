@@ -58,8 +58,8 @@ func tomlQuote(s string) string {
 func codexServer(exe string) string {
 	var b strings.Builder
 	b.WriteString("[mcp_servers.murmur]\ncommand = " + tomlQuote(exe) + "\nargs = [\"mcp\", \"codex\"]\n")
-	if home := os.Getenv("MURMUR_HOME"); home != "" {
-		b.WriteString("\n[mcp_servers.murmur.env]\nMURMUR_HOME = " + tomlQuote(home) + "\n")
+	if os.Getenv("MURMUR_HOME") != "" {
+		b.WriteString("\n[mcp_servers.murmur.env]\nMURMUR_HOME = " + tomlQuote(config.Dir()) + "\n")
 	}
 	b.WriteString("\n[mcp_servers.murmur.tools.who]\napproval_mode = \"approve\"\n\n[mcp_servers.murmur.tools.send]\napproval_mode = \"approve\"\n")
 	return b.String()

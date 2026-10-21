@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Agent is one Claude Code session as the team sees it. Everything in it is read from what Claude Code and git
@@ -63,6 +64,10 @@ type Overlap struct {
 
 // LaptopReadLimit is the largest frame a laptop reads from its hub. The hub keeps the team list under it.
 const LaptopReadLimit = 32 << 20
+
+// HubReadLimit is the largest frame a hub reads from a laptop, which closes the connection of a laptop that sends
+// more: a laptop keeps its hello and agents frames, files included, under it.
+const HubReadLimit = 1 << 20
 
 type Person struct {
 	Handle string  `json:"handle"`
@@ -167,6 +172,10 @@ type Check struct {
 // MaxText caps one message. Claude Code accepts far more; people and agents should not need it.
 const MaxText = 8000
 
+// TooMany is the hub's answer to a message past its sender's limit for the minute. A laptop sends a message its
+// outbox resent again later; a fresh one fails, so its agent hears to group them.
+const TooMany = "too many messages in the last minute; group them into one"
+
 // RepoAddress is how an announcement addresses every agent working in a repo: "repo:acme/api".
 const RepoAddress = "repo:"
 
@@ -214,15 +223,17 @@ var escapeSeq = regexp.MustCompile(`(?:\x1b\[|\x{9b})[0-?]*[ -/]*[@-~]|(?:\x1b\]
 
 // Clean makes text from another laptop safe to print and to hand to an agent. It removes terminal escape
 // sequences, every other control character, and the invisible characters that make text read differently than it
-// is or hide words from people but not from agents. Message text keeps its line breaks and tabs (lines true);
-// one-line fields turn them into spaces.
+// is or hide words from people but not from agents. Bytes that aren't UTF-8 become U+FFFD. Message text keeps its
+// line breaks and tabs (lines true); one-line fields turn them into spaces.
 func Clean(s string, lines bool) string {
-	if !strings.ContainsFunc(s, func(r rune) bool { return r < ' ' || r == '\u2028' || r == '\u2029' || unsafeRune(r) || selector(r) }) {
+	if !strings.ContainsFunc(s, func(r rune) bool {
+		return r < ' ' || r == '\u2028' || r == '\u2029' || r == utf8.RuneError || unsafeRune(r) || selector(r)
+	}) {
 		return s
 	}
 	s = escapeSeq.ReplaceAllString(s, "")
 	var b strings.Builder
-	afterSelector := false
+	afterBase := false // the last character kept can take a variation selector: not a selector, a joiner or a mark
 	for _, r := range s {
 		switch {
 		case r == '\n' || r == '\u2028' || r == '\u2029' || r == '\t':
@@ -233,10 +244,10 @@ func Clean(s string, lines bool) string {
 			}
 		case r < ' ' || unsafeRune(r):
 			continue
-		case selector(r) && (b.Len() == 0 || afterSelector):
+		case selector(r) && !afterBase:
 			continue // one variation selector right after a character, as emoji and some kanji use; a run hides data
 		}
-		afterSelector = selector(r)
+		afterBase = !selector(r) && !unicode.In(r, unicode.Cf, unicode.Mn, unicode.Me)
 		b.WriteRune(r)
 	}
 	return b.String()

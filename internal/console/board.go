@@ -480,7 +480,7 @@ func sharedStem(names []string) string {
 		for i < len(stem) && i < len(n) && stem[i] == n[i] {
 			i++
 		}
-		stem = stem[:i]
+		stem = strings.ToValidUTF8(stem[:i], "") // never half a character: 数据 for 数据处理 and 数据库
 	}
 	if i := strings.LastIndexAny(stem, "-_/"); i >= 0 && len(stem) < len(names[0]) {
 		stem = stem[:i]
@@ -568,7 +568,8 @@ func buildNeeds(s ipc.Snapshot, byAddr map[string]*agentRef, now time.Time) []ne
 	}
 	me := s.Me.Handle
 	for i, m := range s.Msgs {
-		if m.To != me || m.From == me || s.Done[m.ID] {
+		// murmur's own notes to you say that a message failed, which its failed need already shows; nobody answers them
+		if m.To != me || m.From == me || m.From == protocol.System || s.Done[m.ID] {
 			continue
 		}
 		answered := slices.ContainsFunc(s.Msgs[i+1:], func(y protocol.Msg) bool { return y.From == me && y.To == m.From })

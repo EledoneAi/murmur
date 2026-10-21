@@ -11,6 +11,7 @@ and is changed in the hub's admin panel, without a restart: see [Admin settings]
 | Variable | Default | What it does |
 |---|---|---|
 | `PORT` | `8080` | The port the hub listens on. |
+| `HOST` | every interface; `127.0.0.1` with `DEV_LOGIN=1` | The address the hub listens on. The images set `0.0.0.0`, which their container needs. |
 | `PUBLIC_URL` | `http://localhost:$PORT` | The address people and laptops use, such as `https://murmur.example.com`. Set it everywhere but on your own machine. Sign-in redirects and the install line use it, and laptops installed from that line keep it as their hub's address. |
 | `SESSION_SECRET` | none | The key the hub signs its cookies with: 16 characters or more, random (`openssl rand -base64 32`). Required unless `DEV_LOGIN=1`. Changing it signs everyone out of the web pages. |
 | `LOG_FORMAT` | `json` | `json` writes one JSON object per line; `text` writes plain lines for reading in a terminal; `gcp` writes JSON with the field names Google Cloud Logging understands. |
@@ -49,7 +50,7 @@ register with the provider is `PUBLIC_URL` followed by `/auth/callback`.
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Sign in with Google. When `ALLOWED_DOMAINS` holds exactly one domain, Google's sign-in page offers only accounts of that domain (its `hd` hint); the hub still checks each address. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | Sign in with GitHub, through a GitHub OAuth app. |
 | `GITHUB_URL` | The address of a GitHub Enterprise Server, such as `https://github.example.com`, for sign-in and for merge notices. Leave it unset for github.com. |
-| `DEV_LOGIN` | `1` lets anyone sign in by typing an email address, when no identity provider is set. The hub refuses to start with it unless `PUBLIC_URL` is `http://localhost` or a loopback address such as `http://127.0.0.1:8080`, so it can't be left on by mistake on a hub others reach. While there are no `ADMINS` and no admin yet, the first person to sign in becomes an admin; with no allowlist, anyone can sign in. For local development. |
+| `DEV_LOGIN` | `1` lets anyone sign in by typing an email address, when no identity provider is set. The hub refuses to start with it unless `PUBLIC_URL` is `http://localhost` or a loopback address such as `http://127.0.0.1:8080`, and such a hub listens on 127.0.0.1 unless `HOST` says otherwise, so it can't be left on by mistake on a hub others reach. While there are no `ADMINS` and no admin yet, the first person to sign in becomes an admin; with no allowlist, anyone can sign in. For local development. |
 
 ### Who may join
 
