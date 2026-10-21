@@ -138,7 +138,7 @@ func (e *teamEvent) event(me string) net.Buffers {
 }
 
 // pageOrder puts people with a waiting agent first, and their waiting agents first, and keeps only links a page
-// may show.
+// may show. The page tells a person's agents apart by name: of two with one name, on two laptops, it gets the first.
 func pageOrder(people []protocol.Person) []protocol.Person {
 	for i := range people {
 		p := &people[i]
@@ -147,6 +147,12 @@ func pageOrder(people []protocol.Person) []protocol.Person {
 				return cmp.Compare(a.Since, b.Since) // the longest wait first
 			}
 			return last(!waitingFor(a), !waitingFor(b))
+		})
+		named := map[string]bool{}
+		p.Agents = slices.DeleteFunc(p.Agents, func(a protocol.Agent) bool {
+			dup := named[a.Name]
+			named[a.Name] = true
+			return dup
 		})
 		for j := range p.Agents {
 			a := &p.Agents[j]
@@ -171,11 +177,13 @@ func pullRequests(people []protocol.Person) []pullRequest {
 		}
 	}
 	slices.SortStableFunc(out, func(a, b pullRequest) int { return cmp.Compare(a.Since, b.Since) })
+	// two sessions on one branch share a pull request, and one may know its link when the other doesn't: the page
+	// tells pull requests apart by name
 	seen := map[string]bool{}
-	return slices.DeleteFunc(out, func(p pullRequest) bool { // two sessions on one branch share a pull request
-		k := strings.ToLower(cmp.Or(p.URL, p.Name))
-		dup := seen[k]
-		seen[k] = true
+	return slices.DeleteFunc(out, func(p pullRequest) bool {
+		name, link := strings.ToLower(p.Name), strings.ToLower(p.URL)
+		dup := seen[name] || (link != "" && seen[link])
+		seen[name], seen[link] = true, true
 		return dup
 	})
 }
@@ -211,13 +219,18 @@ func running(holders []holder) map[string][]string {
 	return out
 }
 
-// newsLocked lists the announcements still up, newest first.
+// newsLocked lists the announcements still up, newest first. The page tells them apart by time and repo: of two to
+// one repo in the same millisecond, the second says it came a millisecond before.
 func (h *Hub) newsLocked() []newsItem {
 	out := []newsItem{}
 	up := time.Duration(h.settings.AnnounceHours) * time.Hour
 	for _, a := range h.news {
 		if until := a.At.Add(up); time.Now().Before(until) {
-			out = append(out, newsItem{From: a.From, Repo: a.Repo, Text: a.Text, At: a.At.UnixMilli(), Until: until.UnixMilli()})
+			at := a.At.UnixMilli()
+			for slices.ContainsFunc(out, func(n newsItem) bool { return n.At == at && n.Repo == a.Repo }) {
+				at--
+			}
+			out = append(out, newsItem{From: a.From, Repo: a.Repo, Text: a.Text, At: at, Until: until.UnixMilli()})
 		}
 	}
 	return out

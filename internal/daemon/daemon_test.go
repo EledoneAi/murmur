@@ -1282,3 +1282,131 @@ func TestStopNamesItsDaemon(t *testing.T) {
 		t.Fatalf("stopped by a stop meant for 0.0.1: %+v", r)
 	}
 }
+
+// A failure, and that its person marked it done, outlive a restart of the daemon, as an update does; the note that
+// tells the person is not a second need.
+func TestFailureOutlivesARestart(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	d := newDaemon("alice")
+	d.loadHistory()
+	d.mu.Lock()
+	d.failLocked(protocol.Msg{ID: "m1", To: "bob/b1", Text: "hi", At: 1}, "bob/b1 is not running")
+	d.failLocked(protocol.Msg{ID: "m2", To: "carol", Text: "hello", At: 2}, "nobody called \"carol\"")
+	d.done["m2"] = true
+	d.appendHistory(histLine{Done: "m2"})
+	d.mu.Unlock()
+	again := newDaemon("alice")
+	again.loadHistory()
+	again.mu.Lock()
+	s := again.snapshotLocked()
+	again.pruneLocked()
+	pruned := again.snapshotLocked()
+	again.mu.Unlock()
+	for _, s := range []ipc.Snapshot{s, pruned} {
+		if s.Failed["m1"] != "bob/b1 is not running" || len(s.Outbox) != 2 || s.Outbox[0].From != "alice" || s.Done["m1"] || !s.Done["m2"] {
+			t.Fatalf("after a restart: failed %v, outbox %+v, done %v", s.Failed, s.Outbox, s.Done)
+		}
+	}
+}
+
+// Compacting the history never replaces it with a copy left by an earlier crash that can't be written over, and a line
+// longer than any message the hub takes (written by an older version) doesn't end the reading.
+func TestHistoryCompactionAndLongLines(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MURMUR_HOME", dir)
+	path := filepath.Join(dir, "history.jsonl")
+	var b strings.Builder
+	long, _ := json.Marshal(histLine{M: &protocol.Msg{ID: "long", From: "bob", To: "alice", Text: strings.Repeat("x", 2<<20)}})
+	b.Write(append(long, '\n'))
+	for i := range 3 {
+		line, _ := json.Marshal(histLine{M: &protocol.Msg{ID: fmt.Sprintf("m%d", i), From: "bob", To: "alice", Text: "hi"}})
+		b.Write(append(line, '\n'))
+	}
+	_ = os.WriteFile(path, []byte(b.String()), 0o600)
+	_ = os.WriteFile(path+".tmp", []byte("stale\n"), 0o400)
+	d := newDaemon("alice")
+	d.loadHistory()
+	if len(d.history) != 4 || d.history[3].ID != "m2" {
+		t.Fatalf("read %d messages", len(d.history))
+	}
+	again := newDaemon("alice")
+	again.loadHistory()
+	if len(again.history) != 4 {
+		t.Fatalf("after compaction, %d messages", len(again.history))
+	}
+}
+
+// Two copies of one message handed over at once, such as a held message let through as its resent copy arrives,
+// reach the agent once.
+func TestHandOverOnceAtATime(t *testing.T) {
+	in := newInbox(t)
+	d := newDaemon("bob")
+	d.add(agentSession("b1", "conv-b", in))
+	for i := range 30 {
+		m := protocol.Msg{ID: fmt.Sprintf("m%d", i), From: "alice/a1", To: "bob/b1", Text: "hi"}
+		start := make(chan struct{})
+		done := make(chan bool, 2)
+		for range 2 {
+			go func() { <-start; ok, _ := d.handOver(m, "b1"); done <- ok }()
+		}
+		close(start)
+		<-done
+		<-done
+	}
+	n := 0
+	for len(in.got) > 0 || n < 30 {
+		select {
+		case <-in.got:
+			n++
+		case <-time.After(300 * time.Millisecond):
+			if n != 30 {
+				t.Fatalf("30 messages reached the agent %d times", n)
+			}
+			return
+		}
+	}
+	in.quiet(t, 300*time.Millisecond)
+}
+
+// A copy of a message its agent already took, resent once that agent's session ended, is answered as delivered: it
+// was, and a "no longer running" would reach its sender as a failure.
+func TestCopyAfterTheSessionEnded(t *testing.T) {
+	in := newInbox(t)
+	d := newDaemon("bob")
+	s := agentSession("b1", "conv-b", in)
+	d.add(s)
+	m := protocol.Msg{ID: "m1", From: "alice/a1", To: "bob/b1", Text: "hi"}
+	if ok, why := d.handOver(m, "b1"); !ok {
+		t.Fatal(why)
+	}
+	in.expect(t, "hi")
+	d.mu.Lock()
+	d.removeLocked(s.key())
+	d.mu.Unlock()
+	if ok, why := d.handOver(m, "b1"); !ok {
+		t.Fatalf("the copy: %s", why)
+	}
+}
+
+// A laptop whose agents change many files still says hello in a frame the hub reads: the files of the sessions that
+// changed longest ago go first, and the hub would otherwise close the connection, again at every reconnection.
+func TestAgentsFitTheHubsLimit(t *testing.T) {
+	d := newDaemon("alice")
+	for i := range 60 {
+		var files []string
+		for j := range 300 {
+			files = append(files, fmt.Sprintf("services/payments/internal/handlers/v2/generated/file_%03d_%03d.go", i, j))
+		}
+		d.add(&session{id: fmt.Sprint("s", i), name: fmt.Sprintf("a%02d", i), since: int64(i), tree: "t", files: files})
+	}
+	d.mu.Lock()
+	agents := d.localAgentsLocked(true)
+	d.mu.Unlock()
+	b, _ := json.Marshal(protocol.Frame{T: protocol.FrameHello, Agents: agents})
+	if len(b) > protocol.HubReadLimit {
+		t.Fatalf("hello is %d bytes; the hub reads %d", len(b), protocol.HubReadLimit)
+	}
+	if latest := agents[len(agents)-1]; latest.Name != "a59" || len(latest.Files) != 300 {
+		t.Fatalf("the latest session lost its files: %s has %d", latest.Name, len(latest.Files))
+	}
+}

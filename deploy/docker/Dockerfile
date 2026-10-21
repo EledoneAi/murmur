@@ -62,6 +62,7 @@ COPY --from=build /out/dist/ /usr/share/murmur/dist/
 WORKDIR /data
 VOLUME /data
 ENV PORT=8080 \
+    HOST=0.0.0.0 \
     STORE=sqlite:///data/murmur.db \
     DIST_DIR=/usr/share/murmur/dist
 EXPOSE 8080

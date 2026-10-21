@@ -137,6 +137,21 @@ func TestNeeds(t *testing.T) {
 	}
 }
 
+// A message the hub refused is one need, with murmur's note about it in the history, and marking it done clears it.
+func TestFailedMessageIsOneNeed(t *testing.T) {
+	s := ipc.Snapshot{Me: protocol.Person{Handle: "alice"},
+		Msgs:   []protocol.Msg{{ID: "nd-m1", From: protocol.System, To: "alice", Text: "not delivered to bob/b1: offline", At: 2}},
+		Outbox: []protocol.Msg{{ID: "m1", From: "alice", To: "bob/b1", Text: "hi", At: 1}},
+		Failed: map[string]string{"m1": "bob/b1 is not running"}}
+	if n := buildNeeds(s, nil, demoNow); len(n) != 1 || n[0].kind != needFailed {
+		t.Fatalf("needs: %+v", n)
+	}
+	s.Done = map[string]bool{"m1": true}
+	if n := buildNeeds(s, nil, demoNow); len(n) != 0 {
+		t.Fatalf("marked done, still needs: %+v", n)
+	}
+}
+
 // Agents in touch form constellations; an overlap inside one is in tune, and two agents changing the same file
 // without talking are out of tune.
 func TestConstellations(t *testing.T) {

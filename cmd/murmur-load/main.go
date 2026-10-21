@@ -55,6 +55,9 @@ var hubs []string
 
 func main() {
 	flag.Parse()
+	if err := badFlags(); err != nil {
+		fail(err)
+	}
 	hubs = strings.Split(*hubURL, ",")
 	for _, h := range hubs {
 		if u, err := url.Parse(h); err != nil || u.Scheme != "http" || !loopback(u.Hostname()) {
@@ -97,6 +100,19 @@ func main() {
 	report(ctx, t0)
 	stop()
 	wg.Wait()
+}
+
+// badFlags refuses the numbers the load can't run with, instead of panicking once laptops run.
+func badFlags() error {
+	switch {
+	case *laptops < 1 || *agents < 1 || *repos < 1:
+		return errors.New("-laptops, -agents and -repos must be 1 or more")
+	case *laptops < 2 && *send > 0:
+		return errors.New("one laptop has no one to message: -send 0, or -laptops 2 or more")
+	case *every <= 0:
+		return errors.New("-every must be more than 0")
+	}
+	return nil
 }
 
 func fail(err error) {

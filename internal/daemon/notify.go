@@ -41,7 +41,7 @@ func desktop(title, text string) {
 		if err != nil {
 			return
 		}
-		cmd = exec.Command(path, "--", title, text)
+		cmd = exec.Command(path, "--", markupSafe(title), markupSafe(text))
 	default:
 		return
 	}
@@ -49,3 +49,7 @@ func desktop(title, text string) {
 		go func() { _ = cmd.Wait() }()
 	}
 }
+
+// markupSafe is text for notify-send, whose notification servers mostly read markup: what a teammate wrote shows as
+// they wrote it, never as a link or an image.
+var markupSafe = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace

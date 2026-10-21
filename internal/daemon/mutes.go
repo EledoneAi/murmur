@@ -22,6 +22,7 @@ type mute struct {
 	Kind  string    `json:"kind"`  // person, agent, repo or branch
 	Value string    `json:"value"` // bob, bob/main-1, acme/api, feat/x or acme/api@feat/x
 	Until time.Time `json:"until,omitzero"`
+	Group string    `json:"group,omitempty"` // the group muted with it: unmuting that group lifts it, whoever it holds by then
 }
 
 func (m mute) key() string { return m.Kind + ":" + m.Value }
@@ -90,7 +91,10 @@ func (d *Daemon) mute(who, howLong string) (string, error) {
 	if m.Kind == "group" {
 		add = nil
 		for _, a := range d.groupLocked(m.Value) {
-			add = append(add, mute{Kind: "agent", Value: a, Until: m.Until})
+			if a != m.Value && protocol.PersonOf(a) == d.me.Handle { // a mute on your own agent holds what anyone sends it
+				continue
+			}
+			add = append(add, mute{Kind: "agent", Value: a, Until: m.Until, Group: m.Value})
 		}
 	}
 	var said []string
@@ -119,12 +123,18 @@ func (d *Daemon) unmute(who string) (string, error) {
 			keys = append(keys, "agent:"+a)
 		}
 	}
-	n := len(d.mutes)
-	d.mutes = slices.DeleteFunc(d.mutes, func(x mute) bool { return slices.Contains(keys, x.key()) })
-	if len(d.mutes) == n {
+	var lifted []string
+	d.mutes = slices.DeleteFunc(d.mutes, func(x mute) bool {
+		if slices.Contains(keys, x.key()) || (m.Kind == "group" && x.Group == m.Value) {
+			lifted = append(lifted, x.key())
+			return true
+		}
+		return false
+	})
+	if len(lifted) == 0 {
 		return "", errors.New("nothing muted under " + who)
 	}
-	for _, k := range keys {
+	for _, k := range lifted {
 		d.appendHistory(histLine{Unmute: k})
 	}
 	d.changed()

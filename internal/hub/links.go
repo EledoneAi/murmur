@@ -49,7 +49,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	c.SetReadLimit(1 << 20)
+	c.SetReadLimit(protocol.HubReadLimit)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	conn := transport.New(ctx, c, outboxDepth)
@@ -63,7 +63,7 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		conn.Refuse(fmt.Sprintf("this hub speaks protocol %d and runs %s: run murmur update", protocol.Version, h.cfg.Version))
 		return
 	}
-	if min := h.Settings().MinVersion; min != "" && release.Older(hello.Version, min) {
+	if min := h.Settings().MinVersion; min != "" && release.Before(hello.Version, min) {
 		h.log.Info("laptop refused", "person", user.Handle, "version", hello.Version, "why", "older than "+min)
 		conn.Refuse("this team needs murmur " + min + " or later: run murmur update")
 		return
@@ -257,7 +257,7 @@ func (h *Hub) teamChangedLocked() {
 		if !l.gone.IsZero() {
 			continue
 		}
-		if min := h.settings.MinVersion; min != "" && release.Older(l.version, min) {
+		if min := h.settings.MinVersion; min != "" && release.Before(l.version, min) {
 			l.cancel()
 			continue
 		}

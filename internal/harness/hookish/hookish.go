@@ -252,8 +252,8 @@ func (s *Spec) editMCP(exe string, add bool) error {
 	var e map[string]any
 	if add {
 		e = s.mcpEntry(exe)
-		if home := os.Getenv("MURMUR_HOME"); home != "" { // harnesses may hand their MCP servers a bare environment
-			e["env"] = map[string]string{"MURMUR_HOME": home}
+		if os.Getenv("MURMUR_HOME") != "" { // harnesses may hand their MCP servers a bare environment, with no HOME
+			e["env"] = map[string]string{"MURMUR_HOME": config.Dir()}
 		}
 		servers = servers.Set("murmur", harness.Marshal(e))
 	}
@@ -330,6 +330,8 @@ func (s *Spec) Checks() []protocol.Check {
 	current := s.Connected()
 	if o, _, err := harness.ReadObject(s.hooksPath()); err == nil && harness.HasOld(o.Sub("hooks")) {
 		current, fix = false, "an older murmur's, which this version doesn't run: run murmur join, then restart your sessions"
+	} else if gone := harness.Gone(o.Sub("hooks")); gone != "" {
+		current, fix = false, "they run "+config.Tildify(gone)+", which isn't there any more: run murmur join"
 	}
 	checks := []protocol.Check{
 		harness.Check(current, "Hooks", s.events()+" in "+config.Tildify(s.hooksPath()), fix),
@@ -377,7 +379,7 @@ func (a allowList) edit(s *Spec, add bool) error {
 	if add {
 		list = append(list, a.entries...)
 	}
-	if len(list) == 0 && !add {
+	if len(list) == 0 && !add && !a.ifList { // a list murmur only adds to was there before it, empty or not
 		parent = parent.Del(key)
 	} else {
 		parent = parent.Set(key, harness.Marshal(list))

@@ -3,6 +3,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -151,6 +152,13 @@ func Serve(name string) error {
 		line, err := in.ReadBytes('\n')
 		if err != nil {
 			return nil
+		}
+		if bytes.HasPrefix(bytes.TrimSpace(line), []byte("[")) { // a batch, which MCP dropped: the client hears so
+			if err := out.Encode(rpc{JSONRPC: "2.0", ID: json.RawMessage("null"),
+				Error: map[string]any{"code": -32600, "message": "batches are not supported"}}); err != nil {
+				return err
+			}
+			continue
 		}
 		var m rpc
 		if json.Unmarshal(line, &m) != nil || m.ID == nil {

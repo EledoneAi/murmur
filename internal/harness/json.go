@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"golang.org/x/sys/unix"
 )
 
 // ---------------------------------------------------------------- settings files, keys kept in order
@@ -43,18 +45,19 @@ func ParseObject(b []byte) (Object, error) {
 	return o, nil
 }
 
+// Get and Set take a key written twice as the harnesses' JSON readers do: the last one counts.
 func (o Object) Get(k string) json.RawMessage {
-	for _, f := range o {
-		if f.k == k {
-			return f.v
+	for i := len(o) - 1; i >= 0; i-- {
+		if o[i].k == k {
+			return o[i].v
 		}
 	}
 	return nil
 }
 
 func (o Object) Set(k string, v json.RawMessage) Object {
-	for i, f := range o {
-		if f.k == k {
+	for i := len(o) - 1; i >= 0; i-- {
+		if o[i].k == k {
 			o[i].v = v
 			return o
 		}
@@ -153,7 +156,11 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 	if b == nil || bytes.HasSuffix(b, []byte("\n")) {
 		out.WriteByte('\n')
 	}
-	if bytes.Equal(out.Bytes(), b) {
+	text := out.Bytes()
+	if bytes.Contains(b, []byte("\r\n")) { // Windows line ends stay
+		text = bytes.ReplaceAll(text, []byte("\n"), []byte("\r\n"))
+	}
+	if bytes.Equal(text, b) {
 		return nil
 	}
 	if keep := path + ".before-murmur"; adding && len(b) > 2 {
@@ -164,18 +171,21 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return WriteAtomic(path, out.Bytes(), 0o644)
+	return WriteAtomic(path, text, 0o644)
 }
 
 // WriteAtomic replaces the file at path with b, keeping its permissions (mode for a new one): a reader sees the old
 // file or the new one, never half of it. A link at path, such as a settings file a person keeps with their dotfiles,
-// stays a link: its target is replaced.
+// stays a link: its target is replaced. A file this user can't write stays as it is, though replacing it would work.
 func WriteAtomic(path string, b []byte, mode os.FileMode) error {
 	if target, err := filepath.EvalSymlinks(path); err == nil {
 		path = target
 	}
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
+		if unix.Access(path, unix.W_OK) != nil {
+			return &os.PathError{Op: "write", Path: path, Err: os.ErrPermission}
+		}
 	}
 	return ReplaceFile(path, b, mode)
 }
@@ -309,7 +319,8 @@ func hasEntry(hooks Object, is func(string) bool) bool {
 
 // Replace puts murmur's entry where murmur's was in an event's list, and drops any other of murmur's: harnesses
 // such as Codex trust hooks by their place, so the person's hooks after murmur's keep theirs. With entry nil it only
-// drops them. It says whether the list held any of murmur's.
+// drops them. A hook of the person's in a group with murmur's stays, in what is left of that group. It says whether
+// the list held any of murmur's.
 func Replace(entries []json.RawMessage, entry json.RawMessage) ([]json.RawMessage, bool) {
 	at := slices.IndexFunc(entries, OurGroup)
 	if at < 0 {
@@ -322,10 +333,29 @@ func Replace(entries []json.RawMessage, entry json.RawMessage) ([]json.RawMessag
 	if entry != nil {
 		out = append(out, entry)
 	}
-	for _, e := range entries[at+1:] {
-		if !OurGroup(e) {
+	for _, e := range entries[at:] {
+		if e = withoutOurs(e); e != nil {
 			out = append(out, e)
 		}
 	}
 	return out, true
+}
+
+// withoutOurs is a group of hooks without murmur's, or nil when nothing else is in it: Claude Code's /hooks adds a
+// person's hook to the group whose matcher they pick, murmur's too.
+func withoutOurs(group json.RawMessage) json.RawMessage {
+	if !OurGroup(group) {
+		return group
+	}
+	g, err := ParseObject(group)
+	if err != nil {
+		return nil
+	}
+	var hooks []json.RawMessage
+	_ = json.Unmarshal(g.Get("hooks"), &hooks)
+	theirs := slices.DeleteFunc(hooks, func(h json.RawMessage) bool { return groupHas(h, Ours) })
+	if len(theirs) == 0 {
+		return nil
+	}
+	return g.Set("hooks", Marshal(theirs)).Bytes()
 }

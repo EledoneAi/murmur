@@ -59,7 +59,7 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		s.answer(protocol.Frame{T: protocol.FrameAck, ID: m.ID, OK: ok, Note: note, Err: err})
 	}
 	if len(m.Text) > 4*protocol.MaxText { // far over the limit: refused before it costs any cleaning
-		ack(false, "", fmt.Sprintf("the message is %d characters; the limit is %d", len(m.Text), protocol.MaxText))
+		ack(false, "", fmt.Sprintf("the message is %d characters; the limit is %d", utf8.RuneCountInString(m.Text), protocol.MaxText))
 		return
 	}
 	m.Text = strings.TrimSpace(protocol.Clean(m.Text, true)) // before taking the lock, like agent fields
@@ -79,8 +79,8 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 	case m.Text == "":
 		ack(false, "", "the message is empty")
 		return
-	case len(m.Text) > protocol.MaxText:
-		ack(false, "", fmt.Sprintf("the message is %d characters; the limit is %d", len(m.Text), protocol.MaxText))
+	case utf8.RuneCountInString(m.Text) > protocol.MaxText:
+		ack(false, "", fmt.Sprintf("the message is %d characters; the limit is %d", utf8.RuneCountInString(m.Text), protocol.MaxText))
 		return
 	}
 	from := s.handle
@@ -128,9 +128,25 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		if host != nil {
 			h.countCrossedLocked(m)
 		}
+		why := fmt.Sprintf("%s is not running. Send to %s to reach the person, or check `who`.", m.To, u.Handle)
 		switch {
+		case host == nil && s.l != nil:
+			// a message held for the agent's laptop, sent again from an outbox once the hub stopped listing that laptop,
+			// is still on its way: its sender hears once it is delivered or given up on
+			dev, email := s.l.dev, u.Email
+			go func() {
+				ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+				defer done()
+				kept, err := h.store.Pending(ctx, email)
+				if err == nil && slices.ContainsFunc(kept, func(p store.Pending) bool {
+					return p.Msg.ID == m.ID && p.Sender == dev && p.Device != ""
+				}) {
+					return
+				}
+				ack(false, "", why)
+			}()
 		case host == nil:
-			ack(false, "", fmt.Sprintf("%s is not running. Send to %s to reach the person, or check `who`.", m.To, u.Handle))
+			ack(false, "", why)
 		case host.online:
 			h.toDeviceLocked(host.dev, f, h.replyTo(s), cause)
 			h.toPeopleLocked(people, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{host.dev}, cause)
@@ -162,7 +178,7 @@ func (h *Hub) limitLocked(from, to string, toAgent bool) string {
 	s, now := h.settings, time.Now()
 	recent := slices.DeleteFunc(h.sends[from], func(t time.Time) bool { return now.Sub(t) > time.Minute })
 	if len(recent) >= s.SendsPerMinute {
-		return "too many messages in the last minute; group them into one"
+		return protocol.TooMany
 	}
 	h.sends[from] = append(recent, now)
 	if strings.Contains(from, "/") && toAgent {
@@ -209,19 +225,35 @@ func (h *Hub) keepLocked(s sender, m protocol.Msg, email, dev string, ttl time.D
 	}()
 }
 
-// hostLocked finds the laptop running an agent: one that is online first, else one reconnecting.
+// hostLocked finds the laptop running an agent: one that is online first, else one reconnecting. When two of its
+// person's laptops run an agent of that name, it is the one the roster lists.
 func (h *Hub) hostLocked(handle, agent string) *holder {
-	var back *holder
+	var host *holder
+	var its protocol.Agent
 	for x := range h.holdersOfLocked(handle) {
-		if !slices.ContainsFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent }) {
+		i := slices.IndexFunc(x.agents, func(a protocol.Agent) bool { return a.Name == agent })
+		if i < 0 || (!x.online && !h.allowedLocked(x.dev)) { // a laptop revoked since never comes back for it
 			continue
 		}
-		if x.online {
-			return &x
+		if host == nil || sooner(x.agents[i], x, its, *host) {
+			host, its = &x, x.agents[i]
 		}
-		back = &x
 	}
-	return back
+	return host
+}
+
+// sooner says whether agent a, on laptop x, goes before agent b, on laptop y, of the same person and name: the one
+// on a laptop online, then the one waiting for its person, as the team page shows it, then the latest to change.
+func sooner(a protocol.Agent, x holder, b protocol.Agent, y holder) bool {
+	switch {
+	case x.online != y.online:
+		return x.online
+	case waitingFor(a) != waitingFor(b):
+		return waitingFor(a)
+	case a.Since != b.Since:
+		return a.Since > b.Since
+	}
+	return x.dev < y.dev
 }
 
 // delivered passes the recipient's answer on to the laptop that sent the message.

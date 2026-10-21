@@ -350,5 +350,5 @@ func (m *model) send(to, text string) tea.Cmd {
 	}
 }
 
-// wrap breaks text into lines of at most w cells, at spaces where it can.
-func wrap(text string, w int) string { return ansi.Wordwrap(strings.TrimRight(text, "\n"), w, "") }
+// wrap breaks text into lines of at most w cells, at spaces where it can: a link, or Chinese, breaks anywhere.
+func wrap(text string, w int) string { return ansi.Wrap(strings.TrimRight(text, "\n"), w, "") }

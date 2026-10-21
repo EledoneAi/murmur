@@ -82,12 +82,13 @@ func (h *Hub) sameOrigin(next http.Handler) http.Handler {
 	})
 }
 
+// origin is the hub's origin as browsers send it: in lower case, without the scheme's own port.
 func (h *Hub) origin() string {
 	u, err := url.Parse(h.cfg.PublicURL)
 	if err != nil {
 		return h.cfg.PublicURL
 	}
-	return u.Scheme + "://" + u.Host
+	return u.Scheme + "://" + strings.TrimSuffix(strings.ToLower(u.Host), map[string]string{"http": ":80", "https": ":443"}[u.Scheme])
 }
 
 // ---------------------------------------------------------------- signed values

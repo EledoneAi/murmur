@@ -99,7 +99,7 @@ func (m *model) sheetKey(k tea.KeyPressMsg) tea.Cmd {
 	case "up", "ctrl+p":
 		s.sel = max(0, s.sel-1)
 	case "down", "ctrl+n":
-		s.sel = min(len(items)-1, s.sel+1)
+		s.sel = max(0, min(len(items)-1, s.sel+1)) // nothing matching leaves it on the first line
 	case "enter":
 		if s.sel < len(items) && items[s.sel].run != nil {
 			m.sheet = nil
@@ -127,7 +127,7 @@ func (m *model) sheetKey(k tea.KeyPressMsg) tea.Cmd {
 // sheetBox draws the sheet as a box to lay over the screen.
 func (m *model) sheetBox(maxH int) (string, int) {
 	st, g, s := m.st, m.g, m.sheet
-	w := min(72, m.w-6)
+	w := max(10, min(72, m.w-6)) // on a terminal too narrow for it, the box is cut at the edge
 	inner := w - 4
 	title := [...]string{"agents · people · files · actions", "keys", "people", "mute"}[s.kind]
 	var rows []string

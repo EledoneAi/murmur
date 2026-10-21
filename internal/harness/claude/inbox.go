@@ -27,7 +27,7 @@ func (Claude) Push(s harness.Session, text string) error {
 	if s.Version != "" && TooOld(s.Version) {
 		return tooOld(s.Version)
 	}
-	return Inject(s.Socket, text)
+	return Inject(s.Socket, harness.Quote(text)) // Claude Code says the message is from another session
 }
 
 // Inject writes one message to an inbox socket.

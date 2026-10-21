@@ -37,7 +37,9 @@ type State struct {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	// a checkout's own config may name commands: murmur reads checkouts on its own, so status and diff run no
+	// fsmonitor hook and log checks no signature (gpg.program)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.fsmonitor=false", "-c", "log.showSignature=false"}, args...)...)
 	// never take the index lock: the developer's own git commands must not trip over ours
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.Output()
@@ -462,7 +464,7 @@ func dropUnshared(ctx context.Context, top string, files []string) ([]string, er
 	if len(files) == 0 {
 		return files, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", top, "check-attr", "-z", "--stdin"}, unsharedAttrs...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", top, "-c", "core.fsmonitor=false", "check-attr", "-z", "--stdin"}, unsharedAttrs...)...)
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
 	cmd.Stdin = strings.NewReader(strings.Join(files, "\x00") + "\x00")
 	out, err := cmd.Output()

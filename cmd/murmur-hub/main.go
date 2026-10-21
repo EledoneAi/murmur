@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -42,6 +43,16 @@ func env(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// listenAddr is where the hub listens: on every interface, but with dev sign-in on this computer only, since anyone
+// who reaches that hub signs in as anyone. HOST says otherwise, as the images do inside their container.
+func listenAddr(port string, dev bool) string {
+	host := os.Getenv("HOST")
+	if host == "" && dev {
+		host = "127.0.0.1"
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func run(log *slog.Logger) error {
@@ -112,7 +123,7 @@ func run(log *slog.Logger) error {
 	// A request is read within ReadTimeout, so a client that trickles one can't hold a connection; net/http lifts the
 	// deadline once the request is read, so WebSockets and the team page's stream stay open. No write timeout:
 	// laptops keep one WebSocket open for hours, team pages a stream, and downloads take as long as they take.
-	srv := &http.Server{Addr: ":" + port, Handler: h.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+	srv := &http.Server{Addr: listenAddr(port, dev), Handler: h.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 		IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 64 << 10}
 	stopped := make(chan struct{})
 	go func() {

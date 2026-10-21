@@ -165,7 +165,11 @@ func (s *Memory) Put(_ context.Context, key string, value []byte) error {
 func (s *Memory) AddEvent(_ context.Context, e Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.events = append(s.events, e)
+	i := len(s.events) // in order of At, as Events lists them: an event added late goes back to its place
+	for i > 0 && s.events[i-1].At.After(e.At) {
+		i--
+	}
+	s.events = slices.Insert(s.events, i, e)
 	if len(s.events) > keepEvents+1000 {
 		s.events = slices.Clone(s.events[len(s.events)-keepEvents:])
 	}

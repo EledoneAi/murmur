@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -130,6 +131,8 @@ func (d *Daemon) serve(c net.Conn) {
 		}
 		_ = enc.Encode(ipc.Reply{OK: true})
 		d.shutdown()
+	default: // a newer client: it says so rather than finding the connection closed
+		_ = enc.Encode(ipc.Reply{Err: fmt.Sprintf("murmur %s doesn't know the request %q", release.Version, req.Op)})
 	}
 }
 
@@ -255,14 +258,24 @@ func (d *Daemon) subscribe(c net.Conn) {
 }
 
 func (d *Daemon) send(req ipc.Request) ipc.Reply {
-	if strings.TrimSpace(req.To) == "" || strings.TrimSpace(req.Text) == "" {
+	// as the hub cleans it: a model wrote it, and the console shows it while it sends and once it failed
+	req.To, req.Text = strings.TrimSpace(protocol.Clean(req.To, false)), strings.TrimSpace(protocol.Clean(req.Text, true))
+	if req.To == "" || req.Text == "" {
 		return ipc.Reply{Err: "both `to` and `text` are needed"}
+	}
+	// the hub refuses them, and drops the connection that carries one over a megabyte, which the outbox would send again
+	// at every reconnection
+	if n := utf8.RuneCountInString(req.Text); n > protocol.MaxText {
+		return ipc.Reply{Err: fmt.Sprintf("the message is %d characters; the limit is %d", n, protocol.MaxText)}
+	}
+	if len(req.To) > 1024 {
+		return ipc.Reply{Err: "no address on murmur is that long; `who` lists the team"}
 	}
 	d.mu.Lock()
 	from := ""
 	if req.PID != 0 || req.Session != "" {
 		s := d.senderLocked(req)
-		if s == nil {
+		if s == nil || s.name == "" { // a session without a name isn't on the team yet: it never sends as its person
 			d.mu.Unlock()
 			return ipc.Reply{Err: "this session is not on murmur yet; try again in a few seconds"}
 		}
@@ -274,7 +287,8 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 		return ipc.Reply{Err: "Murmur is " + state}
 	}
 	// into the outbox first: until the hub confirms it, it goes again with every reconnect
-	m := protocol.Msg{ID: protocol.RandomHex(8), From: from, To: req.To, Text: req.Text}
+	// the hub stamps its own time; this one is for the console while it sends, or once it failed
+	m := protocol.Msg{ID: protocol.RandomHex(8), From: from, To: req.To, Text: req.Text, At: time.Now().UnixMilli()}
 	ch := make(chan protocol.Frame, 1)
 	d.acks[m.ID] = ch
 	d.outbox[m.ID] = outMsg{Msg: m, At: time.Now()}
@@ -284,7 +298,21 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 	defer func() {
 		d.mu.Lock()
 		delete(d.acks, m.ID)
+		now := d.out
+		_, sending := d.outbox[m.ID]
 		d.mu.Unlock()
+		select {
+		case f := <-ch: // the hub's answer came as the wait ended
+			d.lateAck(f)
+		default:
+			// connected again while it waited: that connection's resend left it to this send, and the old one may have lost it
+			if now != nil && now != out && sending {
+				select {
+				case now <- protocol.Frame{T: protocol.FrameSend, Msg: &m}:
+				default:
+				}
+			}
+		}
 	}()
 	later := ipc.Reply{OK: true, Note: "not confirmed yet: murmur keeps sending it and tells you if it fails"}
 	if out == nil {

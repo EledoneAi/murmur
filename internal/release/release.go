@@ -15,7 +15,8 @@ var Version = "dev"
 func Dev() bool { return Version == "dev" }
 
 // Older compares dotted versions such as 1.2.9 and 1.2.10, by the number each part starts with, ignoring a leading
-// v: 2.1.300-rc.1 counts as 2.1.300. A part without a number counts as older, so does a missing part.
+// v and what follows a - or a +: 2.1.300-rc.1 counts as 2.1.300. A part without a number counts as older, so does a
+// missing part.
 func Older(v, than string) bool {
 	num := func(part string) (int, error) {
 		if i := strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
@@ -23,7 +24,14 @@ func Older(v, than string) bool {
 		}
 		return strconv.Atoi(part)
 	}
-	a, b := strings.Split(strings.TrimPrefix(v, "v"), "."), strings.Split(strings.TrimPrefix(than, "v"), ".")
+	parts := func(v string) []string {
+		v = strings.TrimPrefix(v, "v")
+		if i := strings.IndexAny(v, "-+"); i >= 0 { // the .1 of -rc.1 is not a fourth part
+			v = v[:i]
+		}
+		return strings.Split(v, ".")
+	}
+	a, b := parts(v), parts(than)
 	for i := range b {
 		if i >= len(a) {
 			return true
@@ -60,3 +68,18 @@ var Repo = "EledoneAi/murmur"
 
 // Tap is the Homebrew cask laptops install from, for the line the hub's front page shows.
 var Tap = "eledoneai/tap/murmur"
+
+// Before compares murmur's own versions: as Older, but a pre-release comes before its release, 1.3.0-rc.1 then
+// 1.3.0, which Older counts as one, as the coding tools' versions need. Two pre-releases of one release count as one.
+func Before(v, than string) bool {
+	if Older(v, than) || Older(than, v) {
+		return Older(v, than)
+	}
+	return pre(v) && !pre(than)
+}
+
+// pre says whether v is a pre-release, such as 1.3.0-rc.1. What follows a + is a build, hyphens included.
+func pre(v string) bool {
+	v, _, _ = strings.Cut(v, "+")
+	return strings.Contains(v, "-")
+}

@@ -20,10 +20,12 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
 )
 
@@ -47,11 +49,19 @@ func Check(hub string) (Info, error) {
 	if resp.StatusCode != http.StatusOK {
 		return i, fmt.Errorf("the hub answered %s", resp.Status)
 	}
-	return i, json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&i)
+	err = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&i)
+	i.Version = protocol.Clean(i.Version, false) // murmur update --check prints it
+	return i, err
 }
 
-// Newer says whether v is a release after this one. Builds from source never update.
-func Newer(v string) bool { return !release.Dev() && v != "" && release.Older(release.Version, v) }
+// versionForm is how a release names itself: 1.2.3, maybe after a v and before a pre-release or a build.
+var versionForm = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]*)?$`)
+
+// Newer says whether v is a release after this one; 1.3.0-rc.1 moves on to 1.3.0. Builds from source never update,
+// and a hub's "dev", or anything else that isn't a version, is never newer.
+func Newer(v string) bool {
+	return !release.Dev() && versionForm.MatchString(v) && release.Before(release.Version, v)
+}
 
 // Managed names the package manager that installed exe, which updates it instead of murmur, or "".
 func Managed(exe string) string {
@@ -182,13 +192,16 @@ func Restore(exe string) error { return os.Rename(exe+".prev", exe) }
 // healthy is how long a new daemon has to reach the hub before the old version comes back.
 var healthy = time.Minute
 
+// installed is the binary an update replaces: the running one, except in tests.
+var installed = config.Exe
+
 // Run updates this laptop to the hub's version: download and check it, install it, restart the daemon on it, and
 // put the previous version back if the new daemon isn't online within a minute. say reports each step.
 func Run(cfg config.Config, auto bool, say func(string)) error {
 	if cfg.Hub == "" {
 		return config.ErrNoHub
 	}
-	exe := config.Exe()
+	exe := installed()
 	if pm := Managed(exe); pm != "" {
 		return fmt.Errorf("%s installed this murmur: update it with %s", pm, map[string]string{"Homebrew": "brew upgrade murmur", "Nix": "your Nix configuration"}[pm])
 	}
@@ -206,10 +219,21 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 	if auto && config.UpdateSkipped(info.Version) {
 		return fmt.Errorf("%s failed on this laptop less than an hour ago", info.Version)
 	}
+	// one update at a time: a second one would move the first one's new binary to murmur.prev, over the old one
+	if dir, err := os.Open(filepath.Dir(exe)); err == nil {
+		defer dir.Close()
+		if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); errors.Is(err, syscall.EWOULDBLOCK) {
+			return errors.New("another murmur update is running")
+		}
+	}
 	say("Downloading " + info.Version + " from " + cfg.Hub)
 	v, err := download(cfg.Hub, exe)
 	if err != nil {
 		return err
+	}
+	if auto && config.UpdateSkipped(v) { // the hub's binaries may not be the version it says it runs
+		_ = os.Remove(exe + ".new")
+		return fmt.Errorf("%s failed on this laptop less than an hour ago", v)
 	}
 	if err := Install(exe); err != nil {
 		return fmt.Errorf("installing: %w", err)

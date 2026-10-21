@@ -238,7 +238,7 @@ func (h *Hub) latest(ctx context.Context) (*Latest, bool) {
 	if json.Unmarshal(b, &l) != nil || !semver.MatchString(l.Version) {
 		return nil, false
 	}
-	return &l, semver.MatchString(h.cfg.Version) && release.Older(h.cfg.Version, l.Version)
+	return &l, semver.MatchString(h.cfg.Version) && release.Before(h.cfg.Version, l.Version)
 }
 
 // newestFirst orders versions from the newest to the oldest. Those that aren't numbers, such as dev builds and
@@ -250,9 +250,9 @@ func newestFirst(a, b string) int {
 		return last(!na, !nb)
 	case !na:
 		return strings.Compare(a, b)
-	case release.Older(b, a):
+	case release.Before(b, a):
 		return -1
-	case release.Older(a, b):
+	case release.Before(a, b):
 		return 1
 	}
 	return 0
@@ -353,9 +353,9 @@ func (h *Hub) behind(v string, s Settings) string {
 	switch {
 	case v == "": // it never said hello
 		return ""
-	case s.MinVersion != "" && release.Older(v, s.MinVersion):
+	case s.MinVersion != "" && release.Before(v, s.MinVersion):
 		return "older than " + s.MinVersion + ", the oldest accepted"
-	case semver.MatchString(h.cfg.Version) && release.Older(v, h.cfg.Version):
+	case semver.MatchString(h.cfg.Version) && release.Before(v, h.cfg.Version):
 		return "older than this hub's " + strings.TrimPrefix(h.cfg.Version, "v")
 	}
 	return ""
@@ -747,7 +747,19 @@ func (h *Hub) adminSettings(w http.ResponseWriter, _ *http.Request, _ store.User
 func (h *Hub) settingsPost(w http.ResponseWriter, r *http.Request, me store.User) {
 	s := h.Settings()
 	sent := settingsSent{settingsValues: valuesOf(s)}
-	if !readBody(w, r, &sent) || !h.saveSettings(w, r, sent.over(s), me) {
+	if !readBody(w, r, &sent) {
+		return
+	}
+	// laptops update to this hub's version, so an oldest accepted version past it would keep every one out. A hub
+	// rolled back below the stored one still saves the other settings.
+	next := sent.over(s)
+	if v := strings.TrimPrefix(next.MinVersion, "v"); v != s.MinVersion && semver.MatchString(v) && semver.MatchString(h.cfg.Version) &&
+		release.Before(h.cfg.Version, v) {
+		refuse(w, http.StatusBadRequest, "The oldest accepted version can't be newer than this hub's "+strings.TrimPrefix(h.cfg.Version, "v")+
+			": laptops update to the hub's version.", "min_version")
+		return
+	}
+	if !h.saveSettings(w, r, next, me) {
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {

@@ -45,9 +45,10 @@ const (
 	idleExit   = 10 * time.Minute
 	gitEvery   = 20 * time.Second // while a session works; once more whenever its status changes
 	keepMsgs   = 1000
-	sendWait   = 6 * time.Second
 	historyMax = 2 << 20
 )
+
+var sendWait = 6 * time.Second // how long a send waits for the hub's answer; tests shorten it
 
 var errUnauthorized = errors.New("unauthorized")
 
@@ -483,7 +484,31 @@ func (d *Daemon) localAgentsLocked(withFiles bool) []protocol.Agent {
 		}
 	}
 	slices.SortFunc(out, func(a, b protocol.Agent) int { return strings.Compare(a.Name, b.Name) })
+	if withFiles {
+		fitFiles(out, protocol.HubReadLimit-64<<10) // the rest of the frame takes far less
+	}
 	return out
+}
+
+// fitFiles drops the changed files of the agents that changed longest ago until the agents, encoded, fit in budget
+// bytes: the hub closes a connection that sends a bigger frame, and the laptop would reconnect for nothing forever.
+// Their overlaps go unseen meanwhile.
+func fitFiles(agents []protocol.Agent, budget int) {
+	b, _ := json.Marshal(agents)
+	size := len(b)
+	byAge := make([]int, len(agents))
+	for i := range byAge {
+		byAge[i] = i
+	}
+	slices.SortFunc(byAge, func(i, j int) int { return cmp.Compare(agents[i].Since, agents[j].Since) })
+	for _, i := range byAge {
+		if size <= budget {
+			return
+		}
+		f, _ := json.Marshal(agents[i].Files)
+		size -= len(f)
+		agents[i].Files = nil
+	}
 }
 
 // byIDLocked finds a session by its id, in any harness.
@@ -586,6 +611,9 @@ func (d *Daemon) snapshotLocked() ipc.Snapshot {
 			failed = map[string]string{}
 		}
 		failed[id] = f.Why
+		if d.done[id] { // a refused message never reaches the history, and its person can mark it done all the same
+			done[id] = true
+		}
 		if !inHistory[id] && f.Msg.ID != "" {
 			snap.Outbox = append(snap.Outbox, f.Msg)
 		}
@@ -641,6 +669,9 @@ func (d *Daemon) hubLoop() {
 }
 
 func wsURL(hub string) string {
+	if scheme, rest, ok := strings.Cut(hub, "://"); ok { // MURMUR_HUB may say HTTPS://
+		hub = strings.ToLower(scheme) + "://" + rest
+	}
 	if rest, ok := strings.CutPrefix(hub, "https://"); ok {
 		return "wss://" + rest + "/ws"
 	}
@@ -786,6 +817,8 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 			d.team = *f.Team
 		}
 		d.available, d.forced = "", false
+		// the console and murmur status print it
+		f.Version = protocol.Clean(protocol.Cut(f.Version, 40), false)
 		if update.Newer(f.Version) { // never an older one: a hub can't take laptops back to a version with a known bug
 			d.available = f.Version
 		}
@@ -815,14 +848,15 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 		f.Note, f.Err = protocol.Clean(f.Note, false), protocol.Clean(f.Err, false) // shown to the sender and its agent
 		d.mu.Lock()
 		ch := d.acks[f.ID]
+		if ch != nil {
+			select {
+			case ch <- f: // under the lock: a sender that stops waiting finds it there
+			default:
+			}
+		}
 		d.mu.Unlock()
 		if ch == nil {
 			d.lateAck(f) // its sender stopped waiting
-			return
-		}
-		select {
-		case ch <- f:
-		default:
 		}
 	case protocol.FrameChecked:
 		for i := range f.Overlaps { // they reach an agent
@@ -872,18 +906,20 @@ func cleanPairs(in []protocol.Overlap) []protocol.Overlap {
 	return pairs
 }
 
-// failure is a message sent from this laptop that failed, and why, kept a day for the console.
+// failure is a message sent from this laptop that failed, and why, kept a day for the console, also across restarts.
 type failure struct {
-	Msg protocol.Msg // its sender in full
-	Why string
-	At  time.Time
+	Msg protocol.Msg `json:"msg"` // its sender in full
+	Why string       `json:"why"`
+	At  time.Time    `json:"at"`
 }
 
 func (d *Daemon) failLocked(m protocol.Msg, why string) {
 	if d.failed == nil {
 		d.failed = map[string]failure{}
 	}
-	d.failed[m.ID] = failure{d.fullLocked(m), why, time.Now()}
+	f := failure{d.fullLocked(m), why, time.Now()}
+	d.failed[m.ID] = f
+	d.appendHistory(histLine{Failed: &f})
 	d.changed()
 }
 
@@ -948,6 +984,10 @@ func (d *Daemon) resend(out chan protocol.Frame, minAge time.Duration) {
 func (d *Daemon) lateAck(f protocol.Frame) {
 	d.mu.Lock()
 	o, ok := d.outbox[f.ID]
+	if ok && f.Err == protocol.TooMany { // a resent copy in a burst: it goes again with the outbox's next try
+		d.mu.Unlock()
+		return
+	}
 	if ok {
 		delete(d.outbox, f.ID)
 		d.appendHistory(histLine{Sent: f.ID})
@@ -1120,6 +1160,10 @@ func (d *Daemon) answer(op, id string) error {
 // did, or why when it didn't.
 func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 	d.mu.Lock()
+	if m.From != protocol.System && d.handed[m.ID] { // a copy of one it took, maybe before its session ended
+		d.mu.Unlock()
+		return true, ""
+	}
 	var target *session
 	for _, s := range d.sessions {
 		if s.name == agent {
@@ -1161,12 +1205,15 @@ func (d *Daemon) handOver(m protocol.Msg, agent string) (bool, string) {
 		d.mu.Unlock()
 		return true, note
 	}
+	d.handed[key] = true // taken before the push: a copy arriving meanwhile isn't pushed again
 	d.mu.Unlock()
 	if err := p.Push(to, protocol.Prompt(m)); err != nil {
+		d.mu.Lock()
+		delete(d.handed, key) // tried again when the message comes back
+		d.mu.Unlock()
 		return false, "could not reach " + m.To + ": " + err.Error()
 	}
 	d.mu.Lock()
-	d.handed[key] = true
 	d.appendHistory(histLine{Handed: key})
 	d.mu.Unlock()
 	return true, ""
@@ -1207,8 +1254,9 @@ func (d *Daemon) unholdLocked(agent string) []protocol.Msg {
 // refused handles a hub that won't take this laptop's version: it learns the team's version and updates to it,
 // unless this laptop's person turned updates off.
 func (d *Daemon) refused(cfg config.Config, why string) {
-	d.setState("refused by the hub: " + why)
+	d.setState("refused by the hub: " + protocol.Clean(why, false)) // the console and murmur status print it
 	info, err := update.Check(cfg.Hub)
+	info.Version = protocol.Clean(protocol.Cut(info.Version, 40), false)
 	if err != nil || !update.Newer(info.Version) {
 		return
 	}

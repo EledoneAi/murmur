@@ -26,17 +26,19 @@ func Watch(out io.Writer, in io.Reader) error {
 		return err
 	}
 	var mu sync.Mutex
-	var last ipc.Snapshot
+	var last, listed ipc.Snapshot // the newest snapshot, and the one the needs were last numbered from
 	have := false
 	if in != nil {
 		go func() {
 			sc := bufio.NewScanner(in)
 			fmt.Fprintln(out, "Type help for the commands.")
 			for sc.Scan() {
+				line := strings.TrimSpace(sc.Text())
 				mu.Lock()
-				snap := last
+				var snap ipc.Snapshot
+				snap, listed = numbered(line, last, listed)
 				mu.Unlock()
-				reply, quit := command(snap, strings.TrimSpace(sc.Text()), time.Now(), call)
+				reply, quit := command(snap, line, time.Now(), call)
 				if reply != "" {
 					fmt.Fprintln(out, reply)
 				}
@@ -60,12 +62,13 @@ func Watch(out io.Writer, in io.Reader) error {
 				if json.Unmarshal(data, &s) != nil {
 					continue
 				}
+				s = cleanSnap(s)
 				mu.Lock()
 				var lines []string
 				if have {
 					lines = changes(last, s, time.Now())
 				} else {
-					lines = summary(s, time.Now())
+					lines, listed = summary(s, time.Now()), s
 				}
 				last, have = s, true
 				mu.Unlock()
@@ -211,6 +214,19 @@ const plainHelp = `Commands:
   send TO TEXT           message an agent (bob/main-1), a person (bob) or a repo (repo:acme/api)
   mute WHO [1h|24h]      hold messages from WHO for a while, or until you unmute
   quit`
+
+// numbered is the snapshot a command counts needs in, and the one the needs are numbered from after it: a command
+// that names a need by number counts in the list as it was last printed, so a need coming or going since doesn't
+// shift the number onto another.
+func numbered(line string, last, listed ipc.Snapshot) (snap, nowListed ipc.Snapshot) {
+	switch verb, _, _ := strings.Cut(line, " "); verb {
+	case "needs":
+		return last, last
+	case "y", "x", "done", "reply":
+		return listed, listed
+	}
+	return last, listed
+}
 
 // command runs one line typed in the plain mode and says what happened.
 func command(s ipc.Snapshot, line string, now time.Time, call func(ipc.Request) (ipc.Reply, error)) (reply string, quit bool) {

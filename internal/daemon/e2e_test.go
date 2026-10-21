@@ -480,3 +480,32 @@ func TestE2EHookedAgent(t *testing.T) {
 		t.Fatalf("again: %q", got)
 	}
 }
+
+// A message to an agent whose laptop is disconnected fails, and marking it done takes it out of the console's needs.
+func TestE2EFailedMessageCanBeMarkedDone(t *testing.T) {
+	tm := newTeam(t, "alice", "bob")
+	alice := tm.laptop("alice")
+	r := alice.send(ipc.Request{To: "bob/b1", Text: "are you on the migration?"})
+	if r.OK || !strings.Contains(r.Err, "not running") {
+		t.Fatalf("send to a disconnected agent: %+v", r)
+	}
+	snap := func() ipc.Snapshot { alice.mu.Lock(); defer alice.mu.Unlock(); return alice.snapshotLocked() }
+	s := snap()
+	if len(s.Outbox) != 1 || s.Failed[s.Outbox[0].ID] == "" {
+		t.Fatalf("the console doesn't show the failure: outbox %+v, failed %v", s.Outbox, s.Failed)
+	}
+	id := s.Outbox[0].ID
+	if at := time.UnixMilli(s.Outbox[0].At); time.Since(at) > time.Minute { // the console shows how long ago it was sent
+		t.Fatalf("the failed message was sent at %v", at)
+	}
+	c, them := net.Pipe() // the console marks it done, as x does
+	defer them.Close()
+	go alice.serve(c)
+	var done ipc.Reply
+	if json.NewEncoder(them).Encode(ipc.Request{Op: "done", ID: id}) != nil || json.NewDecoder(them).Decode(&done) != nil || !done.OK {
+		t.Fatalf("done: %+v", done)
+	}
+	if s := snap(); !s.Done[id] {
+		t.Fatalf("marked done, but the console still shows it: done %v, failed %v", s.Done, s.Failed)
+	}
+}

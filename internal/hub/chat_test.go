@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -267,5 +268,23 @@ func TestMinutes(t *testing.T) {
 	if s := (Settings{WorkStart: 9, WorkEnd: 18, Weekdays: true, TimeZone: "UTC"}); !s.working(time.Date(2026, 10, 14, 17, 59, 0, 0, time.UTC)) ||
 		s.working(time.Date(2026, 10, 14, 18, 0, 0, 0, time.UTC)) || s.working(time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)) {
 		t.Error("working hours")
+	}
+}
+
+// A chat webhook that redirects is not followed: an admin's chat address can't lead the hub to post elsewhere, such as
+// to an address inside its own network.
+func TestChatRedirectIsNotFollowed(t *testing.T) {
+	h, err := newHub(t, Config{Secret: []byte("0123456789abcdef"), Log: slog.New(slog.NewJSONHandler(io.Discard, nil))}, store.NewMemory())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := 0
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { inside++ }))
+	defer target.Close()
+	srv := httptest.NewServer(http.RedirectHandler(target.URL+"/metadata", http.StatusTemporaryRedirect))
+	defer srv.Close()
+	chatTo(h, srv.URL+"/hooks/T0/x", "slack")
+	if err := h.post(context.Background(), "hi"); err == nil || inside != 0 {
+		t.Fatalf("a redirecting chat: %v, %d posts behind it", err, inside)
 	}
 }

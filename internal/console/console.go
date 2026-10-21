@@ -18,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
+	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -28,8 +29,9 @@ type (
 	tickMsg time.Time
 	// doneMsg is the result of an action, for the outcome line.
 	doneMsg struct {
-		text string
-		err  bool
+		text   string
+		err    bool
+		resent string // the failed message a resend that didn't go was for: it can go again
 	}
 )
 
@@ -66,7 +68,8 @@ type model struct {
 		at  time.Time
 		key string
 	}
-	typing bool // keys go to the filter
+	typing    bool            // keys go to the filter
+	resending map[string]bool // failed messages sent again: ⏎ sends each once
 
 	motion  bool        // animations play; off over SSH, with MURMUR_MOTION=0 or TERM=dumb
 	anims   []anim      // the animations playing
@@ -96,7 +99,7 @@ type boardFor struct {
 
 func newModel() *model {
 	m := &model{st: newStyles(pickTheme(true)), g: pickGlyphs(), folded: map[string]bool{}, unfolded: map[string]bool{}, pinned: map[string]bool{},
-		clock: time.Now, sub: make(chan tea.Msg, 16), themeFixed: os.Getenv("MURMUR_THEME") != "", motion: motionOn()}
+		resending: map[string]bool{}, clock: time.Now, sub: make(chan tea.Msg, 16), themeFixed: os.Getenv("MURMUR_THEME") != "", motion: motionOn()}
 	m.exe = config.Exe()
 	m.bin, _ = os.Stat(m.exe)
 	if from := os.Getenv("MURMUR_UPDATED_FROM"); from != "" {
@@ -185,8 +188,34 @@ func (m *model) board() *board {
 
 // setSnap takes a new snapshot from the daemon.
 func (m *model) setSnap(s ipc.Snapshot) {
-	m.snap = s
+	m.snap = cleanSnap(s)
 	m.gen++
+}
+
+// cleanSnap makes the messages a snapshot holds safe to print, and keeps only web links to open. The daemon cleans
+// what other laptops send, not what this laptop's own agents send: a message one sends waits in the outbox, or
+// fails, as the agent wrote it, and the note saying it failed quotes its address.
+func cleanSnap(s ipc.Snapshot) ipc.Snapshot {
+	for _, msgs := range [][]protocol.Msg{s.Msgs, s.Outbox, s.Asks} {
+		for i := range msgs {
+			msgs[i].From, msgs[i].To = protocol.Clean(msgs[i].From, false), protocol.Clean(msgs[i].To, false)
+			msgs[i].Text = protocol.Clean(msgs[i].Text, true)
+		}
+	}
+	for id, why := range s.Failed {
+		s.Failed[id] = protocol.Clean(why, false)
+	}
+	for i := range s.Mutes {
+		s.Mutes[i] = protocol.Clean(s.Mutes[i], false)
+	}
+	for i := range s.People { // o opens the link: never a file, an app or a share
+		for j := range s.People[i].Agents {
+			if a := &s.People[i].Agents[j]; !strings.HasPrefix(a.PRURL, "https://") && !strings.HasPrefix(a.PRURL, "http://") {
+				a.PRURL = ""
+			}
+		}
+	}
+	return s
 }
 
 // currentScope is the scope chosen, when the team's size offers it, or the default for that size.
@@ -266,6 +295,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 	case doneMsg:
 		m.outcome = outcome{text: msg.text, err: msg.err, at: m.now()}
+		delete(m.resending, msg.resent)
 	case tea.KeyPressMsg:
 		b := m.board()
 		switch {
@@ -325,7 +355,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.inspect = !m.inspect
 	case "enter":
 		if n, ok := m.selectedNeed(b); ok && n.kind == needFailed {
-			return m, m.do(ipc.Request{Op: "send", To: n.msg.To, Text: n.msg.Text}, "Sent again to "+n.msg.To)
+			return m, m.resend(n.msg)
 		}
 		if m.selected == "fold:quiet" {
 			m.unfolded["quiet"] = !m.unfolded["quiet"]
@@ -568,6 +598,33 @@ func (m *model) selectedAddr(b *board) string {
 		return n.who
 	}
 	return ""
+}
+
+// resend sends a failed message again, once while the first try is under way, and marks the failure done once the
+// daemon keeps the new message, which then says for itself whether it gets through. Only signed out does the daemon
+// refuse to keep it.
+func (m *model) resend(x protocol.Msg) tea.Cmd {
+	if m.resending[x.ID] {
+		return nil
+	}
+	m.resending[x.ID] = true
+	online := m.snap.State == "online"
+	return func() tea.Msg {
+		r, err := m.call(ipc.Request{Op: "send", To: x.To, Text: x.Text}, 10*time.Second)
+		out := doneMsg{text: "Sent again to " + x.To}
+		switch {
+		case err != nil:
+			out = doneMsg{text: err.Error(), err: true}
+		case !r.OK:
+			out = doneMsg{text: r.Err, err: true}
+		}
+		if err == nil && (r.OK || online) {
+			_, _ = m.call(ipc.Request{Op: "done", ID: x.ID}, 10*time.Second)
+		} else {
+			out.resent = x.ID
+		}
+		return out
+	}
 }
 
 // introduce tells two agents changing the same file, who never talked, about each other: one message to each.

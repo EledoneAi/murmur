@@ -35,6 +35,7 @@ type histLine struct {
 	Gone    string         `json:"gone,omitempty"`   // and gone, by session key
 	Queued  *heldMsg       `json:"queued,omitempty"` // waiting for its session's next hook (Agent is the session key)
 	Took    *took          `json:"took,omitempty"`   // and taken, or dropped with its session
+	Failed  *failure       `json:"failed,omitempty"` // a message sent from here that failed
 }
 
 // took is a message that left a session's queue.
@@ -50,11 +51,15 @@ func (d *Daemon) loadHistory() {
 	}
 	hooked := map[string]hookedSession{}
 	if f, err := os.Open(path); err == nil {
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 64<<10), 1<<20)
-		for sc.Scan() {
+		r := bufio.NewReader(f)
+		for {
+			// a line of any length: an older version kept messages longer than the hub takes, and a scanner stops there
+			line, err := r.ReadBytes('\n')
+			if err != nil && len(line) == 0 {
+				break
+			}
 			var h histLine
-			if json.Unmarshal(sc.Bytes(), &h) != nil {
+			if json.Unmarshal(line, &h) != nil {
 				continue
 			}
 			if h.M != nil && !d.seen[h.M.ID] {
@@ -112,6 +117,12 @@ func (d *Daemon) loadHistory() {
 			if h.Queued != nil && !slices.ContainsFunc(d.queued[h.Queued.Agent], func(x heldMsg) bool { return x.Msg.ID == h.Queued.Msg.ID }) {
 				d.queued[h.Queued.Agent] = append(d.queued[h.Queued.Agent], *h.Queued)
 			}
+			if h.Failed != nil {
+				if d.failed == nil {
+					d.failed = map[string]failure{}
+				}
+				d.failed[h.Failed.Msg.ID] = *h.Failed
+			}
 			if h.Took != nil {
 				d.queued[h.Took.Key] = slices.DeleteFunc(d.queued[h.Took.Key], func(x heldMsg) bool { return x.Msg.ID == h.Took.ID })
 				if len(d.queued[h.Took.Key]) == 0 {
@@ -135,6 +146,12 @@ func (d *Daemon) loadHistory() {
 			_ = enc.Encode(histLine{M: &d.history[i]})
 			if d.done[d.history[i].ID] {
 				_ = enc.Encode(histLine{Done: d.history[i].ID})
+			}
+		}
+		for id, f := range d.failed {
+			_ = enc.Encode(histLine{Failed: &f})
+			if d.done[id] && !slices.ContainsFunc(d.history, func(m protocol.Msg) bool { return m.ID == id }) {
+				_ = enc.Encode(histLine{Done: id})
 			}
 		}
 		for k := range d.handed {
@@ -167,10 +184,12 @@ func (d *Daemon) loadHistory() {
 				_ = enc.Encode(histLine{Queued: &h})
 			}
 		}
-		_ = os.WriteFile(path+".tmp", b.Bytes(), 0o600)
-		_ = os.Rename(path+".tmp", path)
+		_ = os.Remove(path + ".tmp") // one an earlier crash left, maybe read-only
+		if os.WriteFile(path+".tmp", b.Bytes(), 0o600) == nil {
+			_ = os.Rename(path+".tmp", path)
+		}
 	}
-	d.hist, _ = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	d.hist = openHistory(path)
 	if d.sessions != nil { // what waited for a session that is gone leaves the queue in the history, once
 		for key := range d.queued {
 			if d.sessions[key] == nil {
@@ -186,9 +205,13 @@ func (d *Daemon) loadHistory() {
 // ponytail: a copy of a message the history no longer keeps can reach its agent once more. Copies come only from
 // their sender's outbox, which gives up after a day: only a laptop getting a thousand messages a day would see it.
 func (d *Daemon) pruneLocked() {
+	maps.DeleteFunc(d.failed, func(_ string, f failure) bool { return time.Since(f.At) > outboxTTL })
 	kept := map[string]bool{}
 	for _, m := range d.history {
 		kept[m.ID] = true
+	}
+	for id := range d.failed { // marked done while it still shows
+		kept[id] = true
 	}
 	gone := func(k string) bool { // k is "id" or "id/…"
 		id, _, _ := strings.Cut(k, "/")
@@ -198,7 +221,6 @@ func (d *Daemon) pruneLocked() {
 	maps.DeleteFunc(d.done, func(k string, _ bool) bool { return gone(k) })
 	maps.DeleteFunc(d.handed, func(k string, _ bool) bool { return gone(k) })
 	maps.DeleteFunc(d.answers, func(k, _ string) bool { return gone(k) })
-	maps.DeleteFunc(d.failed, func(_ string, f failure) bool { return time.Since(f.At) > outboxTTL })
 	for _, m := range []map[string][]heldMsg{d.held, d.queued} {
 		for k, q := range m {
 			if q = slices.DeleteFunc(q, func(h heldMsg) bool { return time.Since(h.At) > heldTTL }); len(q) > 0 {
@@ -208,6 +230,23 @@ func (d *Daemon) pruneLocked() {
 			}
 		}
 	}
+}
+
+// openHistory opens the history file to append to it. A crash can cut its last line short: what comes next starts a
+// line of its own, and only the cut line is lost.
+func openHistory(path string) *os.File {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil
+	}
+	last := []byte{'\n'}
+	if st, err := f.Stat(); err == nil && st.Size() > 0 {
+		_, _ = f.ReadAt(last, st.Size()-1)
+	}
+	if last[0] != '\n' {
+		_, _ = f.Write([]byte{'\n'})
+	}
+	return f
 }
 
 func (d *Daemon) appendHistory(h histLine) {

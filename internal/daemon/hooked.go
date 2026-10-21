@@ -52,6 +52,9 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 		s = &session{harness: ev.Harness, id: ev.SessionID, pid: ev.PID, started: harness.StartTime(ev.PID), cwd: ev.Cwd,
 			app: ev.Harness, hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli()}
 		s.name = d.nameLocked(ev.Harness, d.names[key])
+		if s.name != d.names[key] { // a name another session had: the notes held for that one aren't for this one
+			d.unholdLocked(s.name)
+		}
 		d.sessions[key] = s
 		if d.names != nil {
 			d.names[key] = s.name

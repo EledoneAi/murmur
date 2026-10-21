@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
@@ -139,9 +140,10 @@ func (st styles) texture(g glyphs, kinds string, n int) string {
 const fuseFull = 10 * time.Minute
 
 // fuse burns along a light line while an agent waits, half a cell at a time, full at ten minutes: teal when it
-// waits on you, muted when it waits on someone else. The clock beside it says the same in words.
+// waits on you, muted when it waits on someone else. The clock beside it says the same in words. A wait that starts
+// in the future, on a laptop whose clock is ahead, hasn't burnt anything yet.
 func (st styles) fuse(g glyphs, waited time.Duration, mine bool, width int) string {
-	halves := min(2*width, int((float64(waited)/float64(fuseFull))*float64(2*width)+0.5))
+	halves := max(0, min(2*width, int((float64(waited)/float64(fuseFull))*float64(2*width)+0.5)))
 	full, half := halves/2, halves%2
 	burnt := strings.Repeat(g.fuse, full)
 	if half == 1 {
@@ -221,8 +223,9 @@ func shortBranch(b string, w int, g glyphs) string {
 // question for you.
 func waitReason(a protocol.Agent) string {
 	if a.Needs == "permission" {
-		if a.Doing != "" {
-			return "approve " + strings.ToLower(a.Doing[:1]) + a.Doing[1:]
+		if a.Doing != "" { // a tool's own name can start with any letter
+			_, n := utf8.DecodeRuneInString(a.Doing)
+			return "approve " + strings.ToLower(a.Doing[:n]) + a.Doing[n:]
 		}
 		return "approve a tool call"
 	}

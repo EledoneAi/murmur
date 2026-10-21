@@ -62,10 +62,19 @@ func Home() string {
 // Dir holds the config, the daemon's socket, its log and the message history: nothing else is written anywhere
 // except the hook and MCP entries in Claude Code's own settings.
 func Dir() string {
-	if d := os.Getenv("MURMUR_HOME"); d != "" {
+	d := os.Getenv("MURMUR_HOME")
+	switch {
+	case d == "":
+		return filepath.Join(Home(), ".murmur")
+	case filepath.IsAbs(d):
 		return d
 	}
-	return filepath.Join(Home(), ".murmur")
+	// not absolute, such as "~/murmur" in a settings file no shell expands: from the home folder, the same for the
+	// hooks, the daemon and the MCP server, which each run in a folder of their own
+	if d == "~" || strings.HasPrefix(d, "~/") {
+		d = d[1:]
+	}
+	return filepath.Join(Home(), d)
 }
 
 // SockPath is the daemon's socket. Unix socket paths are capped near 104 bytes, so a long MURMUR_HOME falls
@@ -125,7 +134,7 @@ func Load() Config {
 		_ = json.Unmarshal(b, &c)
 	}
 	if h := os.Getenv("MURMUR_HUB"); h != "" && !c.Solo {
-		c.Hub = h
+		c.Hub = strings.TrimRight(h, "/") // murmur adds its paths after it
 	}
 	return c
 }
