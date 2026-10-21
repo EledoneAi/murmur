@@ -46,14 +46,14 @@ const (
 	gitEvery   = 20 * time.Second // while a session works; once more whenever its status changes
 	keepMsgs   = 1000
 	historyMax = 2 << 20
+	sendWait   = 6 * time.Second // how long a send waits for the hub's answer
 )
-
-var sendWait = 6 * time.Second // how long a send waits for the hub's answer; tests shorten it
 
 var errUnauthorized = errors.New("unauthorized")
 
 type Daemon struct {
 	mu         sync.Mutex
+	wait       time.Duration                // a send's wait for the hub, when not sendWait: tests shorten it
 	sessions   map[string]*session          // by harness.Key
 	hints      map[string]string            // session key -> transcript path, from its start hook
 	sockets    map[string]string            // procKey -> where murmur pushes messages to the session, from its start hook

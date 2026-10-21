@@ -106,21 +106,23 @@ func closedWith(t *testing.T, url string, frames []protocol.Frame) websocket.Sta
 	}
 }
 
-// A laptop that sends a frame over the hub's read limit, or a flood of frames, is let go; the others go on.
+// A laptop that sends a frame over the hub's read limit, or a flood of frames, is let go; the others go on. Its close
+// says why, unless the connection ends first, as it can on Linux while the laptop still writes: no laptop reads the
+// code, and each reconnects after its backoff either way.
 func TestOversizedAndFloodingLaptops(t *testing.T) {
 	_, srv := edgeTeam(t, store.NewMemory())
 	alice := connect(t, srv.URL, "tok-alice", protocol.Agent{Name: "a1", Status: protocol.StatusBusy})
 	bob := connect(t, srv.URL, "tok-bob", protocol.Agent{Name: "b1", Status: protocol.StatusIdle})
 
 	big := protocol.Frame{T: protocol.FrameSend, Msg: &protocol.Msg{ID: "big", To: "bob", Text: strings.Repeat("x", protocol.HubReadLimit)}}
-	if code := closedWith(t, srv.URL, []protocol.Frame{big}); code != websocket.StatusMessageTooBig {
+	if code := closedWith(t, srv.URL, []protocol.Frame{big}); code != websocket.StatusMessageTooBig && code != -1 {
 		t.Errorf("a frame over the read limit closed with %v", code)
 	}
 	var flood []protocol.Frame
 	for range maxFrames + 1 {
 		flood = append(flood, protocol.Frame{T: protocol.FrameCheck, ID: "c"})
 	}
-	if code := closedWith(t, srv.URL, flood); code != websocket.StatusTryAgainLater {
+	if code := closedWith(t, srv.URL, flood); code != websocket.StatusTryAgainLater && code != -1 {
 		t.Errorf("a flood closed with %v", code)
 	}
 
