@@ -34,9 +34,16 @@ type laptop struct {
 	c       *websocket.Conn
 	frames  chan protocol.Frame
 	backlog []protocol.Frame
+	welcome protocol.Frame // what the hub said first
 }
 
 func connect(t *testing.T, url, token string, agents ...protocol.Agent) *laptop {
+	t.Helper()
+	return connectWith(t, url, token, protocol.Frame{T: protocol.FrameHello, Protocol: protocol.Version, Host: "test", Agents: agents})
+}
+
+// connectWith connects a laptop that says this hello.
+func connectWith(t *testing.T, url, token string, hello protocol.Frame) *laptop {
 	t.Helper()
 	ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
@@ -55,8 +62,8 @@ func connect(t *testing.T, url, token string, agents ...protocol.Agent) *laptop 
 			l.frames <- f
 		}
 	}()
-	l.send(protocol.Frame{T: protocol.FrameHello, Protocol: protocol.Version, Host: "test", Agents: agents})
-	l.expect(func(f protocol.Frame) bool { return f.T == "welcome" })
+	l.send(hello)
+	l.welcome = l.expect(func(f protocol.Frame) bool { return f.T == "welcome" })
 	return l
 }
 

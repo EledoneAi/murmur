@@ -28,6 +28,7 @@ type session struct {
 	since   int64
 	sock    string
 	started string    // the process start time the harness records, to tell a reused pid apart
+	proc    string    // its process's start time as harness.StartTime read it when the daemon took the session in
 	hooked  bool      // learned from its hooks, for a harness that keeps no registry of its sessions
 	heard   time.Time // its last hook
 
@@ -54,8 +55,8 @@ func (s *session) key() string {
 
 // listed is the session as its harness knows it, for the harness to push a message to.
 func (s *session) listed() harness.Session {
-	return harness.Session{Harness: s.harness, ID: s.id, PID: s.pid, Name: s.name, Cwd: s.cwd, Status: s.status, App: s.app,
-		Version: s.version, Socket: s.sock, Transcript: s.transcript}
+	return harness.Session{Harness: s.harness, ID: s.id, PID: s.pid, Started: s.proc, Name: s.name, Cwd: s.cwd, Status: s.status,
+		App: s.app, Version: s.version, Socket: s.sock, Transcript: s.transcript}
 }
 
 func (s *session) agent(withFiles bool) protocol.Agent {

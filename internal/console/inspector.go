@@ -91,6 +91,20 @@ func (m *model) inspectorLines(b *board, w int) []line {
 		}
 		add("")
 	}
+	if said := m.said(r); said != "" { // in its own words, in its voice: three lines at most
+		lines := strings.Split(wrap("“"+said+"”", max(10, w-len(indent)-2)), "\n")
+		if len(lines) > 3 {
+			lines = append(lines[:2], fit(lines[2]+" "+lines[3], max(10, w-len(indent)-2), g))
+		}
+		for i, l := range lines {
+			if i == 0 {
+				add(label("LAST SAID") + st.italic.Render(l))
+			} else {
+				add(indent + st.italic.Render(l))
+			}
+		}
+		add("")
+	}
 	if a.Changed > 0 || a.PR > 0 {
 		var parts []string
 		if a.Changed > 0 {
@@ -138,8 +152,20 @@ func (m *model) inspectorLines(b *board, w int) []line {
 		}
 	}
 
+	for i, s := range m.btwLines(b, r, max(10, w-len(indent)-2)) {
+		if i == 0 {
+			add(label("BY THE WAY") + s)
+		} else {
+			add(indent + s)
+		}
+	}
+	add("")
+
 	// the actions, each a word with its key in it, as many as fit; mute's z isn't in its word, so it stays in the footer
 	acts := []string{"write", "copy"}
+	if b.askable(r) {
+		acts = []string{"write", "by the way", "copy"}
+	}
 	if a.PRURL != "" {
 		acts = append(acts, fmt.Sprintf("open #%d", a.PR))
 	}

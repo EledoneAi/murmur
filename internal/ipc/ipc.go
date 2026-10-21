@@ -4,6 +4,7 @@ package ipc
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -37,10 +38,63 @@ type Snapshot struct {
 	Version string            `json:"version"`
 	Update  string            `json:"update,omitempty"` // the team's version, when this laptop can update to it
 	Mutes   []string          `json:"mutes,omitempty"`  // what this person muted, in force now
+	// Asides are the questions asked by the way in the last day: this person's, and those asked of this person's
+	// agents, oldest first. Said has every agent of this laptop's that its coding tool lets be asked by the way, by name,
+	// with the first line of what it last said in its own words, "" until it has said something: an agent in it is on
+	// this laptop, and its person can ask it here, without a hub. Said never leaves the laptop. BtwAnswers is this
+	// laptop's setting for teammates' questions: approve, auto or off. CantAsk has this laptop's other agents, by name,
+	// with why nobody can ask them by the way, in words their person acts on: "api-9a can't be asked by the way: its
+	// Claude Code is older than 2.1.292; update Claude Code".
+	Asides     []Aside           `json:"asides,omitempty"`
+	Said       map[string]string `json:"said,omitempty"`
+	BtwAnswers string            `json:"btw_answers,omitempty"`
+	CantAsk    map[string]string `json:"cant_ask,omitempty"`
 }
+
+// Aside is a question asked by the way, as the console and plain mode show it.
+type Aside struct {
+	protocol.Btw
+	// Mine says it was asked from this laptop, by this person or by one of their agents (From then names it); else a
+	// teammate or a teammate's agent asked one of this person's agents.
+	Mine  bool   `json:"mine,omitempty"`
+	State string `json:"state"`
+	Cold  int    `json:"cold,omitempty"` // on AsideCold: the conversation the copy would read, in tokens
+}
+
+// Where an aside stands.
+const (
+	AsideAsking   = "asking"   // on its way, or waiting on the agent's person (Note says which); Mine only
+	AsideRunning  = "running"  // the copy is answering
+	AsideHeld     = "held"     // answered: the answer waits for this person, who sends it (btw-approve) or drops it
+	AsideCold     = "cold"     // the agent was idle long: the question waits for this person's go before the copy runs
+	AsideAnswered = "answered" // final: Answer holds it
+	AsideFailed   = "failed"   // final: Err says why, a person's decline included
+)
+
+// The settings for teammates' questions by the way, in config.Config.BtwAnswers and Snapshot.BtwAnswers. Empty is
+// BtwApprove. Questions from this person, from any of their laptops, never wait.
+const (
+	BtwApprove = protocol.BtwApprove // each answer waits for this person
+	BtwAuto    = protocol.BtwAuto    // answers go out on their own, except a cold question's
+	BtwOff     = "off"               // teammates can't ask this person's agents
+)
 
 // ---------------------------------------------------------------- talking to the daemon
 
+// Request is one call to the daemon. The ops for questions by the way:
+//   - "btw": To (an agent's address) and Text, under an ID the caller chose (protocol.RandomHex(8)). It returns once
+//     the question is on its way, or refused with Err. The answer shows in Snapshot.Asides. From the MCP server's btw
+//     tool (or OpenCode's murmur_btw), it carries Harness, PID and Session as send does, and the question is then asked
+//     as that agent, not as this laptop's person, and a final answer (or Err) that no btw-wait returned reaches the
+//     agent as a murmur message.
+//   - "btw-wait": ID. It returns once the aside is final, or after about two minutes: Text is the answer, Err why
+//     there is none, and Note where the question stands while it isn't final. From the btw tool, it carries Harness,
+//     PID and Session too, and returns after 45 seconds at most: the tool stops waiting at 50 (mcp.btwWait), under the
+//     coding tools' time limit for a tool call, and tells the agent the Note. A caller that closes the connection stops
+//     waiting (a tool call its coding tool cancelled): a final answer it didn't read reaches the agent as a message.
+//   - "btw-approve", "btw-decline": ID, of an aside AsideHeld (send the answer, or drop it) or AsideCold (run the
+//     copy, or decline the question) for this person.
+//   - "btw-answers": Text is BtwApprove, BtwAuto or BtwOff, saved as this laptop's setting.
 type Request struct {
 	Op      string         `json:"op"`
 	Hook    *harness.Event `json:"hook,omitempty"`    // what a harness's hook reports
@@ -188,23 +242,30 @@ func Hook(req Request, timeout time.Duration) (Reply, func(printed bool), error)
 
 // CallRunning is Call for a daemon that already runs: it never starts one.
 func CallRunning(req Request, out any, timeout time.Duration) error {
+	return CallRunningContext(context.Background(), req, out, timeout)
+}
+
+// CallRunningContext is CallRunning that gives up as soon as ctx is done, with ctx's error: it closes its connection,
+// and the daemon sees whoever called is gone (an agent's btw tool whose call was cancelled, for one).
+func CallRunningContext(ctx context.Context, req Request, out any, timeout time.Duration) error {
 	c, err := Dial()
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	defer context.AfterFunc(ctx, func() { c.Close() })()
 	_ = c.SetDeadline(time.Now().Add(timeout))
-	if err := json.NewEncoder(c).Encode(req); err != nil {
-		return err
+	err = json.NewEncoder(c).Encode(req)
+	if err == nil && out != nil {
+		var line []byte
+		if line, err = bufio.NewReaderSize(c, 1<<16).ReadBytes('\n'); err == nil {
+			err = json.Unmarshal(line, out)
+		}
 	}
-	if out == nil {
-		return nil
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
 	}
-	line, err := bufio.NewReaderSize(c, 1<<16).ReadBytes('\n')
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(line, out)
+	return err
 }
 
 // ---------------------------------------------------------------- one-shot commands
@@ -250,6 +311,42 @@ func Send(to, text string) (string, error) {
 		return "", errors.New(r.Err)
 	}
 	return r.Note, nil
+}
+
+// Btw asks an agent something by the way, as the person at this laptop, and waits about two minutes at most for the
+// answer. It returns the answer, or where the question stands when none came in time, or why there is none.
+func Btw(to, question string) (answer, note string, err error) {
+	if _, err := Settled(); err != nil { // a daemon that just started learns whether its hub carries questions
+		return "", "", err
+	}
+	id := protocol.RandomHex(8)
+	var r Reply
+	if err := Call(Request{Op: "btw", ID: id, To: to, Text: question}, &r, 10*time.Second); err != nil {
+		return "", "", err
+	}
+	if !r.OK {
+		return "", "", errors.New(r.Err)
+	}
+	r = Reply{}
+	if err := Call(Request{Op: "btw-wait", ID: id}, &r, 3*time.Minute); err != nil {
+		return "", "", err
+	}
+	if !r.OK {
+		return "", "", errors.New(r.Err)
+	}
+	return r.Text, r.Note, nil
+}
+
+// SetBtwAnswers saves how this laptop answers teammates' questions by the way: BtwApprove, BtwAuto or BtwOff.
+func SetBtwAnswers(setting string) error {
+	var r Reply
+	if err := Call(Request{Op: "btw-answers", Text: setting}, &r, 5*time.Second); err != nil {
+		return err
+	}
+	if !r.OK {
+		return errors.New(r.Err)
+	}
+	return nil
 }
 
 func Status() (string, bool, error) {

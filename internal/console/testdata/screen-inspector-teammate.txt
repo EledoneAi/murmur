@@ -1,0 +1,40 @@
+ ╭─┬─╮                                                                              
+ ● ● ●  murmur    Team    Mine    All      A alice · 4 online · 12 agents   ● live  
+                                                                                    
+  B main-1                                                            ● working 4m  
+  Review the billing config                                                         
+                                                                                    
+  PLACE      acme/api main                                                          
+                                                                                    
+  NOW        Reading billing/config.go                                              
+                         ··∿····▪···∿······                                         
+             read 83% · edit 5% · web 11%                                           
+                                                                                    
+  CONTEXT      12%                                                                  
+                                                                                    
+  IN TOUCH   ┄ A api-9b held for you                                                
+                                                                                    
+  BY THE WAY you and your agents can ask it; bob reads answers first                
+             ↝ you 6m · answered “What's left in the billing config review?”        
+                                                                                    
+  write  by the way  copy                                                           
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+                                                                                    
+ n next need  ⏎ thread  ␣ close  z mute                                     ? keys  

@@ -1,0 +1,24 @@
+ ╭─┬─╮                                                                              
+ ● ● ●  murmur   Team › Billing                seen only by the people on each end  
+                                                                                    
+          Step 7: billing/rerun.go:87 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 8: billing/rerun.go:88 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 9: billing/rerun.go:89 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 10: billing/rerun.go:90 still calls Rerun() through the alias,       
+          and certifier.go reads it once more.                                      
+          Step 11: billing/rerun.go:91 still calls Rerun() through the alias,       
+          and certifier.go reads it once more.                                      
+          Step 12: billing/rerun.go:92 still calls Rerun() through the alias,       
+          and certifier.go reads it once more.                                      
+          Last: the deploy key is in the vault, not here.                           
+          y share   x drop                                                          
+                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────── 
+ to A api-9b  write to send                                                         
+ api-9b is working; it reads this between two tool calls.                           
+ ✓ Read on: y shares api-9b's answer once all of it has been on screen · 14:32      
+                                                                                    
+ w write  b by the way  ⇥ recipient  [ ] constellation  esc back            ? keys  

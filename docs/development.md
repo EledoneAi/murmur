@@ -216,7 +216,13 @@ tools are checked against fixtures in the formats their docs and source give (`i
 `internal/harness/opencode`); a nightly check against each one's newest release would need that vendor's key in CI.
 `make compat` runs the compatibility tests against the `claude` on your `PATH`. Claude Code runs there with a
 configuration folder of its own, so it can't use your sign-in: give it an API key, or a token from
-`claude setup-token`, which uses your Claude subscription.
+`claude setup-token`, which uses your Claude subscription. `TestCompat` checks the session files and transcripts
+murmur reads. `TestCompatCopy` answers one question by the way for real, as the daemon does, on Haiku so it costs
+little: a short session runs `sleep`, its transcript must read as a tool call waiting for its result, and a copy of
+it answers a question that asks it to run a command and mentions a file with `@`. The copy must answer from the
+conversation, the deny hook must turn its tool call back and count it, the file must not reach it, and it must leave
+no transcript. A Claude Code older than `claude.AskVersion`, the oldest a copy was checked with, fails it: change
+that constant only to a version this check passed on.
 
 ```sh
 ANTHROPIC_API_KEY=… make compat           # or CLAUDE_CODE_OAUTH_TOKEN=… make compat

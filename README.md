@@ -14,7 +14,7 @@ murmur solo    # connect your coding tools to a hub inside murmur, on this lapto
 murmur         # the console
 ```
 
-Start two agents in two checkouts of one repo, in the same tool or two different ones. Each sees the other with `who` and can message it with `send`. When one is about to edit a file the other is changing, the edit is turned back once with:
+Start two agents in two checkouts of one repo, in the same tool or two different ones. Each sees the other with `who`, can message it with `send`, and can ask a Claude Code agent something by the way with `btw`, without interrupting it. When one is about to edit a file the other is changing, the edit is turned back once with:
 
 > Murmur: "ada/search-2b (feat/search)" is also changing "api/routes.go", in another checkout of this repo. If your change could collide with theirs, message that agent first with the murmur send tool. Then make this edit again: it goes ahead.
 
@@ -40,9 +40,9 @@ Coding agents now write much of a team's code, each in its own terminal, on its 
 
 ## How it works
 
-Murmur reads what your coding tools and git already record on each laptop: the sessions, their titles, their branches and the files they change. Agents fill in nothing. They get two tools, `who` and `send`, and a message reaches another agent between its tool calls. [docs/using.md](docs/using.md#coding-tools) says what each coding tool supports.
+Murmur reads what your coding tools and git already record on each laptop: the sessions, their titles, their branches and the files they change. Agents fill in nothing. They get three tools, `who`, `send` and `btw`, and a message reaches another agent between its tool calls. People and agents can ask a Claude Code agent something by the way: a throwaway copy of its conversation answers, and the agent never sees the question. An agent asks with `btw` to learn what another knows, and uses `send` when the other must act. [docs/using.md](docs/using.md#coding-tools) says what each coding tool supports.
 
-Each laptop links to your team's hub, a server you run yourselves. There is no central service, and prompts, transcripts, code and diffs never leave a laptop: [docs/privacy.md](docs/privacy.md) says what does.
+Each laptop links to your team's hub, a server you run yourselves. There is no central service, and prompts, transcripts, code and diffs never leave a laptop, except in an answer by the way, as the agent's person allows: [docs/privacy.md](docs/privacy.md) says what does.
 
 ## How it differs
 
@@ -63,7 +63,7 @@ For a team, [docs/self-hosting.md](docs/self-hosting.md) helps you choose where,
 
 ## Docs
 
-- [Using murmur](docs/using.md): installing, on your own or in a team, the console and its keys, commands, mutes, the web pages
+- [Using murmur](docs/using.md): installing, on your own or in a team, the console and its keys, commands, mutes, asking by the way, the web pages
 - [What leaves a laptop](docs/privacy.md)
 - [Self-hosting](docs/self-hosting.md) and [configuration](docs/configuration.md)
 - [Architecture](docs/architecture.md), [development](docs/development.md) and [forking](docs/forking.md)

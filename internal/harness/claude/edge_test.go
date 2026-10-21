@@ -37,7 +37,7 @@ func TestTheirHookInOurGroup(t *testing.T) {
 		if s, _ := os.ReadFile(path); !strings.Contains(string(s), "guard --no-secrets") {
 			t.Fatalf("join dropped their hook:\n%s", s)
 		}
-		if hooks, perms, _ := SetupState(path); !hooks || !perms {
+		if hooks, perms, _ := SetupState(path); !hooks || len(perms) != len(toolPermissions) {
 			t.Fatal("doctor misses murmur's hooks")
 		}
 	}

@@ -260,8 +260,8 @@ admins only, and every action that signs someone out or takes rights away asks f
   at once.
 - **Settings**: everything in [configuration.md](configuration.md#admin-settings).
 - **Events**: sign-ins, laptops signed in and revoked, people removed and let back in, admin rights given and taken,
-  settings changed and announcements sent, never the text of a message. The log keeps the newest 10,000 events,
-  none older than 90 days.
+  settings changed and announcements sent, never the text of a message, a question or an answer. The log keeps the
+  newest 10,000 events, none older than 90 days.
 
 To take admin rights from someone listed in `ADMINS`, take them out of `ADMINS` too: otherwise they become an admin
 again at their next sign-in.

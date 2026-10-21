@@ -25,6 +25,7 @@ func TestIgnored(t *testing.T) {
 		"ignored_paths": func(s *Settings) { s.IgnoredPaths = []string{"["} }, "sends_per_minute": func(s *Settings) { s.SendsPerMinute = 0 },
 		"work_end": func(s *Settings) { s.WorkEnd = s.WorkStart }, "time_zone": func(s *Settings) { s.TimeZone = "Mars" },
 		"allowed_emails":  func(s *Settings) { s.AllowedEmails = []string{"erin"} },
+		"btw_per_hour":    func(s *Settings) { s.BtwPerHour = 1001 },
 		"allowed_domains": func(s *Settings) { s.AllowedDomains = []string{"erin@x.com"} },
 	} {
 		s := Defaults()

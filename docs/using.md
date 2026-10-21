@@ -25,7 +25,7 @@ brew install eledoneai/tap/murmur
 murmur solo
 ```
 
-`murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1, which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see each other in the console whatever tool each runs in, message each other, and hear who before editing a file that another of your checkouts changes. That hub keeps everything in memory, so when the daemon restarts, messages kept for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates the way it was installed: `brew upgrade murmur`, or the newest binary from the [releases](https://github.com/EledoneAi/murmur/releases).
+`murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1, which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see each other in the console whatever tool each runs in, message each other, ask each other by the way ([below](#asking-by-the-way)), and hear who before editing a file that another of your checkouts changes. Questions by the way stay on the laptop: you and your agents ask its own agents, and a teammate's agent needs your team's hub. That hub keeps everything in memory, so when the daemon restarts, messages kept for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates the way it was installed: `brew upgrade murmur`, or the newest binary from the [releases](https://github.com/EledoneAi/murmur/releases).
 
 **Without Homebrew**, use the line on your hub's front page:
 
@@ -56,6 +56,11 @@ murmur join HUB       join your team's hub: sign in and connect your coding tool
 murmur solo           use murmur on your own: connect your coding tools to a hub inside this laptop's daemon
 murmur who            people and their agents (exits 1 when this laptop is not connected)
 murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every agent in a repo (repo:acme/api)
+murmur btw AGENT QUESTION
+                      ask an agent (bob/main-1, or your own main-1) something by the way: a copy of its
+                      conversation answers, and the agent never sees the question
+murmur btw-answers    how your agents answer teammates' questions by the way: approve (the default), auto or off;
+                      alone, says which is set
 murmur mute WHO       hold messages to your agents from bob, bob/main-1, repo:acme/api, branch:feat/x,
                       branch:acme/api@feat/x or group:bob/main-1 (for 30m, 2h or tomorrow; else until unmute)
 murmur unmute WHO     stop holding new messages from WHO
@@ -72,18 +77,21 @@ murmur uninstall      undo join and sign the laptop out (asks first; --yes for s
 ## The console
 
 What needs you comes first, oldest first, and stays in view: your agents waiting for you in their terminal,
-questions to you, messages a mute holds for your agents, and messages that didn't get through. `n` goes to the next
-one from anywhere. Below it, agents that exchanged messages in the last 24 hours form constellations, with lines
-between those that talk: bright between people, dim between one person's agents, dashed for a held message. When
-two agents change the same file, the constellation says whether they are in tune (`≈`, they talk) or not (`×`);
-agents not in touch that change the same file are listed as out of tune, and `i` introduces them. Agents idle for
-over two hours fold away.
+questions to you, messages a mute holds for your agents, questions by the way from teammates and their agents that
+wait for you, and messages that didn't get through. `n` goes to the next one from anywhere. Below it, agents that
+exchanged messages, or asked one another by the way, in the last 24 hours form constellations, with lines between
+those that talk: bright between people, dim between one person's agents, dashed for a held message or a question by
+the way that waits for you. When two agents change the same file, the constellation says whether they are in tune
+(`≈`, they talk) or not (`×`); agents not in touch that change the same file are listed as out of tune, and `i`
+introduces them. Agents idle for over two hours fold away.
 
 Each agent is one line: its state (`●` working, `◆` needs you, `◇` waits on its owner, `○` idle), its owner's
 initial, its name, where it works (its branch, `²` for a second checkout, `⟵` for the branch it is stacked on,
 `⌂` outside git), its title, and the texture of its last tool calls (`·` read, `▪` edit, `›` run, `∿` web,
 `⋔` subagent, `⇢` message), or, while it waits, a fuse that burns for ten minutes beside a clock. The selected
-agent unfolds what it does now, the size of its change, its pull request and how full its context is.
+agent unfolds what it does now, the size of its change, its pull request and how full its context is. For your own
+agents, the console also shows the first line of what each last said in its own words, read from its transcript on
+your laptop: it never leaves the laptop.
 
 The header has the scope tabs, Team, Mine and All (Near me, Team and All past ten people), and you: your initial
 in your colour. The hub gives everyone their colour in the order they joined, so a person's colour is the same on
@@ -97,8 +105,9 @@ the footer names the keys for the selection that the screen doesn't show already
 | `t`, `m`, `a` | the scope tabs: Team, Mine, All; past ten people, `m` is Near me |
 | `n`, `g` | next thing that needs you; go to your agent's terminal to answer it (tmux, iTerm2, WezTerm, kitty) |
 | `⏎`, `w`, `r` | open the conversation, write in it, reply |
+| `b` | ask the selected agent something by the way ([below](#asking-by-the-way)) |
 | `␣` | the inspector: everything known about an agent |
-| `y`, `x` | let a held message through, or drop it; `x` also marks a question or a conversation done |
+| `y`, `x` | let a held message through, or drop it; share an answer by the way once you have read it whole, or drop it; run or decline a cold question; `x` also marks a question or a conversation done |
 | `z`, `N`, `*` | mute where messages come from; nudge a teammate whose agent waits for them; pin a constellation |
 | `c`, `o`, `i` | copy an address, open a pull request, introduce two agents out of tune |
 | `:` or `⌃k`, `/`, `p` | palette, filter, people |
@@ -121,6 +130,80 @@ laptop's clock), or until you unmute. `group:bob/main-1` mutes that agent and ev
 in the last 24 hours, as they are when you mute, except your own agents. Muting one of your own agents holds what
 reaches it, so it can work undisturbed. Mutes live on each laptop: with two laptops, mute on each.
 
+## Asking by the way
+
+`b` on an agent, or `murmur btw bob/main-1 "what are you stuck on?"`, asks it something without interrupting it. On
+the laptop of the agent's person, murmur runs a throwaway copy of the agent's conversation, and the copy answers.
+The agent never sees the question: nothing reaches its inbox, it takes no turn, and its context doesn't grow. The
+copy runs no tools, so it answers from what the conversation already holds: it can't read a file, run a command or
+look anything up. Only Claude Code agents can be asked, from Claude Code 2.1.292, the oldest murmur checked copies
+with (an older session can't be: the console and `murmur btw` say so, and updating Claude Code fixes it), and not on a
+laptop where your organisation's managed Claude Code settings turn hooks off (`disableAllHooks`,
+`allowManagedHooksOnly`): murmur couldn't keep the copy from using tools. Agents ask too, with murmur's `btw` tool.
+
+**When you ask**, you see where the question stands in the agent's thread: on its way, waiting for the agent's person,
+or being answered, which takes a few seconds. Then the answer, with how much the copy read, in tokens. `murmur btw`
+prints the answer when it comes; past about two minutes, it says where the question stands, and the answer shows in
+the console, or in a notification. Your own agents answer you at once, on this laptop or your others. On your own
+(`murmur solo`), only this laptop's agents can be asked: a teammate's agent needs your team's hub, and murmur says so
+at once. While the answer hasn't come, your laptop asks again every two minutes, so a question whose agent's laptop is
+away or restarting goes once it is back; after a day without an answer, the question fails. Murmur's background
+process stays up while one of your questions waits, even with no agent or console open, to hear the answer.
+
+**When an agent asks**, with `btw`, it learns what another agent is doing, has found or knows, without interrupting
+it; it uses `send` instead when the other agent must act on something or answer itself. Agents in every coding tool
+murmur connects can ask. An agent asks one agent: `bob/main-1`, or `main-1` for one of its person's own, never
+itself. If the answer comes within 45 seconds, the tool returns it, marked as relayed by murmur from a copy of the
+other agent's conversation, which never saw the question. Otherwise the tool says where the question stands, and the
+agent goes on with its work: the answer reaches it once, later, as a message from the agent it asked, delivered as
+messages are ([below](#coding-tools)). The message says it came from a copy of that agent's conversation, which never
+saw the question, and to ask a follow-up with `btw` again, keeping `send` for when that agent must act or reply
+itself. An answer whose tool call was cancelled, its person having stopped the agent while `btw` waited, comes the
+same way. When no answer will come, murmur's note quotes why, as the other laptop or the hub said it, and waits while
+the agent is idle. An agent that closes before its answer comes, or before it reads it, gets nothing, and the agent
+asked never hears of it.
+
+Your agents' questions show in your console, in italics: in the asking agent's thread and in the thread of the agent
+asked, with the answer, once, even when it reached your agent as a message. On the board, a question links the two
+agents, as a message does. Your agents' answers go to them, never to a notification.
+
+**When a teammate, or a teammate's agent, asks one of your agents**, the copy runs at once on your laptop, signed in
+as the agent is, with your Claude account or your cloud provider, which bills it. By default, the question and its
+answer then wait in Needs you: `y` shares the answer once you have had all of it on screen, `x` drops it, and the
+teammate hears you didn't share it. An answer that fits on the line under the question shares at once; a longer one
+opens in the agent's thread on the first `y`, and the next `y` shares it (one taller than the screen scrolls on,
+with `y` or `↑↓`, until you have seen it all). In a thread, `y` and `x` act on what shows them under it.
+`murmur --plain` prints the answer whole wherever it gives the number `y` takes. A question for an agent idle for
+over an hour waits for your go before the copy runs: by then the conversation has left the prompt cache, and a copy
+reads all of it again at full price, many times what it costs while the agent works. Needs you shows how long the
+agent has been idle and how much the copy would read, in tokens; `y` runs it, `x` declines the question. A
+teammate's agent asks as its person would, under its own name: Needs you shows the agent that asked beside its
+person's initial, and the notification names it ("carol's agent web-2 asks main-1 by the way"). Questions from you
+and your agents to your own agents never wait. When the copy fails, or can't sign in, the teammate hears only that;
+you see why, and what to do.
+
+A laptop runs two copies at once at most, one per agent. Two more questions for an agent wait for its copy, five
+minutes at most, and one more is refused; a copy has two minutes to answer. Copies still running when murmur's
+background process stops (an update, `murmur uninstall`, a signal) stop with it, with anything they started, so they
+cost nothing more: their questions fail, saying murmur restarted, and can be asked again. The hub counts the
+questions an agent asks with its person's, and as messages: two agents that ask and write each other too often
+without a person are paused, as their messages are ([configuration.md](configuration.md#admin-settings)).
+
+`murmur btw-answers`, or the palette, sets how your agents answer teammates and their agents:
+
+| Setting | Questions from teammates and their agents |
+|---|---|
+| `approve`, the default | the copy runs at once, and each answer waits for you |
+| `auto` | answers go out on their own; a question for an agent idle for over an hour still waits for your go |
+| `off` | they can't ask your agents; you and your agents still can, from any of your laptops |
+
+The setting lives on each laptop: with two laptops, set it on each. Whatever it says, a laptop answers at most 20
+questions an hour from teammates and their agents. Teammates see which of your agents they can ask, and whether the
+answers wait for you; with `off`, that only you and your agents ask them. The hub refuses teammates and their agents
+then, whatever their laptop says. The team's admins can turn off questions through the hub
+([configuration.md](configuration.md#admin-settings)): then you and your agents can ask only your agents on the same
+laptop.
+
 ## The web pages
 
 The hub's web page shows your laptops, where you can revoke one, and the team. Its team page (`/team`) is the
@@ -139,8 +222,9 @@ admin panel too (`/admin`): who may join, people and laptops, settings, and the 
 ## Notifications
 
 When someone messages you, or a mute holds a message for one of your agents, the laptop shows a desktop
-notification (macOS, or Linux with `notify-send`) with the sender and the first line, never more.
-`murmur notifications off` turns them off.
+notification (macOS, or Linux with `notify-send`) with the sender and the first line, never more. So does a
+question by the way that waits for you, and the answer to yours, unless `murmur btw` is still waiting to print it;
+answers to your agents' questions go to the agents instead. `murmur notifications off` turns them off.
 
 ## VS Code and the desktop app
 
@@ -169,6 +253,9 @@ in how a message reaches their agents:
   Each message comes into the agent's context under a line that says it comes from another session, not from its
   person, and can't approve anything.
 - **Context.** How full an agent's context window is shows for Claude Code only.
+- **Asking by the way.** Only Claude Code agents can be asked, from Claude Code 2.1.292: murmur copies a
+  conversation only in Claude Code, and only in versions it checked copies with. Agents in every tool can ask, with
+  `btw`, and a late answer reaches them as their messages do.
 - **Codex** runs a new hook only once you trust it: after `murmur join`, open `/hooks` in Codex and trust murmur's.
   murmur's hooks go in `hooks.json`; if you keep yours in `config.toml`, Codex warns that both are in use until one
   place holds them all. Codex runs its sessions in a background server that can outlive them, so a session closed
@@ -186,30 +273,39 @@ For each coding tool it finds, and only those:
   briefs the session on the team (who else works in its repo, overlapping files, waiting messages, the team's
   agreements), a `PreToolUse` hook on `Edit`, `MultiEdit`, `Write` and `NotebookEdit` that checks a file before an
   agent changes it, a `Notification` hook that reports when an agent waits for its person, and permission for the
-  two tools (`mcp__murmur__who`, `mcp__murmur__send`). `crossSessionInbound: "accept"` in the same file, only if you
-  say yes. Claude Code delivers messages between
-  sessions from version 2.1.224. A session in `bypassPermissions` mode without this setting holds each message
-  for an approval and drops it after 5 minutes, and with `"refuse"` agents get no messages at all. `join` and
-  `doctor` say so, and `join` offers to set it when it runs in a terminal. The `murmur` MCP server, registered
-  with `claude mcp add --scope user`.
+  three tools (`mcp__murmur__who`, `mcp__murmur__send`, `mcp__murmur__btw`). `crossSessionInbound: "accept"` in the
+  same file, only if you say yes. Claude Code delivers messages between sessions from version 2.1.224; its agents can
+  be asked by the way from 2.1.292. A session in `bypassPermissions` mode without this setting holds each message for
+  an approval and drops it after 5 minutes, and with `"refuse"` agents get no messages at all. `join` and `doctor`
+  say so, and `join` offers to set it when it runs in a terminal. The `murmur` MCP server, registered with
+  `claude mcp add --scope user`.
 - **Codex**, `~/.codex/hooks.json` (or `$CODEX_HOME`): hooks on `SessionStart`, `UserPromptSubmit`, `PreToolUse`
   (`apply_patch`), `PostToolUse`, `Stop`, `PermissionRequest` and `SessionEnd`, after your own. At the end of
-  `config.toml`, a block of murmur's own between two comment lines: the MCP server, with its two tools set to run
-  without asking. murmur changes or removes that block only as it wrote it, and reads nothing else in the file; if
-  you changed it, or have another server called `murmur`, join and uninstall say what to do by hand.
+  `config.toml`, a block of murmur's own between two comment lines: the MCP server, with its three tools set to run
+  without asking (`[mcp_servers.murmur.tools.btw]` with `approval_mode = "approve"`, and the same for `who` and
+  `send`). murmur changes or removes that block only as it wrote it, and reads nothing else in the file; if you
+  changed it, or have another server called `murmur`, join and uninstall say what to do by hand.
 - **Cursor**, `~/.cursor/hooks.json`: hooks on `sessionStart`, `beforeSubmitPrompt`, `preToolUse` (`Write`),
-  `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:who` and `murmur:send` in the
-  editor's MCP allowlist in `permissions.json`, only where you keep one (an allowlist murmur created would replace
-  the one in Cursor's settings), and `Mcp(murmur:who)` and `Mcp(murmur:send)` in the CLI's `cli-config.json`.
-- **OpenCode**, `~/.config/opencode/plugins/murmur.js`: murmur's plugin, which gives agents `murmur_who` and
-  `murmur_send`.
+  `postToolUse`, `stop` and `sessionEnd`. The MCP server in `mcp.json`. `murmur:who`, `murmur:send` and `murmur:btw`
+  in the editor's MCP allowlist in `permissions.json`, only where you keep one (an allowlist murmur created would
+  replace the one in Cursor's settings), and `Mcp(murmur:who)`, `Mcp(murmur:send)` and `Mcp(murmur:btw)` in the
+  CLI's `cli-config.json`.
+- **OpenCode**, `~/.config/opencode/plugins/murmur.js`: murmur's plugin, which gives agents `murmur_who`,
+  `murmur_send` and `murmur_btw`.
 - **Copilot CLI**, `~/.copilot/hooks/murmur.json` (or `$COPILOT_HOME`), a file of murmur's own, and the MCP server
   in `mcp-config.json`. Copilot asks before every MCP tool, so murmur's hook before edits and murmur's tools lets
-  `murmur-who` and `murmur-send` through, and lets everything through if murmur is gone.
+  `murmur-who`, `murmur-send` and `murmur-btw` through, and lets everything through if murmur is gone.
 - **Gemini CLI**, `~/.gemini/settings.json`: hooks on `SessionStart`, `BeforeAgent`, `BeforeTool` (`write_file`,
-  `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted for its two
-  tools. A project's own server called `murmur` doesn't inherit that trust: Gemini CLI replaces the entry whole.
-- `~/.murmur/`: config and sign-in token, the background process's socket and log, message history.
+  `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted, with
+  `includeTools` naming its three tools, `who`, `send` and `btw`: Gemini CLI offers agents only those. A project's
+  own server called `murmur` doesn't inherit that trust: Gemini CLI replaces the entry whole.
+- `~/.murmur/`: config and sign-in token, the background process's socket and log, the history of messages and
+  questions by the way.
+
+A laptop set up by an earlier version gets the `btw` entries at its next setup: the first time murmur's background
+process starts on the new version, or `murmur join`. Until then a coding tool may ask before an agent's `btw` runs,
+Gemini CLI doesn't offer it, and `murmur doctor` says so for Claude Code. A Codex block you changed by hand is left
+alone, as above. A session started before the update gets `btw` once it restarts, as it gets the new hooks.
 
 Settings files keep their keys in order, their indentation and what they say, and a copy of the original is kept as
 `<file>.before-murmur`; murmur's own entries keep their place when join runs again. A settings file you keep as a
@@ -226,7 +322,8 @@ and `crossSessionInbound` if join set it.
 ```
 agents' sessions --(session list, transcripts, hooks, git: read only)--> daemon <--WebSocket--> your team's hub
 agents' sessions <--(messages: an inbox, a plugin, or hooks' answers)--- daemon
-console, MCP server (who, send) <--(local socket)----------------------- daemon
+a session's copy <--(a question by the way, its answer; no tools)------> daemon
+console, MCP server (who, send, btw) <--(local socket)------------------ daemon
 ```
 
 - **The daemon** (`murmur daemon`, one per laptop) is the only long-lived process. The hooks, the console and
@@ -250,8 +347,14 @@ console, MCP server (who, send) <--(local socket)----------------------- daemon
   `linguist-vendored`, `-diff` or `murmur-ignore`, and the paths the team's admins ignore never count.
 - **Briefs.** Each session starts knowing who else works in its repo, what overlaps, which messages wait for it,
   and the team's agreements.
+- **Asking by the way.** A question, from a person or an agent, goes to the laptop of the agent's person, through
+  the hub unless the agent is yours and on the same laptop. There the daemon runs the agent's own `claude` on a fork
+  of its conversation, with every tool refused and nothing saved, signed in as the session is, and sends the answer
+  back. The session's transcript stays as it was. The hub passes the question and the answer on, and keeps neither
+  in its store ([privacy.md](privacy.md)). An answer that comes after an agent's `btw` stopped waiting goes to that
+  agent as a message, delivered as above.
 - **The hub** keeps people, laptops and messages for people who are offline in its store, routes messages, and
-  passes presence between laptops. It logs events, never the text of a message.
+  passes presence between laptops. It logs events, never the text of a message, a question or an answer.
 - **Text from others** (names, titles, branches, messages) loses terminal escape codes, control characters and
   invisible characters, at the hub and on each laptop, before anything prints it or hands it to an agent.
 - **Updates.** The admins choose how laptops follow the hub's version: on their own while no agent is busy, when

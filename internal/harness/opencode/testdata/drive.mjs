@@ -1,7 +1,7 @@
 // Drives murmur's OpenCode plugin as OpenCode does, with a client that records the prompts it gets, and prints what
 // happened as JSON. Payloads follow OpenCode's plugin API (packages/plugin/src/index.ts, v1.19).
 import { connect } from "node:net"
-import { readdirSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 
 const [plugin, sockets] = process.argv.slice(2)
@@ -41,6 +41,21 @@ try {
   out.edit = e.message
 }
 out.who = await hooks.tool.murmur_who.execute({}, { sessionID: "s2", messageID: "m", agent: "plan", abort: new AbortController().signal })
+out.btw = await hooks.tool.murmur_btw.execute(
+  { to: "bob/b1", question: "what are you on?" },
+  { sessionID: "s2", messageID: "m", agent: "plan", abort: new AbortController().signal },
+)
+// a btw whose call is aborted, its person having stopped the agent, stops murmur and resolves at once
+const abort = new AbortController()
+const slow = hooks.tool.murmur_btw.execute(
+  { to: "bob/b1", question: "slow?" },
+  { sessionID: "s2", messageID: "m", agent: "plan", abort: abort.signal },
+)
+for (let i = 0; i < 250 && !existsSync(`${sockets}/slow`); i++) await new Promise((r) => setTimeout(r, 20))
+const aborted = Date.now()
+abort.abort()
+out.aborted = await slow
+out.abortedIn = Date.now() - aborted
 
 const socks = readdirSync(sockets).filter((f) => f.startsWith(`opencode-${process.pid}-`) && f.endsWith(".sock"))
 out.sockets = socks.length

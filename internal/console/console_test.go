@@ -1,6 +1,7 @@
 package console
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
@@ -57,7 +58,7 @@ func TestGolden(t *testing.T) {
 	for _, w := range []int{60, 84, 110, 160} {
 		for _, th := range []theme{dark, light} {
 			m := demo(w, 32, th)
-			press(m, "down", "down", "down", "down", "down") // the first board row, with its detail line
+			press(m, "down", "down", "down", "down", "down", "down") // the first board row, with its detail line
 			text, _ := m.screen()
 			golden(t, fmt.Sprintf("home-%d-%s.ansi", w, th.name), text)
 			if th.name == "dark" {
@@ -121,7 +122,7 @@ func TestNeeds(t *testing.T) {
 	for _, n := range b.needs {
 		got = append(got, n.key)
 	}
-	want := []string{"need:agent:alice/api-1a", "need:msg:m6", "need:held:h1"}
+	want := []string{"need:agent:alice/api-1a", "need:btw:w2", "need:msg:m6", "need:held:h1"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("needs %v, want %v", got, want)
 	}
@@ -131,7 +132,7 @@ func TestNeeds(t *testing.T) {
 	if m.selected != want[0] {
 		t.Fatalf("n went to %q", m.selected)
 	}
-	press(m, "n", "n", "n")
+	press(m, "n", "n", "n", "n")
 	if m.selected != want[0] {
 		t.Fatalf("n doesn't go round: %q", m.selected)
 	}
@@ -143,11 +144,11 @@ func TestFailedMessageIsOneNeed(t *testing.T) {
 		Msgs:   []protocol.Msg{{ID: "nd-m1", From: protocol.System, To: "alice", Text: "not delivered to bob/b1: offline", At: 2}},
 		Outbox: []protocol.Msg{{ID: "m1", From: "alice", To: "bob/b1", Text: "hi", At: 1}},
 		Failed: map[string]string{"m1": "bob/b1 is not running"}}
-	if n := buildNeeds(s, nil, demoNow); len(n) != 1 || n[0].kind != needFailed {
+	if n := buildNeeds(s, nil, nil, demoNow); len(n) != 1 || n[0].kind != needFailed {
 		t.Fatalf("needs: %+v", n)
 	}
 	s.Done = map[string]bool{"m1": true}
-	if n := buildNeeds(s, nil, demoNow); len(n) != 0 {
+	if n := buildNeeds(s, nil, nil, demoNow); len(n) != 0 {
 		t.Fatalf("marked done, still needs: %+v", n)
 	}
 }
@@ -240,24 +241,45 @@ func TestGutter(t *testing.T) {
 	}
 }
 
-// The other screens, at the width where each matters, compared with testdata like the home screen.
+// The other screens, at the width where each matters, compared with testdata like the home screen. A screen can start
+// from another team than the demo's, on a selection, and be taller than 32 rows.
 func TestGoldenScreens(t *testing.T) {
 	for _, c := range []struct {
 		name string
-		w    int
+		w, h int
+		snap func() ipc.Snapshot
+		sel  string
 		keys []string
 	}{
-		{"inspector-side", 140, []string{"down", "down", "down", "down", "down", "down", "space"}},
-		{"inspector-full", 84, []string{"down", "down", "down", "down", "down", "down", "space"}},
-		{"thread", 110, []string{"down", "down", "down", "down", "down", "enter"}},
-		{"composer", 110, []string{"down", "down", "down", "down", "down", "down", "w", "O", "k"}},
-		{"palette", 110, []string{":", "w", "e", "b"}},
-		{"palette-actions", 110, []string{"down", "down", "down", "down", "down", "down", ":", "a", "p", "i", "9", "b"}},
-		{"help", 110, []string{"?"}},
-		{"mute", 110, []string{"down", "down", "down", "down", "down", "down", "down", "z"}},
-		{"filter", 110, []string{"/", "w", "e", "b"}},
+		{"inspector-side", 140, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "down", "space"}},
+		{"inspector-full", 84, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "down", "space"}},
+		{"thread", 110, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "enter"}},
+		{"composer", 110, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "down", "w", "O", "k"}},
+		{"palette", 110, 0, nil, "", []string{":", "w", "e", "b"}},
+		{"palette-actions", 110, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "down", ":", "a", "p", "i", "9", "b"}},
+		{"help", 110, 0, nil, "", []string{"?"}},
+		{"mute", 110, 0, nil, "", []string{"down", "down", "down", "down", "down", "down", "down", "down", "z"}},
+		{"filter", 110, 0, nil, "", []string{"/", "w", "e", "b"}},
+		{"composer-aside", 110, 0, nil, "agent:bob/main-1", []string{"b", "S", "t", "u", "c", "k", "?"}},
+		{"thread-asides", 110, 48, asideTeam, "agent:alice/api-9b", []string{"enter"}},
+		{"needs-asides", 110, 0, asideTeam, "need:btw:w2", nil},
+		{"needs-asides-cold", 84, 0, asideTeam, "need:btw:w6", nil},
+		{"inspector-teammate", 84, 40, nil, "agent:bob/main-1", []string{"space"}},
+		{"palette-btw", 110, 0, nil, "agent:bob/main-1", []string{":", "b", "t", "w"}},
+		{"needs-agent-aside", 110, 0, agentAsideTeam, "need:btw:a2", nil},
+		{"thread-agent-aside", 110, 48, agentAsideTeam, "agent:alice/api-9b", []string{"enter"}},
+		{"review-aside", 110, 0, asideTeam, "need:btw:w2", []string{"y"}},
+		{"review-long", 84, 24, longAnswerTeam, "need:btw:w2", []string{"y"}},
+		{"review-long-rest", 84, 24, longAnswerTeam, "need:btw:w2", []string{"y", "y"}},
 	} {
-		m := demo(c.w, 32, dark)
+		m := demo(c.w, cmp.Or(c.h, 32), dark)
+		if c.snap != nil {
+			m.setSnap(c.snap())
+		}
+		if c.sel != "" {
+			m.screen()
+			m.selected = c.sel
+		}
 		press(m, c.keys...)
 		text, _ := m.screen()
 		if m.sheet != nil {
@@ -367,7 +389,7 @@ func TestLargeTeam(t *testing.T) {
 func TestPlain(t *testing.T) {
 	s := demoSnapshot(demoNow)
 	text := strings.Join(summary(s, demoNow), "\n")
-	for _, want := range []string{"murmur, as alice. Connected. 4 people online, 12 agents.", "3 things need you:",
+	for _, want := range []string{"murmur, as alice. Connected. 4 people online, 12 agents.", "4 things need you:",
 		"1. alice/api-1a needs you: approve running go test ./ocr/..., waiting 3 minutes.",
 		"alice/api-9b is working, in acme/api on feat/billing-v2: Rerun billing on staging.",
 		"Out of tune: alice/infra-3 and dave/infra-1 both change main.tf and never talked."} {
@@ -386,8 +408,8 @@ func TestPlain(t *testing.T) {
 	}
 	var asked ipc.Request
 	fake := func(r ipc.Request) (ipc.Reply, error) { asked = r; return ipc.Reply{OK: true}, nil }
-	if reply, _ := command(s, "y 3", demoNow, fake); reply != "Let through to alice/api-9b." || asked.Op != "approve" || asked.ID != "h1" {
-		t.Fatalf("y 3: %q, asked %+v", reply, asked)
+	if reply, _ := command(s, "y 4", demoNow, fake); reply != "Let through to alice/api-9b." || asked.Op != "approve" || asked.ID != "h1" {
+		t.Fatalf("y 4: %q, asked %+v", reply, asked)
 	}
 	if reply, _ := command(s, "y 1", demoNow, fake); !strings.Contains(reply, "held message") {
 		t.Fatalf("y on an approval: %q", reply)
@@ -573,7 +595,7 @@ func TestHeaderShowsYou(t *testing.T) {
 	}
 	m.w = 60 // one row: your initial before the lamp
 	head = m.header(m.board())
-	if got := ansi.Strip(head[0]); len(head) != 1 || !strings.HasSuffix(got, "◆ 3   A ● live ") || !strings.Contains(head[0], m.st.person(6).Render("A")) {
+	if got := ansi.Strip(head[0]); len(head) != 1 || !strings.HasSuffix(got, "◆ 4   A ● live ") || !strings.Contains(head[0], m.st.person(6).Render("A")) {
 		t.Fatalf("the narrow header says %q", got)
 	}
 	m = demo(110, 30, dark) // alone on the hub
@@ -630,7 +652,7 @@ func TestFooterLeavesOutShownKeys(t *testing.T) {
 	m := demo(110, 30, dark)
 	m.screen()
 	m.selected = "agent:alice/api-9b"
-	if got := check(m, "api-9b"); !strings.HasPrefix(got, " ⏎ thread  ␣ inspect  w write  c copy  z mute  g terminal  o open #1822 ") ||
+	if got := check(m, "api-9b"); !strings.HasPrefix(got, " ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute  g terminal  o open #1822 ") ||
 		!strings.HasSuffix(got, "? keys  ") {
 		t.Fatalf("on api-9b, the footer says %q", got)
 	}
@@ -640,7 +662,7 @@ func TestFooterLeavesOutShownKeys(t *testing.T) {
 	}
 	m.selected = "need:held:h1"
 	press(m, "enter")
-	if got := check(m, "a thread with a held message"); !strings.HasPrefix(got, " w write  ⇥ recipient") {
+	if got := check(m, "a thread with a held message"); !strings.HasPrefix(got, " w write  b by the way  ⇥ recipient") {
 		t.Fatalf("in a thread with a held message in view, the footer says %q", got)
 	}
 }

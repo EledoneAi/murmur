@@ -98,12 +98,19 @@ func summary(s ipc.Snapshot, now time.Time) []string {
 		out = append(out, "Nothing needs you.")
 	} else {
 		out = append(out, fmt.Sprintf("%d %s you:", len(b.needs), plural(len(b.needs), "thing needs", "things need")))
-		for i, n := range b.needs {
+		for i, n := range b.needs { // a held answer in full: y N shares only what was said
 			out = append(out, fmt.Sprintf("  %d. %s, waiting %s.", i+1, needSentence(n), spoken(now.Sub(n.since))))
+			out = append(out, asideDetail(n)...)
 		}
 	}
 	for _, r := range b.all() {
-		out = append(out, agentSentence(r, now))
+		out = append(out, b.agentSentence(r, now))
+	}
+	for _, a := range s.Asides { // your questions by the way, and your agents', still on their way
+		if a.Mine && !a.Final() {
+			out = append(out, fmt.Sprintf("%s question by the way to %s (%s): %s", capital(whose(askedBy(a, s.Me.Handle))), a.To,
+				asideWhere(a), oneLine(a.Question)))
+		}
 	}
 	for _, d := range b.dissonant {
 		out = append(out, fmt.Sprintf("Out of tune: %s and %s both change %s and never talked.", d.mine.addr, d.other, d.file))
@@ -125,7 +132,7 @@ func changes(old, now ipc.Snapshot, at time.Time) []string {
 	after := map[string]bool{}
 	for _, n := range nb.needs {
 		after[n.key] = true
-		if _, ok := before[n.key]; !ok {
+		if _, ok := before[n.key]; !ok && n.kind != needAsideHeld && n.kind != needAsideCold { // asides say it below
 			out = append(out, "Needs you: "+needSentence(n)+".")
 		}
 	}
@@ -138,11 +145,12 @@ func changes(old, now ipc.Snapshot, at time.Time) []string {
 	for _, x := range old.Msgs {
 		seen[x.ID] = true
 	}
-	for _, x := range now.Msgs {
-		if !seen[x.ID] && x.From != now.Me.Handle {
+	for _, x := range now.Msgs { // an answer by the way delivered as a message is said with its question
+		if !seen[x.ID] && x.From != now.Me.Handle && !nb.delivered[x.ID] {
 			out = append(out, fmt.Sprintf("Message from %s to %s: %s", x.From, x.To, firstLine(x.Text)))
 		}
 	}
+	out = append(out, asideChanges(old, now, nb)...)
 	oldAgents := map[string]*agentRef{}
 	for _, r := range ob.all() {
 		oldAgents[r.addr] = r
@@ -153,9 +161,9 @@ func changes(old, now ipc.Snapshot, at time.Time) []string {
 		o := oldAgents[r.addr]
 		switch {
 		case o == nil:
-			out = append(out, "New: "+agentSentence(r, at))
+			out = append(out, "New: "+nb.agentSentence(r, at))
 		case o.st != r.st && r.mine:
-			out = append(out, agentSentence(r, at))
+			out = append(out, nb.agentSentence(r, at))
 		}
 	}
 	for addr := range oldAgents {
@@ -166,7 +174,9 @@ func changes(old, now ipc.Snapshot, at time.Time) []string {
 	return out
 }
 
-func agentSentence(r *agentRef, now time.Time) string {
+// agentSentence says an agent in a sentence: what it does, where, on what, and for your agents on this laptop, what it
+// last said in its own words, or why nobody can ask it by the way.
+func (b *board) agentSentence(r *agentRef, now time.Time) string {
 	where := r.a.Repo
 	if r.a.Branch != "" {
 		where += " on " + r.a.Branch
@@ -181,7 +191,14 @@ func agentSentence(r *agentRef, now time.Time) string {
 	if r.a.Title != "" {
 		s += ": " + r.a.Title
 	}
-	return s + "."
+	s += "."
+	if t := b.said[r.a.Name]; r.mine && t != "" {
+		s += " It last said: " + t
+	}
+	if why := b.cantAskHere(r); why != "" {
+		s += " " + sentence(why)
+	}
+	return s
 }
 
 func stateWord(state string) string {
@@ -208,10 +225,13 @@ func spoken(d time.Duration) string {
 const plainHelp = `Commands:
   needs                  what needs you, numbered
   who                    every agent
-  y N, x N               let held message N through, or drop it
+  y N, x N               let held message N through, or drop it; for a question by the way, share its answer
+                         or drop it, or let a cold one run or decline it
   reply N TEXT           answer need N
   done N                 mark question N done
   send TO TEXT           message an agent (bob/main-1), a person (bob) or a repo (repo:acme/api)
+  btw AGENT QUESTION     ask an agent (bob/main-1, or one of yours by its name) by the way: a copy of its
+                         conversation answers, and the agent never sees the question
   mute WHO [1h|24h]      hold messages from WHO for a while, or until you unmute
   quit`
 
@@ -264,26 +284,48 @@ func command(s ipc.Snapshot, line string, now time.Time, call func(ipc.Request) 
 		var lines []string
 		for i, n := range b.needs {
 			lines = append(lines, fmt.Sprintf("%d. %s, waiting %s.", i+1, needSentence(n), spoken(now.Sub(n.since))))
+			lines = append(lines, asideDetail(n)...)
 		}
 		return strings.Join(lines, "\n"), false
 	case "who":
 		var lines []string
 		for _, r := range b.all() {
-			lines = append(lines, agentSentence(r, now))
+			lines = append(lines, b.agentSentence(r, now))
 		}
 		return strings.Join(lines, "\n"), false
 	case "y", "x":
 		n, ok := nth(rest)
-		if !ok || n.kind != needHeld {
-			return "Say the number of a held message, from needs.", false
-		}
-		if verb == "y" {
+		switch {
+		case ok && (n.kind == needAsideHeld || n.kind == needAsideCold):
+			req, ok := settleRequest(n.btw, verb == "y")
+			return do(req, ok+"."), false
+		case !ok || n.kind != needHeld:
+			return "Say the number of a held message, or of a question by the way that waits for you, from needs.", false
+		case verb == "y":
 			return do(ipc.Request{Op: "approve", ID: n.msg.ID}, "Let through to "+n.to+"."), false
 		}
 		return do(ipc.Request{Op: "decline", ID: n.msg.ID}, "Dropped; "+n.who+" is told."), false
+	case "btw":
+		to, text, _ := strings.Cut(rest, " ")
+		if text = strings.TrimSpace(text); to == "" || text == "" {
+			return "Say which agent to ask (bob/main-1), then the question.", false
+		}
+		if !strings.Contains(to, "/") { // one of yours, by its name
+			to = s.Me.Handle + "/" + to
+		}
+		r := b.find(to)
+		switch {
+		case r == nil:
+			return to + " isn't running. Type who for the agents.", false
+		case !b.askable(r):
+			return "Not asked: " + sentence(b.whyNot(r)), false
+		case len([]rune(text)) > protocol.MaxBtwQuestion:
+			return fmt.Sprintf("Not asked: a question by the way holds %d characters at most.", protocol.MaxBtwQuestion), false
+		}
+		return do(ipc.Request{Op: "btw", ID: protocol.RandomHex(8), To: to, Text: text}, "Asked "+to+" by the way; the answer comes here."), false
 	case "done":
 		n, ok := nth(rest)
-		if !ok || n.kind == needApprove || n.kind == needHeld {
+		if !ok || n.kind == needApprove || n.kind == needHeld || n.kind == needAsideHeld || n.kind == needAsideCold {
 			return "Say the number of a question or a failed message, from needs.", false
 		}
 		return do(ipc.Request{Op: "done", ID: n.msg.ID}, "Marked done."), false
@@ -313,6 +355,83 @@ func command(s ipc.Snapshot, line string, now time.Time, call func(ipc.Request) 
 	}
 	return fmt.Sprintf("%q isn't a command. Type help.", verb), false
 }
+
+// asideChanges says what changed in the questions asked by the way: yours and your agents', asked, on their way and
+// answered; and teammates' questions to your agents, or their agents', with the need numbers y and x take when they
+// wait for you.
+func asideChanges(old, now ipc.Snapshot, nb *board) []string {
+	before := map[string]ipc.Aside{}
+	for _, a := range old.Asides {
+		before[a.ID] = a
+	}
+	var out []string
+	for _, a := range now.Asides {
+		o, seen := before[a.ID]
+		if seen && o.State == a.State && o.Note == a.Note {
+			continue
+		}
+		q, who := oneLine(a.Question), askedBy(a, now.Me.Handle) // you, your main-1, carol, carol's agent web-2
+		switch {
+		case a.Mine && a.Final():
+			out = append(out, answerSentence(a)+".")
+		case a.Mine && !seen:
+			out = append(out, fmt.Sprintf("%s asked %s by the way: %s", capital(who), a.To, q))
+			if a.Note != "" || a.State == ipc.AsideRunning {
+				out = append(out, fmt.Sprintf("%s question by the way to %s: %s.", capital(whose(who)), a.To, asideWhere(a)))
+			}
+		case a.Mine:
+			out = append(out, fmt.Sprintf("%s question by the way to %s: %s.", capital(whose(who)), a.To, asideWhere(a)))
+		case waits(a):
+			n := slices.IndexFunc(nb.needs, func(n need) bool { return n.key == "need:btw:"+a.ID }) + 1
+			if a.State == ipc.AsideHeld {
+				out = append(out, fmt.Sprintf("%s asked your %s by the way; the answer waits for you: y %d shares it, x %d drops it.",
+					capital(who), agentName(a.To), n, n))
+			} else {
+				out = append(out, fmt.Sprintf("%s asked your %s by the way, idle long; its copy would read %s tokens: y %d lets it run, x %d declines it.",
+					capital(who), agentName(a.To), tokens(a.Cold), n, n))
+			}
+			out = append(out, asideDetail(need{kind: needAsideHeld, btw: a})...)
+		case a.State == ipc.AsideAnswered:
+			out = append(out, fmt.Sprintf("Your %s answered %s by the way: %s", agentName(a.To), who, oneLine(a.Answer)))
+		case a.State == ipc.AsideFailed:
+			out = append(out, fmt.Sprintf("%s asked your %s by the way and got no answer: %s.", capital(who), agentName(a.To), a.Err))
+		case !seen:
+			out = append(out, fmt.Sprintf("%s asked your %s by the way: %s", capital(who), agentName(a.To), q))
+		}
+	}
+	return out
+}
+
+// asideWhere says where your question by the way stands while it has no answer: the note of the agent's laptop or of
+// the hub (it waits on the agent's person, or for a laptop), being answered, or on its way.
+func asideWhere(a ipc.Aside) string {
+	switch {
+	case a.Note != "":
+		return a.Note
+	case a.State == ipc.AsideRunning:
+		return "being answered by a copy of its conversation"
+	}
+	return "on its way"
+}
+
+// asideDetail is the question by the way of a need, and the answer that waits for you, whole, each on a line of its
+// own: the plain mode says an answer whole wherever it gives the number y shares it by.
+func asideDetail(n need) []string {
+	if n.kind != needAsideHeld && n.kind != needAsideCold {
+		return nil
+	}
+	out := []string{"   Question: " + oneLine(n.btw.Question)}
+	if n.btw.Answer != "" {
+		out = append(out, "   Answer: "+oneLine(n.btw.Answer))
+	}
+	return out
+}
+
+// oneLine is text on one line, for the plain mode: its lines joined, its spaces collapsed.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// sentence ends what s says with a full stop, on one line, unless it ends with one.
+func sentence(s string) string { return strings.TrimSuffix(oneLine(s), ".") + "." }
 
 // Status prints the daemon's snapshot as JSON, for scripts.
 func Status(out io.Writer) error {

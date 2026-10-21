@@ -1,0 +1,24 @@
+ ╭─┬─╮                                                                              
+ ● ● ●  murmur   Team › Billing                seen only by the people on each end  
+                                                                                    
+ 14:30  C carol ↝ A api-9b  by the way        53k tokens read  answer held for you  
+          Does rerun.go still call the old certifier?                               
+        ↳ Step 1: billing/rerun.go:81 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 2: billing/rerun.go:82 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 3: billing/rerun.go:83 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 4: billing/rerun.go:84 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 5: billing/rerun.go:85 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 6: billing/rerun.go:86 still calls Rerun() through the alias, and    
+          certifier.go reads it once more.                                          
+          Step 7: billing/rerun.go:87 still calls Rerun() through the alias, and    
+ ────────────────────────────────────────────────────────────────────────────────── 
+ to A api-9b  write to send                                                         
+ api-9b is working; it reads this between two tool calls.                           
+ ✓ Read api-9b's answer to carol: y shares it, x drops it · 14:32                   
+                                                                                    
+ y read  x drop  w write  b by the way  ⇥ recipient  [ ] constellation      ? keys  

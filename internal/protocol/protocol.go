@@ -42,6 +42,58 @@ type Agent struct {
 	Op       string   `json:"op,omitempty"`
 	Dir      string   `json:"dir,omitempty"`
 	Also     []string `json:"also,omitempty"` // other repos the session touched, owner/name like Repo
+	// Btw says whether teammates can ask the agent something by the way, and how its person answers: BtwApprove
+	// (each answer waits for them) or BtwAuto. BtwMine when its person turned teammates' questions off: they and their
+	// own agents can still ask it. Empty when it can't be asked at all: its tool can't copy a session, or this one (an
+	// older version of it), or its laptop or the hub can't carry the question.
+	Btw string `json:"btw,omitempty"`
+}
+
+// How a person answers questions asked of their agents by the way, in Agent.Btw.
+const (
+	BtwApprove = "approve"
+	BtwAuto    = "auto"
+	BtwMine    = "mine" // only its person and their agents may ask; older peers read it as empty
+)
+
+// Btw is a question asked of an agent by the way, and its answer. A throwaway copy of the agent's conversation, on
+// its person's laptop, answers it: the agent itself never sees the question. The asking laptop chooses the ID and
+// asks again under it until the answer comes; the answering laptop answers a question it has seen from its history.
+type Btw struct {
+	ID string `json:"id"`
+	// From is who asks: a person, "alice", or one of their agents, "alice/main-1". The asking laptop names its agent
+	// that asks, if one does, as person/agent; the hub writes the person, and passes only an agent that laptop runs.
+	From     string `json:"from"`
+	To       string `json:"to"` // the agent asked: "bob/main-1"
+	Question string `json:"question,omitempty"`
+	Answer   string `json:"answer,omitempty"` // on btw-answer: the answer, final
+	Err      string `json:"err,omitempty"`    // on btw-answer: why there is no answer, final
+	Note     string `json:"note,omitempty"`   // on btw-answer: where the question stands, not final ("waits for bob")
+	Tokens   int    `json:"tokens,omitempty"` // on btw-answer: the conversation the copy read, in tokens
+	At       int64  `json:"at"`
+	// Again, on btw, says the asking laptop asks again a question that went to a hub before (after a reconnect, or on
+	// its timer). A hub that doesn't know it, having restarted since, doesn't refuse it while the agent's person has
+	// no laptop online: theirs may not have reconnected yet.
+	Again bool `json:"again,omitempty"`
+}
+
+// Final says the answer is in, or won't come.
+func (b Btw) Final() bool { return b.Answer != "" || b.Err != "" }
+
+// What a question asked by the way and its answer may hold.
+const (
+	MaxBtwQuestion = 2000
+	MaxBtwAnswer   = 4000
+)
+
+// Clean cleans and cuts what another laptop wrote in a question or an answer.
+func (b *Btw) Clean() {
+	b.ID = Clean(Cut(b.ID, 64), false)
+	b.From, b.To = Clean(Cut(b.From, 200), false), Clean(Cut(b.To, 200), false)
+	b.Question = strings.TrimSpace(Clean(Cut(b.Question, 4*MaxBtwQuestion), true))
+	b.Answer = strings.TrimSpace(Clean(Cut(b.Answer, 4*MaxBtwAnswer), true))
+	b.Err, b.Note = Clean(Cut(b.Err, 300), false), Clean(Cut(b.Note, 200), false)
+	b.Tokens = max(b.Tokens, 0)
 }
 
 // The kinds of tool call in Agent.Kinds.
@@ -51,7 +103,7 @@ const (
 	KindRun      = 'x' // Bash
 	KindWeb      = 'w' // WebFetch, WebSearch
 	KindSubagent = 's' // Task, Agent
-	KindMessage  = 'm' // murmur's send
+	KindMessage  = 'm' // murmur's send and btw
 )
 
 // Overlap is one of a person's agents changing the same files as another checkout's agent.
@@ -111,7 +163,15 @@ const (
 	FrameRoster    = "roster"
 	FrameMsg       = "msg"
 	FrameAck       = "ack"
+	// A question by the way goes from the asking laptop through the hub to the laptop of the agent asked (Btw); its
+	// answers go back the same way, notes first, then one final answer or error. Never kept for an offline laptop.
+	FrameBtw       = "btw"
+	FrameBtwAnswer = "btw-answer"
 )
+
+// CanBtw, in Frame.Can, says a laptop (on hello) or a hub (on welcome) carries questions by the way. Peers that don't
+// say it never get a btw frame: an older one would drop it, and the asker would wait for nothing.
+const CanBtw = "btw"
 
 // What Claude Code reports a session doing.
 const (
@@ -138,6 +198,8 @@ type Frame struct {
 	Tree     string    `json:"tree,omitempty"`     // on check: the asking checkout, whose own agents don't count
 	Files    []string  `json:"files,omitempty"`    // on check: paths in Repo
 	Echo     bool      `json:"echo,omitempty"`     // a copy for the people involved to see, not for delivery
+	Btw      *Btw      `json:"btw,omitempty"`      // on btw and btw-answer
+	Can      []string  `json:"can,omitempty"`      // on hello and welcome: what this side carries beyond the protocol (CanBtw)
 	ID       string    `json:"id,omitempty"`
 	OK       bool      `json:"ok,omitempty"`
 	Note     string    `json:"note,omitempty"`
@@ -191,6 +253,12 @@ func PersonOf(addr string) string {
 	return p
 }
 
+// LateBtw starts the id of the message a laptop writes to bring one of its agents the answer to its question by the
+// way, or why none came, after its btw tool stopped waiting. The agent it names as its sender never wrote it, nor saw
+// the question: its text says how to follow up, and Prompt adds no word of answering that agent with send. A hub
+// takes no message under such an id.
+const LateBtw = "bw-"
+
 // Prompt is the text a Claude Code session receives. The first line is what its person sees in the preview,
 // so it names the sender and starts the message.
 func Prompt(m Msg) string {
@@ -205,7 +273,7 @@ func Prompt(m Msg) string {
 		b.WriteByte('\n')
 		b.WriteString(rest)
 	}
-	if m.From != System {
+	if m.From != System && !strings.HasPrefix(m.ID, LateBtw) {
 		who := m.From
 		if p, a := Split(m.From); a != "" {
 			who = p + "'s agent " + a
@@ -306,6 +374,9 @@ func (a *Agent) Clean() {
 	a.Also = a.Also[:min(len(a.Also), 5)]
 	for i := range a.Also {
 		a.Also[i] = Clean(Cut(a.Also[i], 200), false)
+	}
+	if a.Btw != BtwApprove && a.Btw != BtwAuto && a.Btw != BtwMine {
+		a.Btw = ""
 	}
 	a.Context = min(max(a.Context, 0), 100)
 	a.Added, a.Deleted, a.Changed = max(a.Added, 0), max(a.Deleted, 0), max(a.Changed, 0)

@@ -64,8 +64,9 @@ func TestCodexConfig(t *testing.T) {
 	m := murmurServer(parseTOML(t, path))
 	tools, _ := m["tools"].(map[string]any)
 	who, _ := tools["who"].(map[string]any)
+	btw, _ := tools["btw"].(map[string]any)
 	env, _ := m["env"].(map[string]any)
-	if !strings.HasPrefix(got, codexConfig+"\n") || m["command"] != "/opt/murmur" || who["approval_mode"] != "approve" ||
+	if !strings.HasPrefix(got, codexConfig+"\n") || m["command"] != "/opt/murmur" || who["approval_mode"] != "approve" || btw["approval_mode"] != "approve" ||
 		env["MURMUR_HOME"] != "/home/me/.murmur" || !Codex.mcpConnected() {
 		t.Fatalf("config.toml:\n%s", got)
 	}

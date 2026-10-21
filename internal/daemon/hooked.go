@@ -51,6 +51,7 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 		}
 		s = &session{harness: ev.Harness, id: ev.SessionID, pid: ev.PID, started: harness.StartTime(ev.PID), cwd: ev.Cwd,
 			app: ev.Harness, hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli()}
+		s.proc = s.started
 		s.name = d.nameLocked(ev.Harness, d.names[key])
 		if s.name != d.names[key] { // a name another session had: the notes held for that one aren't for this one
 			d.unholdLocked(s.name)
@@ -67,6 +68,7 @@ func (d *Daemon) hookedLocked(ev harness.Event) {
 	moved := ev.PID > 1 && ev.PID != s.pid
 	if moved {
 		s.pid, s.started = ev.PID, harness.StartTime(ev.PID) // the same conversation, resumed in another process
+		s.proc = s.started
 	}
 	if ev.Cwd != "" && ev.Cwd != s.cwd {
 		s.cwd, moved = ev.Cwd, true
@@ -147,8 +149,8 @@ func (s *session) running() bool {
 // restoreLocked takes back the sessions the history learned from hooks whose processes still run.
 func (d *Daemon) restoreLocked(sessions map[string]hookedSession) {
 	for key, h := range sessions {
-		s := &session{harness: h.Harness, id: h.ID, pid: h.PID, started: h.Started, name: h.Name, cwd: h.Cwd, app: h.Harness,
-			hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli(), heard: time.Now()}
+		s := &session{harness: h.Harness, id: h.ID, pid: h.PID, started: h.Started, proc: h.Started, name: h.Name, cwd: h.Cwd,
+			app: h.Harness, hooked: true, status: protocol.StatusIdle, since: time.Now().UnixMilli(), heard: time.Now()}
 		if d.sessions[key] != nil || !s.running() {
 			continue
 		}
@@ -229,11 +231,13 @@ func (d *Daemon) settle(token string, printed bool) {
 }
 
 // unreadLocked drops what waits for a session that is gone, for good, and tells each sender their message wasn't
-// read: once the daemon runs, so a start, which may find several, is over first.
+// read: once the daemon runs, so a start, which may find several, is over first. Murmur's notes have no sender to
+// tell, and neither has a late answer by the way: the agent it names as its sender never saw the question, which this
+// note would quote to it.
 func (d *Daemon) unreadLocked(key string) {
 	for _, h := range d.queued[key] {
 		d.appendHistory(histLine{Took: &took{key, h.Msg.ID}})
-		if m := h.Msg; m.From != protocol.System {
+		if m := h.Msg; m.From != protocol.System && !late(m) {
 			first, _, _ := strings.Cut(strings.TrimSpace(m.Text), "\n")
 			d.notices = append(d.notices, ipc.Request{To: m.From, Text: fmt.Sprintf("%s closed before it read your message (%q).", m.To, protocol.Cut(first, 80))})
 		}

@@ -20,6 +20,24 @@ import (
 
 var assistantLine = []byte(`"type":"assistant"`)
 
+// synthetic reads the model of an answer: Claude Code names "<synthetic>" the answers it writes itself, errors and
+// replies it didn't ask the model for. Every answer is read for it, without keeping the name.
+type synthetic bool
+
+func (s *synthetic) UnmarshalJSON(b []byte) error {
+	*s = string(b) == `"<synthetic>"`
+	return nil
+}
+
+// ended reads an answer's stop reason: whether the answer ended the turn, as a call of a tool doesn't. A line of an
+// answer written before the answer ended says none.
+type ended bool
+
+func (e *ended) UnmarshalJSON(b []byte) error {
+	*e = string(b) != "null" && string(b) != `"tool_use"`
+	return nil
+}
+
 // transcriptTypes are the short lines read for what they say, found near their start: titles, PR links, the model
 // the conversation runs on, and compactions.
 var transcriptTypes = [][]byte{[]byte(`"type":"ai-title"`), []byte(`"type":"custom-title"`), []byte(`"type":"pr-link"`),
@@ -44,6 +62,7 @@ type Transcript struct {
 	tokens  int    // the context the latest answer used
 	model   string // the model, as Claude Code names it to the model itself
 	large   bool   // the context window is known to hold a million tokens
+	turn    turn   // where the agent's turn stands
 }
 
 // title is the conversation's title: its person's, or else Claude Code's.
@@ -55,8 +74,8 @@ func (t *Transcript) title() string {
 }
 
 // Read reads what was appended since the last call into a. Titles and PR links are short lines that start with
-// their type; tool calls and context sizes are assistant lines. Long lines (tool output, file contents) are skipped
-// without being held in memory.
+// their type; tool calls and context sizes are assistant lines; user lines say where the turn stands from their
+// start. Long lines (tool output, file contents) are skipped without being held in memory.
 func (t *Transcript) Read(a *harness.Activity) bool {
 	if t.Path == "" {
 		return false
@@ -68,7 +87,7 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil || st.Size() < t.Offset {
-		t.Offset = 0 // rewritten from scratch
+		t.Offset, t.turn = 0, turn{} // rewritten from scratch
 	}
 	if _, err := f.Seek(t.Offset, io.SeekStart); err != nil {
 		return false
@@ -88,13 +107,20 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 	changed := false
 	pos := t.Offset
 	// the last answer before callsFrom, decoded when the read gets past it: a long tool output can fill the window,
-	// and the session would show no activity and no context until its next answer
-	var before []byte
+	// and the session would show no activity and no context until its next answer. The user line that last moved the
+	// turn after it moves it again then, as it came after it.
+	var before, end []byte
+	var held move
 	for {
 		line, err := r.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) {
+		long := errors.Is(err, bufio.ErrBufferFull)
+		m, user := userOf(line)
+		if long {
 			n := int64(len(line))
 			for errors.Is(err, bufio.ErrBufferFull) {
+				if m.kind == maybePrompt { // what a line of text is, its end says
+					end = append(end[:0], line[max(len(line)-userTail, 0):]...)
+				}
 				line, err = r.ReadSlice('\n')
 				n += int64(len(line))
 			}
@@ -102,21 +128,37 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 				break // a long line still being written: read it again next time
 			}
 			pos += n
-			continue
+			if m.kind == maybePrompt {
+				line = append(end, line...)
+			}
+		} else {
+			if err != nil {
+				break // EOF, possibly mid-line: that line is read again next time
+			}
+			pos += int64(len(line))
 		}
-		if err != nil {
-			break // EOF, possibly mid-line: that line is read again next time
-		}
-		pos += int64(len(line))
 		if len(before) > 0 && pos > callsFrom {
 			changed = t.assistant(before, a) || changed
+			t.turn.move(held)
 			before = before[:0]
+		}
+		if user {
+			if m.kind == maybePrompt {
+				m = t.turn.prompted(line)
+			}
+			if t.turn.move(m); pos <= callsFrom && m.kind != noMove {
+				held = m
+			}
+			continue
+		}
+		if long {
+			continue
 		}
 		if bytes.Contains(line, assistantLine) {
 			if pos > callsFrom {
 				changed = t.assistant(line, a) || changed
 			} else {
-				before = append(before[:0], line...)
+				before, held = append(before[:0], line...), move{}
 			}
 			continue
 		}
@@ -176,24 +218,31 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 	}
 	if len(before) > 0 { // nothing but lines too long to read came after it
 		changed = t.assistant(before, a) || changed
+		t.turn.move(held)
 	}
 	t.Offset = pos
+	// where the turn stands shows nowhere: it changes nothing
+	a.Turn, a.TurnCall = t.turn.at, t.turn.call
 	return changed
 }
 
-// assistant reads an assistant line: how full the context window is, and its tool calls. Claude Code writes one line
-// per block of an answer, each with the answer's usage.
+// assistant reads an assistant line: how full the context window is, its tool calls, what the agent said, and where
+// its turn stands. Claude Code writes one line per block of an answer, each with the answer's usage.
 func (t *Transcript) assistant(line []byte, a *harness.Activity) bool {
 	var e struct {
 		Type      string    `json:"type"`
 		Sidechain bool      `json:"isSidechain"`
 		Timestamp time.Time `json:"timestamp"`
 		Message   struct {
-			Content []struct {
+			Synthetic synthetic `json:"model"`
+			Content   []struct {
 				Type  string          `json:"type"`
+				ID    string          `json:"id"`
 				Name  string          `json:"name"`
+				Text  string          `json:"text"`
 				Input json.RawMessage `json:"input"`
 			} `json:"content"`
+			Ended ended `json:"stop_reason"`
 			Usage struct {
 				Input         int `json:"input_tokens"`
 				CacheRead     int `json:"cache_read_input_tokens"`
@@ -209,14 +258,45 @@ func (t *Transcript) assistant(line []byte, a *harness.Activity) bool {
 	if u := e.Message.Usage; !e.Sidechain && u.Input+u.CacheRead+u.CacheCreation > 0 {
 		changed = t.context(a, u.Input+u.CacheRead+u.CacheCreation)
 	}
+	// a subagent's words and turn aren't the agent's, nor Claude Code's own notes ("API Error", "No response
+	// requested.")
+	own := !e.Sidechain && !bool(e.Message.Synthetic)
+	if own {
+		t.turn.answering()
+	}
 	for _, c := range e.Message.Content {
-		if c.Type != "tool_use" {
-			continue
+		switch {
+		case c.Type == "tool_use":
+			call := callOf(c.Name, c.Input)
+			a.Called(call)
+			if own {
+				t.turn.called(c.ID, call.Doing)
+			}
+			changed = true
+		case c.Type == "text" && own:
+			if said := saidOf(c.Text); said != "" && said != a.Said {
+				a.Said, changed = said, true
+			}
 		}
-		a.Called(callOf(c.Name, c.Input))
-		changed = true
+	}
+	if own {
+		t.turn.answered(bool(e.Message.Ended))
 	}
 	return changed
+}
+
+// maxSaid is how much of what the agent said Activity.Said keeps, in characters.
+const maxSaid = 200
+
+// saidOf is the first line of an agent's text that holds anything, clean and cut to maxSaid characters.
+func saidOf(text string) string {
+	for line := range strings.Lines(text) {
+		if line = strings.TrimSpace(line); line != "" {
+			// cut before cleaning, so a long line costs no more than a short one; cleaning only takes characters out
+			return strings.TrimSpace(cutRunes(protocol.Clean(cutRunes(line, 4*maxSaid), false), maxSaid))
+		}
+	}
+	return ""
 }
 
 // The context window holds a million tokens, as current models' do, unless the model is a Haiku or from before the
@@ -238,9 +318,10 @@ func windowOf(model string) int {
 	return largeWindow
 }
 
-// context takes the tokens the conversation now uses, and says whether its percentage changed.
+// context takes the tokens the conversation now uses, and says whether its percentage changed. Tokens alone doesn't
+// count as a change: nothing shows it, and a question by the way reads it when it comes.
 func (t *Transcript) context(a *harness.Activity, tokens int) bool {
-	t.tokens = tokens
+	t.tokens, a.Tokens = tokens, tokens
 	t.large = t.large || tokens > smallWindow
 	window := windowOf(t.model)
 	if t.large {
@@ -284,7 +365,7 @@ func kindOf(tool string) byte {
 		return protocol.KindWeb
 	case "Task", "Agent":
 		return protocol.KindSubagent
-	case "mcp__murmur__send":
+	case "mcp__murmur__send", "mcp__murmur__btw":
 		return protocol.KindMessage
 	}
 	return 0

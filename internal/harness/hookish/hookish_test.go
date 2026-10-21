@@ -247,9 +247,10 @@ func TestGeminiSettings(t *testing.T) {
 	}
 	var f struct {
 		MCPServers map[string]struct {
-			Command string
-			Args    []string
-			Trust   bool
+			Command      string
+			Args         []string
+			Trust        bool
+			IncludeTools []string
 		}
 		Hooks map[string][]struct {
 			Matcher string
@@ -257,7 +258,8 @@ func TestGeminiSettings(t *testing.T) {
 		}
 	}
 	_ = json.Unmarshal([]byte(read(t, path)), &f)
-	if m := f.MCPServers["murmur"]; m.Command != "/opt/murmur" || strings.Join(m.Args, " ") != "mcp gemini" || !m.Trust || len(f.MCPServers) != 2 {
+	if m := f.MCPServers["murmur"]; m.Command != "/opt/murmur" || strings.Join(m.Args, " ") != "mcp gemini" || !m.Trust ||
+		strings.Join(m.IncludeTools, ",") != "who,send,btw" || len(f.MCPServers) != 2 {
 		t.Fatalf("mcpServers: %+v", f.MCPServers)
 	}
 	if b := f.Hooks["BeforeTool"]; len(b) != 1 || b[0].Matcher != "write_file|replace" || b[0].Hooks[0].Timeout != 5000 {
@@ -283,12 +285,13 @@ func TestCopilotSetup(t *testing.T) {
 	var hooks struct {
 		Version int
 		Hooks   map[string][]struct {
-			Type, Bash string
-			TimeoutSec int
+			Type, Bash, Matcher string
+			TimeoutSec          int
 		}
 	}
 	_ = json.Unmarshal([]byte(read(t, Copilot.hooksPath())), &hooks)
-	if hooks.Version != 1 || hooks.Hooks["PreToolUse"][0].Bash != "/opt/murmur hook copilot before-tool || true" || hooks.Hooks["sessionEnd"][0].TimeoutSec != 5 {
+	if hooks.Version != 1 || hooks.Hooks["PreToolUse"][0].Bash != "/opt/murmur hook copilot before-tool || true" || hooks.Hooks["sessionEnd"][0].TimeoutSec != 5 ||
+		!strings.HasSuffix(hooks.Hooks["PreToolUse"][0].Matcher, "|murmur-who|murmur-send|murmur-btw") {
 		t.Fatalf("hooks: %+v", hooks)
 	}
 	if got := read(t, filepath.Join(Copilot.dir(), "mcp-config.json")); !strings.Contains(got, `"tools": [`) || !strings.Contains(got, `"type": "local"`) {
@@ -322,7 +325,9 @@ func TestCursorSetup(t *testing.T) {
 		t.Fatalf("hooks.json:\n%s", got)
 	}
 	if !strings.Contains(read(t, filepath.Join(dir, "permissions.json")), `"murmur:who"`) ||
-		!strings.Contains(read(t, filepath.Join(dir, "cli-config.json")), `"Mcp(murmur:send)"`) {
+		!strings.Contains(read(t, filepath.Join(dir, "permissions.json")), `"murmur:btw"`) ||
+		!strings.Contains(read(t, filepath.Join(dir, "cli-config.json")), `"Mcp(murmur:send)"`) ||
+		!strings.Contains(read(t, filepath.Join(dir, "cli-config.json")), `"Mcp(murmur:btw)"`) {
 		t.Fatal("murmur's tools aren't allowed")
 	}
 	if err := Cursor.Disconnect(""); err != nil {
@@ -441,9 +446,10 @@ func TestComments(t *testing.T) {
 	}
 }
 
-// Only murmur's own two tools are let through, by their exact names.
+// Only murmur's own tools are let through, by their exact names.
 func TestExactTools(t *testing.T) {
-	for tool, allowed := range map[string]bool{"murmur-who": true, "murmur-send": true, "murmur-evil": false, "evil-murmur-send": false, "bash": false} {
+	for tool, allowed := range map[string]bool{"murmur-who": true, "murmur-send": true, "murmur-btw": true, "murmur-evil": false,
+		"evil-murmur-send": false, "murmur-btw2": false, "bash": false} {
 		if got := Copilot.Answer(harness.Event{Kind: harness.BeforeTool, Tool: tool}, "") != nil; got != allowed {
 			t.Errorf("copilot %s: allowed %v", tool, got)
 		}
@@ -453,7 +459,7 @@ func TestExactTools(t *testing.T) {
 	Cursor.Connect("/opt/murmur", nil)
 	var p struct{ MCPAllowlist []string }
 	_ = json.Unmarshal([]byte(read(t, filepath.Join(Cursor.dir(), "permissions.json"))), &p)
-	if strings.Join(p.MCPAllowlist, ",") != "murmur:who,murmur:send" {
+	if strings.Join(p.MCPAllowlist, ",") != "murmur:who,murmur:send,murmur:btw" {
 		t.Fatalf("allowlist: %v", p.MCPAllowlist)
 	}
 }
@@ -476,6 +482,72 @@ func TestCarries(t *testing.T) {
 	} {
 		if ev := parse(t, c.s, c.kind, c.input); ev.Carries != c.want {
 			t.Errorf("%s %s: carries %v", c.s.name, c.kind, ev.Carries)
+		}
+	}
+}
+
+// A laptop set up before btw: murmur's entries let who and send through, not btw. Each harness still counts as
+// connected, so the daemon sets it up again after the update, and doctor finds nothing missing. The next setup adds
+// btw where it added the others, and uninstall takes it out with them.
+func TestBeforeBtw(t *testing.T) {
+	exe := filepath.Join(sandbox(t), "murmur") // there: doctor checks that the hooks' binary is
+	_ = os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755)
+	specs := []*Spec{Codex, Gemini, Cursor, Copilot}
+	permissions, cli := filepath.Join(Cursor.dir(), "permissions.json"), filepath.Join(Cursor.dir(), "cli-config.json")
+	_ = os.WriteFile(permissions, []byte(`{"mcpAllowlist": ["docs:*"]}`), 0o644)
+	_ = os.WriteFile(cli, []byte(`{"permissions": {"allow": ["Shell(ls)"]}}`), 0o644)
+	for _, s := range specs {
+		s.Connect(exe, nil)
+	}
+	// what the version before btw wrote
+	configTOML := filepath.Join(Codex.dir(), "config.toml")
+	body := strings.Replace(codexServer(exe), "\n[mcp_servers.murmur.tools.btw]\napproval_mode = \"approve\"\n", "", 1)
+	_ = os.WriteFile(configTOML, []byte(blockStart+"\n"+body+blockEnd+digest(body)+"\n"), 0o600)
+	o, b, _ := harness.ReadObject(Gemini.hooksPath())
+	servers := o.Sub("mcpServers")
+	servers = servers.PutSub("murmur", servers.Sub("murmur").Set("includeTools", harness.Marshal([]string{"who", "send"})))
+	_ = harness.WriteObject(Gemini.hooksPath(), b, o.PutSub("mcpServers", servers), true)
+	_ = os.WriteFile(permissions, []byte(`{"mcpAllowlist": ["docs:*", "murmur:who", "murmur:send"]}`), 0o644)
+	_ = os.WriteFile(cli, []byte(`{"permissions": {"allow": ["Shell(ls)", "Mcp(murmur:who)", "Mcp(murmur:send)"]}}`), 0o644)
+	_ = os.WriteFile(Copilot.hooksPath(), []byte(strings.Replace(read(t, Copilot.hooksPath()), "|murmur-btw", "", 1)), 0o644)
+	files := []string{configTOML, Gemini.hooksPath(), permissions, cli, Copilot.hooksPath()}
+	for _, f := range files {
+		if strings.Contains(read(t, f), "btw") {
+			t.Fatalf("%s before btw:\n%s", f, read(t, f))
+		}
+	}
+
+	for _, s := range specs {
+		if !s.Connected() {
+			t.Errorf("%s set up before btw isn't connected: the update wouldn't set it up again", s.name)
+		}
+		for _, c := range s.Checks() {
+			if !c.OK {
+				t.Errorf("%s set up before btw: %+v", s.name, c)
+			}
+		}
+		for _, c := range s.Connect(exe, nil) {
+			if !c.OK && c.Name != "Next" {
+				t.Errorf("%s set up again: %+v", s.name, c)
+			}
+		}
+	}
+	for f, want := range map[string]string{configTOML: "[mcp_servers.murmur.tools.btw]\napproval_mode = \"approve\"", Gemini.hooksPath(): `"btw"`,
+		permissions: `"murmur:btw"`, cli: `"Mcp(murmur:btw)"`, Copilot.hooksPath(): "|murmur-btw"} {
+		if !strings.Contains(read(t, f), want) {
+			t.Errorf("%s set up again, without %s:\n%s", f, want, read(t, f))
+		}
+	}
+	parseTOML(t, configTOML)
+
+	for _, s := range specs {
+		if err := s.Disconnect(""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range files {
+		if b, err := os.ReadFile(f); strings.Contains(string(b), "murmur") {
+			t.Errorf("%s after uninstall (%v):\n%s", f, err, b)
 		}
 	}
 }

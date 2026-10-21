@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,9 @@ func TestWire(t *testing.T) {
 		}
 		if again, _ := json.Marshal(fr); string(again) != string(payload) {
 			t.Fatalf("%s isn't what json.Marshal writes:\n%s\n%s", fr.T, payload, again)
+		}
+		if fr.T == protocol.FrameWelcome && !slices.Equal(fr.Can, []string{protocol.CanBtw}) {
+			t.Fatalf("the welcome doesn't say the hub carries questions by the way: %s", payload)
 		}
 		kinds, payload = append(kinds, fr.T), nil
 		pairs = pairs || (fr.T == protocol.FrameRoster && len(fr.Pairs) > 0)

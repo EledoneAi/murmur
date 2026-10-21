@@ -295,7 +295,7 @@ func (s *Spec) Connect(exe string, _ func(string) bool) []protocol.Check {
 	if err != nil {
 		checks = append(checks, protocol.Check{Name: "MCP server", Detail: err.Error()})
 	} else {
-		checks = append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur: who, send, allowed without a prompt"})
+		checks = append(checks, protocol.Check{Name: "MCP server", OK: true, Detail: "murmur: who, send, btw, allowed without a prompt"})
 	}
 	if s.note != "" {
 		checks = append(checks, protocol.Check{Name: "Next", Detail: s.note})
@@ -335,7 +335,7 @@ func (s *Spec) Checks() []protocol.Check {
 	}
 	checks := []protocol.Check{
 		harness.Check(current, "Hooks", s.events()+" in "+config.Tildify(s.hooksPath()), fix),
-		harness.Check(s.mcpConnected(), "MCP server", "murmur: who, send", "missing: run murmur join"),
+		harness.Check(s.mcpConnected(), "MCP server", "murmur: who, send, btw", "missing: run murmur join"),
 	}
 	if s.checks != nil {
 		checks = append(checks, s.checks(s)...)

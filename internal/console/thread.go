@@ -1,6 +1,7 @@
 package console
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -15,8 +16,9 @@ import (
 
 // A thread is one conversation in order: a constellation's, or the one with an agent or a person. Agents' words are
 // set in italics, the voice of the collective; people's are upright. Each message says whether it is sending,
-// delivered or failed, and a message a mute holds sits in place with its keys. The composer at the bottom knows
-// whether its recipient is busy or waiting, and says when it will read the message.
+// delivered or failed, and a message a mute holds sits in place with its keys. Questions asked by the way of its
+// agents, and by them, sit among the messages, set apart (see aside.go). The composer at the bottom knows whether its recipient is
+// busy or waiting, and says when it will read the message; asking by the way, it says how the answer comes.
 
 type thread struct {
 	name    string          // what the header calls it
@@ -24,8 +26,16 @@ type thread struct {
 	members map[string]bool // the addresses whose messages belong here
 	to      string          // the composer's recipient
 	writing bool            // the composer has the keys; else the thread does
+	aside   bool            // the composer asks its recipient by the way: the agent won't see it
 	input   textarea.Model
 	scroll  int // lines scrolled up from the newest
+	// focus is the aside that waits for you which the thread was opened on from Needs you: y and x settle it while it
+	// waits, and only its lines carry their keys. jump scrolls to it on the next draw: to its first line you haven't
+	// had on screen, when it is taller than the screen. read says which of its lines you had, readOf of which aside.
+	focus  string
+	jump   bool
+	read   []bool
+	readOf string
 }
 
 func newInput() textarea.Model {
@@ -77,6 +87,9 @@ func (m *model) openThread(b *board, writing bool) tea.Cmd {
 		t.name, t.to = n.who, n.who
 		t.members[n.who] = true
 	}
+	if n, ok := m.selectedNeed(b); ok && (n.kind == needAsideHeld || n.kind == needAsideCold) { // opened on it
+		t.focus, t.jump, t.members[n.btw.To] = n.btw.ID, true, true
+	}
 	m.thread = t
 	m.resizeInput()
 	if writing {
@@ -94,14 +107,15 @@ func (m *model) resizeInput() {
 	m.thread.input.SetHeight(min(lines, 4))
 }
 
-// threadMsgs are the messages of the thread, oldest first, with the ones a mute holds.
+// threadMsgs are the messages of the thread, oldest first, with the ones a mute holds. An answer by the way delivered
+// as a message is the aside's, shown once.
 func (m *model) threadMsgs() (msgs []protocol.Msg, held map[string]bool) {
-	t, me := m.thread, m.snap.Me.Handle
+	t, me, delivered := m.thread, m.snap.Me.Handle, m.board().delivered
 	in := func(addr string) bool {
 		return t.members[addr] || addr == me || protocol.PersonOf(addr) == me && !strings.Contains(addr, "/")
 	}
 	belongs := func(x protocol.Msg) bool {
-		return (t.members[x.From] || t.members[x.To]) && in(x.From) && in(x.To) && x.From != protocol.System
+		return (t.members[x.From] || t.members[x.To]) && in(x.From) && in(x.To) && x.From != protocol.System && !delivered[x.ID]
 	}
 	held = map[string]bool{}
 	for _, x := range append(slices.Clone(m.snap.Msgs), m.snap.Outbox...) {
@@ -118,22 +132,28 @@ func (m *model) threadMsgs() (msgs []protocol.Msg, held map[string]bool) {
 	return msgs, held
 }
 
-// threadScreen draws the thread under the header: the messages, newest at the bottom, then the composer.
+// who is an address as a thread shows it: the person's initial in their colour, then the agent's or the person's
+// name in the given ink.
+func (m *model) who(b *board, addr string, name ink) string {
+	person, agent, _ := strings.Cut(addr, "/")
+	if agent == "" {
+		agent = person
+	}
+	s := name.Render(agent)
+	if !b.solo {
+		s = m.st.person(b.colours[person]).Render(b.initials[person]) + " " + s
+	}
+	return s
+}
+
+// threadScreen draws the thread under the header: the messages and the asides, newest at the bottom, then the
+// composer. It notes which lines of the aside y would settle you have had on screen.
 func (m *model) threadScreen(b *board, room int) []line {
 	st, g, t := m.st, m.g, m.thread
 	msgs, held := m.threadMsgs()
-	who := func(addr string) string {
-		person, agent, _ := strings.Cut(addr, "/")
-		name := agent
-		if agent == "" {
-			name = person
-		}
-		s := st.name.Render(name)
-		if !b.solo {
-			s = st.person(b.colours[person]).Render(b.initials[person]) + " " + s
-		}
-		return s
-	}
+	asides := m.threadAsides()
+	target, targetMsg := m.waiting(msgs, held, asides)
+	who := func(addr string) string { return m.who(b, addr, st.name) }
 	textW := max(20, m.w-14)
 	lines := func(x protocol.Msg) []line { // a message as the thread shows it
 		var out []line
@@ -157,17 +177,23 @@ func (m *model) threadScreen(b *board, room int) []line {
 		for _, l := range strings.Split(wrap(x.Text, textW), "\n") {
 			add("          " + voice.Render(l))
 		}
-		if held[x.ID] {
+		if targetMsg != nil && x.ID == targetMsg.ID {
 			out = append(out, line{text: pad("          "+st.keyWord("y", "let through")+"   "+st.keyWord("x", "drop"), m.w), hot: []string{"y", "x"}})
 		}
 		add("")
 		return out
 	}
-	// the composer: its recipient, the text, and when the recipient will read it
-	compose := []line{{text: pad(" "+st.faint.Render(strings.Repeat(g.h, max(0, m.w-2))), m.w)}}
+	// the composer: its recipient, the text, and when the recipient will read it; asking by the way, its rule says
+	// the agent won't see the question, and the line under it how the answer comes
+	rule, verb, note := "", "to ", m.readsWhen(b, t.to)
+	if t.aside {
+		rule = st.dim.Render(g.aside+" by the way: "+agentName(t.to)+" won't see this") + " "
+		verb, note = "ask ", m.answersHow(b, t.to)
+	}
+	compose := []line{{text: pad(" "+rule+st.faint.Render(strings.Repeat(g.h, max(0, m.w-2-cellWidth(rule)))), m.w)}}
 	inputLines := strings.Split(t.input.View(), "\n")
 	for i, l := range inputLines {
-		left := " " + st.dim.Render("to ") + who(t.to) + "  "
+		left := " " + st.dim.Render(verb) + who(t.to) + "  "
 		if i > 0 {
 			left = strings.Repeat(" ", cellWidth(left))
 		}
@@ -177,24 +203,101 @@ func (m *model) threadScreen(b *board, room int) []line {
 		}
 		compose = append(compose, line{text: spread(left+l, right, m.w)})
 	}
-	compose = append(compose, line{text: pad(" "+st.dim.Render(m.readsWhen(b, t.to)), m.w)})
+	compose = append(compose, line{text: pad(" "+st.dim.Render(note), m.w)})
 
-	// the messages, newest at the bottom: only as many as the screen and the scroll show are drawn
+	// the messages and the asides, newest at the bottom: only as many as the screen and the scroll show are drawn,
+	// all of them to jump to the aside y settles
 	room = max(0, room-len(compose)) // a terminal too short for both keeps the composer
 	var body []line
-	for i := len(msgs) - 1; i >= 0 && len(body) < room+t.scroll; i-- {
-		body = append(lines(msgs[i]), body...)
+	below, tall := -1, 0 // the lines under the aside y settles, and its own
+	for i, j := len(msgs)-1, len(asides)-1; (i >= 0 || j >= 0) && (len(body) < room+t.scroll || t.jump); {
+		if j >= 0 && (i < 0 || asides[j].At >= msgs[i].At) {
+			a := m.asideLines(b, asides[j], textW, target != nil && asides[j].ID == target.ID)
+			if target != nil && asides[j].ID == target.ID {
+				below, tall = len(body), len(a)
+			}
+			body = append(a, body...)
+			j--
+		} else {
+			body = append(lines(msgs[i]), body...)
+			i--
+		}
 	}
-	if len(msgs) == 0 {
+	if len(msgs) == 0 && len(asides) == 0 {
 		body = []line{{text: pad("   "+st.dim.Render("No messages yet. Write below to start the conversation."), m.w)}}
 	}
+	if t.jump && below >= 0 {
+		t.scroll = scrollTo(t, target.ID, below, tall, room)
+	}
+	t.jump = false
 	t.scroll = max(0, min(t.scroll, len(body)-room))
+	if below >= 0 && target.State == ipc.AsideHeld {
+		m.sawLines(target.ID, below, tall, room)
+	}
 	start := max(0, len(body)-room-t.scroll)
 	shown := body[start:min(len(body), start+room)]
 	for len(shown) < room { // the newest messages sit just above the composer
 		shown = append([]line{{text: pad("", m.w)}}, shown...)
 	}
 	return append(shown, compose...)
+}
+
+// waiting is what y and x settle in the thread: the aside it was opened on from Needs you while that waits, else the
+// newest of what waits for you, a held message or an aside. Only its lines carry the keys.
+func (m *model) waiting(msgs []protocol.Msg, held map[string]bool, asides []ipc.Aside) (*ipc.Aside, *protocol.Msg) {
+	if i := slices.IndexFunc(asides, func(a ipc.Aside) bool { return a.ID == m.thread.focus && waits(a) }); i >= 0 {
+		return &asides[i], nil
+	}
+	var msg *protocol.Msg
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if held[msgs[i].ID] {
+			msg = &msgs[i]
+			break
+		}
+	}
+	if a := lastWaiting(asides); a != nil && (msg == nil || a.At >= msg.At) {
+		return a, nil
+	}
+	return nil, msg
+}
+
+// scrollTo is the thread's scroll that shows aside id, with below lines under it and tall of its own: where it is,
+// when it is on screen already; else just far enough for all of it; or, taller than the screen, from its first line
+// you haven't had on screen.
+func scrollTo(t *thread, id string, below, tall, room int) int {
+	switch {
+	case tall <= room && below >= t.scroll && below+tall <= t.scroll+room:
+		return t.scroll
+	case tall <= room && below < t.scroll:
+		return below
+	case tall <= room:
+		return below + tall - room
+	}
+	first := 0
+	if t.readOf == id && len(t.read) == tall {
+		for first < tall-1 && t.read[first] {
+			first++
+		}
+	}
+	return max(below, below+tall-first-room)
+}
+
+// sawLines notes the lines of held answer id, below lines from the bottom of the thread and tall of its own, that are
+// on screen now: once you have had all of them, y shares it.
+func (m *model) sawLines(id string, below, tall, room int) {
+	t := m.thread
+	if t.readOf != id || len(t.read) != tall { // another aside, or the screen's width changed how it wraps
+		t.read, t.readOf = make([]bool, tall), id
+	}
+	all := true
+	for i := range tall {
+		d := below + tall - 1 - i // its distance from the bottom
+		t.read[i] = t.read[i] || d >= t.scroll && d < t.scroll+room
+		all = all && t.read[i]
+	}
+	if all {
+		m.read[id] = true
+	}
 }
 
 // readsWhen says when the recipient will read a message: between two tool calls, at the end of its turn, or now.
@@ -231,18 +334,26 @@ func (m *model) threadKey(b *board, k tea.KeyPressMsg) tea.Cmd {
 		case "esc":
 			t.writing = false
 			t.input.Blur()
+			t.setAside(false)
 			return nil
 		case "enter":
 			text := strings.TrimSpace(t.input.Value())
 			if text == "" {
 				return nil
 			}
+			if t.aside && len([]rune(text)) > protocol.MaxBtwQuestion {
+				m.outcome = outcome{text: fmt.Sprintf("A question by the way holds %d characters at most", protocol.MaxBtwQuestion), err: true, at: m.now()}
+				return nil
+			}
 			t.input.Reset()
 			m.resizeInput()
 			t.scroll = 0
+			if t.aside {
+				return m.askBtw(t.to, text)
+			}
 			return m.send(t.to, text)
 		case "tab":
-			t.to = m.nextRecipient(t)
+			t.to = m.nextRecipient(b, t)
 			return nil
 		case "pgup":
 			t.scroll += 5
@@ -257,21 +368,28 @@ func (m *model) threadKey(b *board, k tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 	msgs, held := m.threadMsgs()
-	var heldMsg *protocol.Msg
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if held[msgs[i].ID] {
-			heldMsg = &msgs[i]
-			break
+	// y and x settle what waits for you: the aside the thread was opened on, else the newest of what waits, a held
+	// message or an aside. y shares an answer only once all of it has been on screen: until then, it scrolls to it.
+	a, heldMsg := m.waiting(msgs, held, m.threadAsides())
+	if a != nil && (k.String() == "y" || k.String() == "x") {
+		if k.String() == "y" && a.State == ipc.AsideHeld && !m.read[a.ID] {
+			t.focus, t.jump = a.ID, true
+			m.outcome = outcome{text: "Read on: y shares " + agentName(a.To) + "'s answer once all of it has been on screen", at: m.now()}
+			return nil
 		}
+		return m.settle(*a, k.String() == "y")
 	}
 	switch k.String() {
 	case "esc", "q":
 		m.thread = nil
 	case "w", "r", "enter":
 		t.writing = true
+		t.setAside(false)
 		return t.input.Focus()
+	case "b":
+		return m.askHere(b)
 	case "tab":
-		t.to = m.nextRecipient(t)
+		t.to = m.nextRecipient(b, t)
 	case "up", "k", "pgup":
 		t.scroll++
 	case "down", "j", "pgdown":
@@ -300,11 +418,12 @@ func (m *model) threadKey(b *board, k tea.KeyPressMsg) tea.Cmd {
 	return nil
 }
 
-// nextRecipient goes round the thread's members, other than you.
-func (m *model) nextRecipient(t *thread) string {
+// nextRecipient goes round the thread's members, other than you; asking by the way, round its agents that can be
+// asked.
+func (m *model) nextRecipient(b *board, t *thread) string {
 	var all []string
 	for a := range t.members {
-		if protocol.PersonOf(a) != m.snap.Me.Handle || strings.Contains(a, "/") {
+		if (protocol.PersonOf(a) != m.snap.Me.Handle || strings.Contains(a, "/")) && (!t.aside || b.askable(b.find(a))) {
 			all = append(all, a)
 		}
 	}

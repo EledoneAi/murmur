@@ -69,8 +69,10 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 	case !msgID.MatchString(m.ID): // it names stored messages and the keys laptops remember messages by
 		ack(false, "", "a message id is 1 to 64 letters, digits and dashes")
 		return
-	case strings.HasPrefix(m.ID, "gh-"), strings.HasPrefix(m.ID, "an-"):
-		ack(false, "", "message ids starting with gh- or an- belong to the hub's own messages")
+	case strings.HasPrefix(m.ID, "gh-"), strings.HasPrefix(m.ID, "an-"), strings.HasPrefix(m.ID, protocol.LateBtw):
+		// the hub's merge notices and announcements, and the late answers by the way a laptop hands its own agents,
+		// which consoles show as answers, never as messages
+		ack(false, "", "message ids starting with gh-, an- or bw- belong to murmur's own messages")
 		return
 	case h.waiting[m.ID] != nil:
 		// a retry of a message already on its way, from the laptop that sent it: answer on its new connection. The

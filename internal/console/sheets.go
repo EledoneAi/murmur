@@ -260,7 +260,11 @@ func (m *model) paletteItems(b *board) []item {
 		}}
 	}
 	if r := m.selectedAgent(b); r != nil {
-		out = append(out, act("Write to "+r.a.Name, "w"), act("Copy "+r.addr, "c"), act("Mute where "+r.a.Name+"'s messages come from", "z"))
+		out = append(out, act("Write to "+r.a.Name, "w"))
+		if b.askable(r) {
+			out = append(out, act("Ask "+r.a.Name+" by the way; it won't see the question", "b"))
+		}
+		out = append(out, act("Copy "+r.addr, "c"), act("Mute where "+r.a.Name+"'s messages come from", "z"))
 		if r.a.PRURL != "" {
 			out = append(out, act(fmt.Sprintf("Open #%d", r.a.PR), "o"))
 		}
@@ -286,6 +290,9 @@ func (m *model) paletteItems(b *board) []item {
 		out = append(out, act("People", "p"))
 	}
 	out = append(out, act("Filter the board", "/"), act("Inspect the selection", " "), act("Every key", "?"), act("Quit", "q"))
+	if !b.solo {
+		out = append(out, m.btwItems()...)
+	}
 	return out
 }
 
@@ -307,7 +314,9 @@ func (m *model) helpItems() []item {
 		{"MOVE", "↑↓ j k", "previous or next row"}, {"MOVE", "← → h l", "fold or unfold"}, {"MOVE", "[ ]", "previous or next constellation"},
 		{"MOVE", "home end", "top, bottom"}, {"MOVE", "n", "next thing that needs you, from anywhere"},
 		{"ACT", "⏎", "open the thread"}, {"ACT", "␣", "inspector on or off"}, {"ACT", "w", "write to the selected agent"},
-		{"ACT", "r", "reply to the selected question"}, {"ACT", "y x", "let a held message through, or drop it"},
+		{"ACT", "r", "reply to the selected question"}, {"ACT", "b", "ask the selected agent by the way; it won't see it"},
+		{"ACT", "y x", "let a held message through, or drop it"},
+		{"ACT", "y x", "share an answer by the way once you read it whole, or drop it"}, {"ACT", "y x", "let a cold question by the way run, or decline it"},
 		{"ACT", "x", "mark a question or a failed message done"}, {"ACT", "i", "introduce two agents that are out of tune"},
 		{"ACT", "o", "open the pull request"}, {"ACT", "c", "copy the address"}, {"ACT", "z", "mute for an hour, a day, until unmuted"},
 		{"ACT", "g", "go to your agent's terminal (tmux, iTerm2, WezTerm, kitty)"}, {"ACT", "*", "pin a constellation to the top"},
@@ -316,7 +325,7 @@ func (m *model) helpItems() []item {
 		{"VIEWS", "a", "All: every fold open"}, {"VIEWS", ": ⌃k", "palette"}, {"VIEWS", "/", "filter in place"}, {"VIEWS", "p", "people"},
 		{"VIEWS", "?", "these keys"}, {"VIEWS", "esc", "back one level, never quits"}, {"VIEWS", "q ⌃c", "quit"},
 		{"COMPOSER", "⏎", "send"}, {"COMPOSER", "⇧⏎ ⌥⏎", "new line"}, {"COMPOSER", "⇥", "change the recipient"},
-		{"COMPOSER", "esc", "stop writing"},
+		{"COMPOSER", "esc", "stop writing, or asking"},
 	}
 	var out []item
 	for _, k := range keys {

@@ -211,4 +211,9 @@ func TestMergeNotices(t *testing.T) {
 	if a := alice.expect(func(f protocol.Frame) bool { return f.T == protocol.FrameAck && strings.HasPrefix(f.ID, "gh-") }); a.OK {
 		t.Fatal("a laptop sent a message under a merge notice's id")
 	}
+	// nor under a late answer by the way's, which a console would show as an answer and not as the message it is
+	alice.send(protocol.Frame{T: protocol.FrameSend, Msg: &protocol.Msg{ID: "bw-q1", From: "a1", To: "bob/b1", Text: "hi"}})
+	if a := alice.expect(func(f protocol.Frame) bool { return f.T == protocol.FrameAck && f.ID == "bw-q1" }); a.OK {
+		t.Fatal("a laptop sent a message under a late answer's id")
+	}
 }

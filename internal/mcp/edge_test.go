@@ -4,76 +4,43 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
-	"net"
 	"os"
+	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
 )
 
-// fakeDaemon answers on a socket of its own as the daemon does: who lists the team, send refuses a message without
-// a recipient or text and takes the rest. It keeps the sends.
-func fakeDaemon(t *testing.T) func() []ipc.Request {
+// teamDaemon answers as the daemon does: who lists the team, send refuses a message without a recipient or text and
+// takes the rest. It returns the sends it got.
+func teamDaemon(t *testing.T) func() []ipc.Request {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "mm") // short: unix socket paths are capped near 104 bytes
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	t.Setenv("MURMUR_HOME", dir)
-	ln, err := net.Listen("unix", config.SockPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { ln.Close() })
-	var mu sync.Mutex
-	var sent []ipc.Request
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
+	f := fakeDaemon(t, func(req ipc.Request) *ipc.Reply {
+		switch req.Op {
+		case "who":
+			return &ipc.Reply{OK: true, Text: "alice, you\nbob"}
+		case "send":
+			if strings.TrimSpace(req.To) == "" || strings.TrimSpace(req.Text) == "" {
+				return &ipc.Reply{Err: "both `to` and `text` are needed"}
 			}
-			line, _ := bufio.NewReader(c).ReadBytes('\n')
-			var req ipc.Request
-			_ = json.Unmarshal(line, &req)
-			r := ipc.Reply{OK: true}
-			switch req.Op {
-			case "who":
-				r.Text = "alice, you\nbob"
-			case "send":
-				mu.Lock()
-				sent = append(sent, req)
-				mu.Unlock()
-				if strings.TrimSpace(req.To) == "" || strings.TrimSpace(req.Text) == "" {
-					r = ipc.Reply{Err: "both `to` and `text` are needed"}
-				}
-			}
-			_ = json.NewEncoder(c).Encode(r)
-			c.Close()
 		}
-	}()
+		return &ipc.Reply{OK: true}
+	})
 	return func() []ipc.Request {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]ipc.Request(nil), sent...)
+		return slices.DeleteFunc(f.requests(), func(r ipc.Request) bool { return r.Op != "send" })
 	}
 }
 
-// serve runs the server on pipes for its stdin and stdout: write sends it lines, read takes one line of its answer,
+// onPipes runs the server on pipes for its stdin and stdout: write sends it lines, read takes one line of its answer,
 // or "" when none comes within a second, and stop closes its stdin and says whether it returned.
-func serve(t *testing.T) (write func(string), read func() string, stop func() bool) {
+func onPipes(t *testing.T) (write func(string), read func() string, stop func() bool) {
 	t.Helper()
 	inR, inW, _ := os.Pipe()
 	outR, outW, _ := os.Pipe()
-	stdin, stdout := os.Stdin, os.Stdout
-	os.Stdin, os.Stdout = inR, outW
 	returned := make(chan error, 1)
-	go func() { returned <- Serve("none") }()
+	go func() { returned <- serve("none", inR, outW) }()
 	lines := make(chan string, 100)
 	go func() {
 		r := bufio.NewReaderSize(outR, 1<<16)
@@ -86,7 +53,7 @@ func serve(t *testing.T) (write func(string), read func() string, stop func() bo
 			lines <- strings.TrimSuffix(l, "\n")
 		}
 	}()
-	t.Cleanup(func() { os.Stdin, os.Stdout = stdin, stdout; inW.Close(); outW.Close(); inR.Close(); outR.Close() })
+	t.Cleanup(func() { inW.Close(); outW.Close(); inR.Close(); outR.Close() })
 	write = func(s string) {
 		if _, err := io.WriteString(inW, s); err != nil {
 			t.Fatal(err)
@@ -133,8 +100,8 @@ func parse(t *testing.T, line string) answer {
 // Every request gets one answer under its own id, whatever the id is; notifications, lines that aren't JSON and
 // half a message at the end get none, and the server stops when its input closes.
 func TestServeAnswersRequestsOnly(t *testing.T) {
-	fakeDaemon(t)
-	write, read, stop := serve(t)
+	teamDaemon(t)
+	write, read, stop := onPipes(t)
 	write(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n")
 	write("not json\n\n")
 	for _, id := range []string{`1`, `"a-1"`, `null`, `{"k":[1]}`, `0`} {
@@ -159,8 +126,8 @@ func TestServeAnswersRequestsOnly(t *testing.T) {
 // A tool call with no arguments, arguments of the wrong type, an unknown tool, or a recipient or text that is empty
 // or blank is an error the agent reads, never a broken answer; a long message reaches the daemon whole.
 func TestToolCallsWithBadArguments(t *testing.T) {
-	sent := fakeDaemon(t)
-	write, read, stop := serve(t)
+	sent := teamDaemon(t)
+	write, read, stop := onPipes(t)
 	defer stop()
 	call := func(params string) answer {
 		t.Helper()
@@ -189,8 +156,8 @@ func TestToolCallsWithBadArguments(t *testing.T) {
 // A batch of requests, which MCP took out in 2025-06-18, gets an error rather than no answer, so the client doesn't
 // wait for one; the server answers what comes next.
 func TestBatchIsRefused(t *testing.T) {
-	fakeDaemon(t)
-	write, read, _ := serve(t)
+	teamDaemon(t)
+	write, read, _ := onPipes(t)
 	write(`[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","id":2,"method":"ping"}]` + "\n")
 	if a := parse(t, read()); a.Error == nil || a.Error.Code != -32600 {
 		t.Fatalf("a batch: %+v", a)

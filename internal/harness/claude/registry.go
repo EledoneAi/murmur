@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -79,6 +80,22 @@ func ReadEntry(path string) (Entry, error) {
 }
 
 func (Claude) Watch() string { return RegistryDir() }
+
+// lstart is how Claude Code records when a session's process started (procStart): what `ps -o lstart` prints, in
+// UTC, "Mon Oct 20 13:58:01 2026".
+const lstart = "Mon Jan 2 15:04:05 2006"
+
+// SameStart says whether a session's procStart is when process pid started, to the second it records give or take
+// one: not when the process with the PID now started at another time. A procStart in another form says nothing
+// against it.
+func (Claude) SameStart(pid int, procStart string) bool {
+	at, err := time.ParseInLocation(lstart, strings.Join(strings.Fields(procStart), " "), time.UTC)
+	if err != nil {
+		return true
+	}
+	now := harness.StartedAt(pid)
+	return !now.IsZero() && now.Sub(at).Abs() < 2*time.Second
+}
 
 // Sessions lists the live sessions in Claude Code's registry: one file per process, which Claude Code rewrites as
 // the session's status changes.

@@ -58,36 +58,39 @@ type Hub struct {
 	id    string
 	log   *slog.Logger
 
-	mu       sync.Mutex
-	settings Settings
-	users    map[string]*store.User         // by email, as the store had them at the last reload
-	handles  map[string]*store.User         // by handle
-	devices  map[string]*store.Device       // by id
-	tokens   map[string]*store.Device       // by token hash
-	links    map[string]*link               // laptops connected to this instance, or gone less than `grace` ago
-	remote   map[string]*presence           // laptops on other instances, by device id
-	asked    map[string]time.Time           // instance -> when this one last asked it for its laptops
-	waiting  map[string]*waiter             // message id -> the sender to tell when it is delivered
-	pages    map[string]chan protocol.Frame // message id -> the team page here waiting for its answer
-	streams  map[chan struct{}]bool         // the team pages open here, told when the roster changes
-	teamPage atomic.Pointer[teamEvent]      // what the last roster told the team pages, while some are open
-	newLinks []*link                        // said hello since the last roster: the next one goes to them first
-	out      handout                        // where rosters leave for the laptops here
-	changes  uint64                         // agents reports from laptops here, counted: what a roster has
-	seq      int64                          // the latest presence this instance published: publishLinkLocked
-	colours  map[string]int                 // by email, until people change: coloursLocked
-	news     []announcement                 // announcements to repos, newest first, as the store had them
-	newsMu   sync.Mutex                     // one change to the stored announcements at a time
-	pairs    map[string]*pair
-	sends    map[string][]time.Time // sender address -> recent sends
-	reloaded time.Time
-	dirty    chan struct{}
-	gets     downloads
-	sums     sync.Map // client binary name -> its SHA-256
-	stats    teamStats
-	stop     context.CancelFunc
-	index    atomic.Pointer[overlapIndex] // the latest, built with each roster
-	done     <-chan struct{}              // closed when the hub stops
+	mu        sync.Mutex
+	settings  Settings
+	users     map[string]*store.User         // by email, as the store had them at the last reload
+	handles   map[string]*store.User         // by handle
+	devices   map[string]*store.Device       // by id
+	tokens    map[string]*store.Device       // by token hash
+	links     map[string]*link               // laptops connected to this instance, or gone less than `grace` ago
+	remote    map[string]*presence           // laptops on other instances, by device id
+	asked     map[string]time.Time           // instance -> when this one last asked it for its laptops
+	waiting   map[string]*waiter             // message id -> the sender to tell when it is delivered
+	asides    map[string]*aside              // question by the way id -> the laptops it went between: btw.go
+	asks      map[string][]time.Time         // person -> their recent questions by the way, for BtwPerHour
+	asksAgain map[string][]time.Time         // person -> their recent questions asked again that this instance didn't know
+	pages     map[string]chan protocol.Frame // message id -> the team page here waiting for its answer
+	streams   map[chan struct{}]bool         // the team pages open here, told when the roster changes
+	teamPage  atomic.Pointer[teamEvent]      // what the last roster told the team pages, while some are open
+	newLinks  []*link                        // said hello since the last roster: the next one goes to them first
+	out       handout                        // where rosters leave for the laptops here
+	changes   uint64                         // agents reports from laptops here, counted: what a roster has
+	seq       int64                          // the latest presence this instance published: publishLinkLocked
+	colours   map[string]int                 // by email, until people change: coloursLocked
+	news      []announcement                 // announcements to repos, newest first, as the store had them
+	newsMu    sync.Mutex                     // one change to the stored announcements at a time
+	pairs     map[string]*pair
+	sends     map[string][]time.Time // sender address -> recent sends
+	reloaded  time.Time
+	dirty     chan struct{}
+	gets      downloads
+	sums      sync.Map // client binary name -> its SHA-256
+	stats     teamStats
+	stop      context.CancelFunc
+	index     atomic.Pointer[overlapIndex] // the latest, built with each roster
+	done      <-chan struct{}              // closed when the hub stops
 }
 
 // link is one laptop connected to this instance.
@@ -100,10 +103,15 @@ type link struct {
 	out     chan *protocol.Frame
 	roster  func(...[]byte) // hands the laptop the newest roster, encoded, in parts, ahead of any it hasn't read yet
 	cancel  context.CancelFunc
-	gone    time.Time // zero while connected
-	shown   uint64    // the roster last handed to it, by hash, and the changes it has: under the hub's handout lock
-	shownAt uint64    //
-	changed uint64    // its agents' latest report, as h.changes counts them
+	gone    time.Time   // zero while connected
+	shown   uint64      // the roster last handed to it, by hash, and the changes it has: under the hub's handout lock
+	shownAt uint64      //
+	changed uint64      // its agents' latest report, as h.changes counts them
+	btw     bool        // it said protocol.CanBtw on hello: it carries questions by the way
+	answers []time.Time // its recent answers by the way, and notes, each counted apart: btw.go
+	notes   []time.Time //
+
+	went map[string]went // the questions it asked that went on lately: btw.go
 }
 
 type waiter struct {
@@ -132,8 +140,9 @@ func New(ctx context.Context, cfg Config, st store.Store, b bus.Bus) (*Hub, erro
 		cfg: cfg, store: st, bus: b, id: cfg.Instance, log: cfg.Log, stop: stop,
 		links: map[string]*link{}, remote: map[string]*presence{}, asked: map[string]time.Time{}, waiting: map[string]*waiter{}, pairs: map[string]*pair{},
 		pages: map[string]chan protocol.Frame{}, streams: map[chan struct{}]bool{}, done: ctx.Done(),
-		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1),
-		gets: downloads{seen: map[string][]time.Time{}},
+		sends: map[string][]time.Time{}, dirty: make(chan struct{}, 1), asides: map[string]*aside{}, asks: map[string][]time.Time{},
+		asksAgain: map[string][]time.Time{},
+		gets:      downloads{seen: map[string][]time.Time{}},
 	}
 	if err := h.loadSettings(ctx); err != nil {
 		stop()

@@ -248,7 +248,7 @@ func TestFilterTakesAnyText(t *testing.T) {
 		if got := len(b.lone) + len(b.quiet) + len(b.groups); want != 12 && got != want || want == 12 && b.agents != 12 {
 			t.Errorf("%q: %d rows, want %d", filter, got, want)
 		}
-		if len(b.needs) != 3 {
+		if len(b.needs) != 4 {
 			t.Errorf("%q: %d needs", filter, len(b.needs))
 		}
 	}
@@ -399,12 +399,13 @@ func TestPullRequestLinksAreWebPages(t *testing.T) {
 // kind (0, negative, too big, not ASCII digits) and an empty answer, without asking the daemon. done marks a question
 // or a failed message, never an approval or a held message.
 func TestPlainCommands(t *testing.T) {
-	s := failedTo("online") // 1 an approval, 2 dave's question, 3 the failed message, 4 the held one
+	// 1 an approval, 2 carol's question by the way, 3 dave's question, 4 the failed message, 5 the held one
+	s := failedTo("online")
 	var asked []ipc.Request
 	fake := func(r ipc.Request) (ipc.Reply, error) { asked = append(asked, r); return ipc.Reply{OK: true}, nil }
 	for line, want := range map[string]string{
-		"y   4": "approve h1", "x 4": "decline h1", "reply  2   ok, merge it": "send dave ok, merge it", "done 2": "done m6",
-		"done 3": "done f1", "send  bob   hi": "send bob hi", "mute bob/main-1 1h": "mute bob/main-1 1h",
+		"y   5": "approve h1", "x 5": "decline h1", "reply  3   ok, merge it": "send dave ok, merge it", "done 3": "done m6",
+		"done 4": "done f1", "send  bob   hi": "send bob hi", "mute bob/main-1 1h": "mute bob/main-1 1h",
 	} {
 		asked = nil
 		if reply, _ := command(s, line, demoNow, fake); len(asked) != 1 || strings.HasPrefix(reply, "Say") {
@@ -415,8 +416,8 @@ func TestPlainCommands(t *testing.T) {
 			t.Errorf("%q asked %q, want %q", line, got, want)
 		}
 	}
-	for _, line := range []string{"y", "x", "y 0", "y -4", "y 5", "y 99999999999999999999", "y ４", "y ٤", "y 4.0", "y 0x4", "y 1",
-		"x 3", "done", "done 1", "done 4", "done 9", "reply", "reply 2", "reply 2    ", "reply two ok", "send", "send bob",
+	for _, line := range []string{"y", "x", "y 0", "y -5", "y 6", "y 99999999999999999999", "y ５", "y ٥", "y 5.0", "y 0x5", "y 1",
+		"x 4", "done", "done 1", "done 5", "done 9", "reply", "reply 3", "reply 3    ", "reply two ok", "send", "send bob",
 		"send bob  \t ", "mute"} {
 		asked = nil
 		if reply, _ := command(s, line, demoNow, fake); len(asked) != 0 || reply == "" {
@@ -470,16 +471,16 @@ func TestThreadDoneAndHeldDecidedElsewhere(t *testing.T) {
 }
 
 // A need's number in the plain mode is its place in the list as it was last printed: a question arriving since, which
-// sorts before it, doesn't turn "x 3" onto another message.
+// sorts before it, doesn't turn "x 4" onto another message.
 func TestPlainNumbersAreThoseListed(t *testing.T) {
 	listed := demoSnapshot(demoNow)
 	last := demoSnapshot(demoNow)
 	last.Msgs = append(last.Msgs, protocol.Msg{ID: "q0", From: "bob", To: "alice", Text: "lunch?", At: demoNow.Add(-3 * time.Hour).UnixMilli()})
 	var asked ipc.Request
 	fake := func(r ipc.Request) (ipc.Reply, error) { asked = r; return ipc.Reply{OK: true}, nil }
-	snap, _ := numbered("x 3", last, listed)
-	if _, _ = command(snap, "x 3", demoNow, fake); asked.Op != "decline" || asked.ID != "h1" {
-		t.Fatalf("x 3 asked %+v", asked)
+	snap, _ := numbered("x 4", last, listed)
+	if _, _ = command(snap, "x 4", demoNow, fake); asked.Op != "decline" || asked.ID != "h1" {
+		t.Fatalf("x 4 asked %+v", asked)
 	}
 	if _, now := numbered("needs", last, listed); len(now.Msgs) != len(last.Msgs) {
 		t.Fatal("needs doesn't list the needs as they are now")

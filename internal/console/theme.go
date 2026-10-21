@@ -84,6 +84,7 @@ type styles struct {
 	fg, dim, faint, name, bold, wordmark ink
 	teal, tealBold, thorn, link, sib     ink
 	hotkey, tab, label, italic           ink
+	aside                                ink // a question by the way, its answer, and where it stands: dim, in italics
 	run, web, lilac                      ink
 	clash                                ink // a file both sides of a dissonance change
 	people                               [len(theme{}.people)]ink
@@ -99,7 +100,8 @@ func newStyles(t theme) styles {
 		link: newInk(s.Foreground(t.link)), sib: newInk(s.Foreground(t.sib)),
 		hotkey: newInk(s.Foreground(t.hotkey).Bold(true).Underline(true)), tab: newInk(s.Foreground(t.dim)),
 		label: newInk(s.Foreground(t.dim).Bold(true)), italic: newInk(s.Foreground(t.fg).Italic(true)),
-		run: newInk(s.Foreground(t.run)), web: newInk(s.Foreground(t.web)), lilac: newInk(s.Foreground(t.lilac)),
+		aside: newInk(s.Foreground(t.dim).Italic(true)), run: newInk(s.Foreground(t.run)),
+		web: newInk(s.Foreground(t.web)), lilac: newInk(s.Foreground(t.lilac)),
 		// ponytail: no curly or coloured underline: Terminal.app misreads both and paints the rest of the row
 		clash: newInk(s.Foreground(t.thorn)),
 		selBg: tint(t.sel), tabBg: tint(t.tab),

@@ -28,6 +28,7 @@ const (
 	evFrame    = "frame"    // a frame for laptops another instance holds
 	evChanged  = "changed"  // something changed in the store: read it again
 	evAnswer   = "answer"   // the answer to a message sent from a team page on another instance
+	evBtw      = "btw"      // an answer by the way, for the instance where its question was asked
 )
 
 // presence is a laptop as the instance holding it describes it.
@@ -37,6 +38,7 @@ type presence struct {
 	Handle string           `json:"handle"`
 	Agents []protocol.Agent `json:"agents,omitempty"` // files included: every instance answers checks and lists overlaps
 	Online bool             `json:"online"`           // false while it reconnects, or once it's gone
+	Btw    bool             `json:"btw,omitempty"`    // it carries questions by the way
 	// Seq orders one instance's presence events: each goes out on a goroutine of its own, so a newer one can arrive
 	// first. Nanoseconds, so an instance that restarts under the same name goes on after its last.
 	Seq int64 `json:"seq"`
@@ -125,6 +127,14 @@ func (h *Hub) listen(ctx context.Context) {
 				h.pageAnswerLocked(f)
 				h.mu.Unlock()
 			}
+		case evBtw:
+			var b btwEvent
+			if json.Unmarshal(e.Data, &b) == nil {
+				b.Btw.Clean() // another instance cleaned it already; this one doesn't rely on it
+				h.mu.Lock()
+				h.passAnswerLocked(b.Device, b.Btw)
+				h.mu.Unlock()
+			}
 		}
 	}
 }
@@ -157,7 +167,7 @@ func (h *Hub) onChanged(ctx context.Context, what string) {
 // publishLinkLocked tells the other instances about one of this instance's laptops.
 func (h *Hub) publishLinkLocked(ctx context.Context, l *link) {
 	h.seq = max(h.seq+1, time.Now().UnixNano())
-	p := presence{Device: l.dev, Email: l.email, Handle: l.handle, Agents: l.agents, Online: l.gone.IsZero(), Seq: h.seq}
+	p := presence{Device: l.dev, Email: l.email, Handle: l.handle, Agents: l.agents, Online: l.gone.IsZero(), Btw: l.btw, Seq: h.seq}
 	go h.publish(context.WithoutCancel(ctx), evPresence, p, "")
 }
 
@@ -216,7 +226,7 @@ func (h *Hub) onFrameEvent(f frameEvent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if f.Device != "" {
-		if l := h.links[f.Device]; l != nil && l.gone.IsZero() {
+		if l := h.links[f.Device]; l != nil && l.gone.IsZero() && carries(l.btw, f.Frame) {
 			if f.ReplyTo != "" && f.Frame.Msg != nil {
 				h.waiting[f.Frame.Msg.ID] = &waiter{from: f.ReplyTo, created: time.Now()}
 			}
@@ -238,6 +248,7 @@ type holder struct {
 	dev, email, handle string
 	agents             []protocol.Agent
 	online             bool
+	btw                bool // it carries questions by the way
 }
 
 // holdersLocked lists every laptop the team can see: this instance's, then the others'.
@@ -254,7 +265,7 @@ func (h *Hub) holdersOfLocked(handle string) iter.Seq[holder] {
 			if p := h.remote[l.dev]; !l.gone.IsZero() && p != nil && p.Online {
 				continue // gone from here, online on another instance
 			}
-			if !yield(holder{dev: l.dev, email: l.email, handle: l.handle, agents: l.agents, online: l.gone.IsZero()}) {
+			if !yield(holder{dev: l.dev, email: l.email, handle: l.handle, agents: l.agents, online: l.gone.IsZero(), btw: l.btw}) {
 				return
 			}
 		}
@@ -263,7 +274,7 @@ func (h *Hub) holdersOfLocked(handle string) iter.Seq[holder] {
 				continue
 			}
 			if l, here := h.links[p.Device]; !here || (!l.gone.IsZero() && p.Online) {
-				if !yield(holder{dev: p.Device, email: p.Email, handle: p.Handle, agents: p.Agents, online: p.Online}) {
+				if !yield(holder{dev: p.Device, email: p.Email, handle: p.Handle, agents: p.Agents, online: p.Online, btw: p.Btw}) {
 					return
 				}
 			}
@@ -271,11 +282,14 @@ func (h *Hub) holdersOfLocked(handle string) iter.Seq[holder] {
 	}
 }
 
-// toDeviceLocked sends a frame to one laptop, wherever it is connected. replyTo names the laptop to tell when the
-// message in the frame is delivered; cause is its sender's latest agents report, if a laptop here sent it, which a
-// laptop here gets in a roster before the message.
+// toDeviceLocked sends a frame to one laptop, wherever it is connected, unless it can't read it. replyTo names the
+// laptop to tell when the message in the frame is delivered; cause is its sender's latest agents report, if a laptop
+// here sent it, which a laptop here gets in a roster before the message.
 func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string, cause uint64) bool {
 	if l := h.links[dev]; l != nil && l.gone.IsZero() {
+		if !carries(l.btw, f) {
+			return false
+		}
 		if replyTo != "" && f.Msg != nil {
 			h.waiting[f.Msg.ID] = &waiter{from: replyTo, created: time.Now()}
 		}
@@ -283,7 +297,7 @@ func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string, cause
 		l.send(f)
 		return true
 	}
-	if p := h.remote[dev]; p != nil && p.Online {
+	if p := h.remote[dev]; p != nil && p.Online && carries(p.Btw, f) {
 		go h.publish(context.Background(), evFrame, frameEvent{Device: dev, ReplyTo: replyTo, Frame: f}, p.instance)
 		return true
 	}
@@ -585,7 +599,7 @@ const rosterBudget = protocol.LaptopReadLimit * 3 / 4
 func worstSize(a protocol.Agent) int {
 	n := 512
 	for _, s := range append([]string{a.Name, a.Repo, a.Branch, a.Title, a.PRURL, a.App, a.Status, a.Needs, a.Doing,
-		a.Kinds, a.Base, a.Detached, a.Op, a.Dir}, a.Also...) {
+		a.Kinds, a.Base, a.Detached, a.Op, a.Dir, a.Btw}, a.Also...) {
 		n += 6*len(s) + 24 // the field's name and quotes, for Also's entries
 	}
 	return n
@@ -617,9 +631,10 @@ func (h *Hub) rosterLocked() []protocol.Person {
 		}
 	}
 	type placed struct {
-		p *protocol.Person
-		a *protocol.Agent // as its laptop said, which nothing changes
-		x holder
+		p   *protocol.Person
+		a   *protocol.Agent // as its laptop said, which nothing changes
+		x   holder
+		btw bool // the hub carries questions by the way to its laptop
 	}
 	var all []placed
 	type address struct {
@@ -634,7 +649,7 @@ func (h *Hub) rosterLocked() []protocol.Person {
 		}
 		p.Online = p.Online || x.online
 		for i := range x.agents {
-			at := placed{p, &x.agents[i], x}
+			at := placed{p, &x.agents[i], x, x.btw && h.settings.Btw}
 			all = append(all, at)
 			if y, ok := first[address{p, at.a.Name}]; !ok || sooner(*at.a, x, *y.a, y.x) {
 				first[address{p, at.a.Name}] = at
@@ -651,6 +666,9 @@ func (h *Hub) rosterLocked() []protocol.Person {
 		}
 		a := *x.a
 		a.Files, a.Tree = nil, ""
+		if !x.btw { // nobody can ask it by the way, whatever its laptop says
+			a.Btw = ""
+		}
 		x.p.Agents = append(x.p.Agents, a)
 	}
 	var out []protocol.Person
@@ -706,6 +724,18 @@ func (h *Hub) sweep(ctx context.Context, alive bool) {
 	for from, ts := range h.sends {
 		if len(ts) == 0 || time.Since(ts[len(ts)-1]) > time.Minute {
 			delete(h.sends, from)
+		}
+	}
+	for id, a := range h.asides {
+		if time.Since(a.created) > asideFor {
+			delete(h.asides, id)
+		}
+	}
+	for _, m := range []map[string][]time.Time{h.asks, h.asksAgain} {
+		for from, ts := range m {
+			if len(ts) == 0 || time.Since(ts[len(ts)-1]) > time.Hour {
+				delete(m, from)
+			}
 		}
 	}
 	window := time.Duration(h.settings.LoopMinutes) * time.Minute

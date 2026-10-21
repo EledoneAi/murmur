@@ -78,10 +78,12 @@ type dissonance struct {
 type needKind int
 
 const (
-	needApprove  needKind = iota // one of your agents waits for you in its terminal
-	needQuestion                 // a person or an agent asked you something
-	needHeld                     // a mute holds a message for one of your agents
-	needFailed                   // a message you sent didn't get through
+	needApprove   needKind = iota // one of your agents waits for you in its terminal
+	needQuestion                  // a person or an agent asked you something
+	needHeld                      // a mute holds a message for one of your agents
+	needFailed                    // a message you sent didn't get through
+	needAsideHeld                 // your agent's answer to a teammate's question by the way waits for you to share it
+	needAsideCold                 // a teammate's question by the way to your agent, idle long, waits for your go
 )
 
 // need is one line of Needs you.
@@ -95,6 +97,8 @@ type need struct {
 	since time.Time
 	ref   *agentRef
 	msg   protocol.Msg
+	btw   ipc.Aside // for a question by the way
+	asker string    // for a question by the way: who asked, as a sentence names them, carol or carol's agent web-2
 }
 
 type board struct {
@@ -111,8 +115,13 @@ type board struct {
 	quiet     []*agentRef
 	people    int // online
 	agents    int
-	initials  map[string]string // handle -> its initial, two letters when two people share one
-	colours   map[string]int    // handle -> its colour, as the hub numbered it; you and everyone with agents
+	initials  map[string]string    // handle -> its initial, two letters when two people share one
+	colours   map[string]int       // handle -> its colour, as the hub numbered it; you and everyone with agents
+	said      map[string]string    // this laptop's agents that can be asked by the way, by name, with what they last said
+	cantAsk   map[string]string    // this laptop's agents nobody can ask by the way, by name, with why, as the daemon says it
+	hubBtw    bool                 // an agent says how it answers questions by the way: the hub carries them
+	byAddr    map[string]*agentRef // every agent, whatever the scope shows
+	delivered map[string]bool      // the messages that carry an answer by the way to the agent that asked
 }
 
 // scope narrows the board: everyone, or your agents and those in touch with them.
@@ -148,7 +157,8 @@ func scopes(people int) []scope {
 }
 
 func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
-	b := &board{me: s.Me.Handle, initials: map[string]string{}, colours: map[string]int{}}
+	b := &board{me: s.Me.Handle, initials: map[string]string{}, colours: map[string]int{}, said: s.Said,
+		cantAsk: s.CantAsk}
 	b.assignPeople(s.Me, s.People)
 
 	// every agent, and second checkouts
@@ -168,6 +178,7 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 			}
 			byAddr[r.addr] = r
 			all = append(all, r)
+			b.hubBtw = b.hubBtw || a.Btw != "" // only said, and passed on, through a hub that carries questions
 			if a.Branch != "" && a.Tree != "" {
 				k := place{p.Handle, a.Repo, a.Branch}
 				checkouts[k] = append(checkouts[k], r)
@@ -186,10 +197,13 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 			}
 		}
 	}
-	b.agents = len(all)
+	b.agents, b.byAddr = len(all), byAddr
 	b.solo = len(b.colours) <= 1
 
-	// links, from the messages this laptop saw lately between agents still running
+	// links, from the messages this laptop saw lately between agents still running, and the questions an agent asked
+	// another by the way: the asker learned from the other's conversation. An answer delivered as a message is the
+	// question's already.
+	b.delivered = deliveries(s)
 	counts, held := map[pair]int{}, map[pair]bool{}
 	latest := map[string]int64{}
 	add := func(m protocol.Msg, isHeld bool) {
@@ -202,10 +216,17 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 		latest[m.From], latest[m.To] = max(latest[m.From], m.At), max(latest[m.To], m.At)
 	}
 	for _, m := range s.Msgs {
-		add(m, false)
+		if !b.delivered[m.ID] {
+			add(m, false)
+		}
 	}
 	for _, m := range s.Asks {
 		add(m, true)
+	}
+	for _, a := range s.Asides { // one that waits for you is dashed, as a held message
+		if byAgent(a) {
+			add(protocol.Msg{From: a.From, To: a.To, At: a.At}, waits(a))
+		}
 	}
 
 	// constellations: the connected agents, by union-find over the links
@@ -302,7 +323,7 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 	if b.large = len(b.colours) > largeTeam; b.large && sc != scopeAll {
 		b.foldFar(sc)
 	}
-	b.needs = buildNeeds(s, byAddr, now)
+	b.needs = buildNeeds(s, byAddr, b.delivered, now)
 	return b
 }
 
@@ -557,8 +578,10 @@ func (b *board) assignPeople(me protocol.Person, people []protocol.Person) {
 }
 
 // buildNeeds lists what needs you, oldest first: your agents waiting for you, questions to you, messages a mute
-// holds for your agents, and messages you sent that didn't get through.
-func buildNeeds(s ipc.Snapshot, byAddr map[string]*agentRef, now time.Time) []need {
+// holds for your agents, messages you sent that didn't get through, and teammates' questions by the way to your
+// agents whose answer waits for you to share it, or which wait for your go. Answers by the way delivered as messages
+// are not messages here.
+func buildNeeds(s ipc.Snapshot, byAddr map[string]*agentRef, delivered map[string]bool, now time.Time) []need {
 	var out []need
 	for _, r := range byAddr {
 		if r.st == needsYou {
@@ -583,10 +606,22 @@ func buildNeeds(s ipc.Snapshot, byAddr map[string]*agentRef, now time.Time) []ne
 			since: time.UnixMilli(m.At), ref: byAddr[m.From], msg: m})
 	}
 	for _, m := range append(slices.Clone(s.Msgs), s.Outbox...) {
-		if why, ok := s.Failed[m.ID]; ok && !s.Done[m.ID] {
+		if why, ok := s.Failed[m.ID]; ok && !s.Done[m.ID] && !delivered[m.ID] {
 			out = append(out, need{key: "need:failed:" + m.ID, kind: needFailed, who: m.To, text: firstLine(m.Text), why: why,
 				since: time.UnixMilli(m.At), ref: byAddr[m.To], msg: m})
 		}
+	}
+	for _, a := range s.Asides {
+		kind := needAsideHeld
+		switch a.State {
+		case ipc.AsideHeld:
+		case ipc.AsideCold:
+			kind = needAsideCold
+		default:
+			continue
+		}
+		out = append(out, need{key: "need:btw:" + a.ID, kind: kind, who: a.From, to: a.To, text: firstLine(a.Question),
+			since: time.UnixMilli(a.At), ref: byAddr[a.To], btw: a, asker: askedBy(a, me)})
 	}
 	slices.SortFunc(out, func(x, y need) int { return cmp.Or(x.since.Compare(y.since), cmp.Compare(x.key, y.key)) })
 	return out

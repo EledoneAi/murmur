@@ -224,6 +224,10 @@ export interface SettingsValues {
   weekdays: boolean;
   weekly_report: boolean;
   check_hours: number;
+  /** People can ask agents questions by the way. */
+  btw: boolean;
+  /** What one person and their agents can ask by the way in an hour, each also counted in sends_per_minute. */
+  btw_per_hour: number;
 }
 
 export interface Settings {
@@ -386,6 +390,12 @@ export const settingFields: SettingField[] = [
     hint: 'What one person or one agent can send.',
   },
   {
+    name: 'btw_per_hour', group: 'Limits', kind: 'number', min: 1, max: 1000, label: 'Questions by the way per hour',
+    hint:
+      'What one person and their agents can ask agents by the way in an hour. Each also counts as a message in the ' +
+      'minute, and between two agents in the loop limit.',
+  },
+  {
     name: 'loop_max', group: 'Limits', kind: 'number', min: 1, max: 1000, label: 'Messages between two agents',
     hint: 'How many two agents can exchange within the loop window before a person must step in.',
   },
@@ -431,6 +441,14 @@ export const settingFields: SettingField[] = [
       'How your agents should work together, in plain sentences. Every agent reads them at the start of each ' +
       'session. For example: message the agent changing a file before you change it; ask a person only for ' +
       'decisions, with options.',
+  },
+  {
+    name: 'btw', group: 'Agents', kind: 'checkbox', label: 'Let people ask agents questions by the way',
+    hint:
+      "A throwaway copy of the agent's conversation answers, on its person's laptop, and the agent never sees the " +
+      'question. Agents can ask too. Each person chooses whether answers to teammates wait for them first. The ' +
+      "hub's store keeps neither the questions nor the answers; a Postgres bus may hold a long one for five minutes " +
+      'at most, on its way between instances.',
   },
   {
     name: 'announce_hours', group: 'Agents', kind: 'number', min: 1, max: 720, label: 'Hours an announcement stays up',

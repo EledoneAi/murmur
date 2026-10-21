@@ -1,0 +1,24 @@
+ [38;2;211;214;226m╭─┬─╮[m                                                                              
+ [38;2;211;214;226m●[m [38;2;79;214;196m●[m [38;2;211;214;226m●[m  [1;38;2;238;240;248mmurmur[m   [38;2;139;144;169mTeam › [m[1;38;2;238;240;248mBilling[m                [38;2;139;144;169mseen only by the people on each end[m  
+                                                                                    
+          [3;38;2;139;144;169mStep 7: billing/rerun.go:87 still calls Rerun() through the alias, and[m    
+          [3;38;2;139;144;169mcertifier.go reads it once more.[m                                          
+          [3;38;2;139;144;169mStep 8: billing/rerun.go:88 still calls Rerun() through the alias, and[m    
+          [3;38;2;139;144;169mcertifier.go reads it once more.[m                                          
+          [3;38;2;139;144;169mStep 9: billing/rerun.go:89 still calls Rerun() through the alias, and[m    
+          [3;38;2;139;144;169mcertifier.go reads it once more.[m                                          
+          [3;38;2;139;144;169mStep 10: billing/rerun.go:90 still calls Rerun() through the alias,[m       
+          [3;38;2;139;144;169mand certifier.go reads it once more.[m                                      
+          [3;38;2;139;144;169mStep 11: billing/rerun.go:91 still calls Rerun() through the alias,[m       
+          [3;38;2;139;144;169mand certifier.go reads it once more.[m                                      
+          [3;38;2;139;144;169mStep 12: billing/rerun.go:92 still calls Rerun() through the alias,[m       
+          [3;38;2;139;144;169mand certifier.go reads it once more.[m                                      
+          [3;38;2;139;144;169mLast: the deploy key is in the vault, not here.[m                           
+          [1;4;38;2;247;248;255;4my[m [38;2;139;144;169mshare[m   [1;4;38;2;247;248;255;4mx[m [38;2;139;144;169mdrop[m                                                          
+                                                                                    
+ [38;2;58;62;85m──────────────────────────────────────────────────────────────────────────────────[m 
+ [38;2;139;144;169mto [m[1;38;2;122;167;255mA[m [38;2;238;240;248mapi-9b[m  [37m[37m[m[m[37m[38;5;240mw[m[m[37m[38;5;240mrite to send[m[m[37m                                         [m                
+ [38;2;139;144;169mapi-9b is working; it reads this between two tool calls.[m                           
+ [38;2;211;214;226m✓ Read on: y shares api-9b's answer once all of it has been on screen[m[38;2;139;144;169m · 14:32[m      
+                                                                                    
+ [1;4;38;2;247;248;255;4mw[m [38;2;139;144;169mwrite[m  [1;4;38;2;247;248;255;4mb[m [38;2;139;144;169mby the way[m  [1;4;38;2;247;248;255;4m⇥[m [38;2;139;144;169mrecipient[m  [1;4;38;2;247;248;255;4m[[m[38;2;247;248;255;4m [m[1;4;38;2;247;248;255;4m][m [38;2;139;144;169mconstellation[m  [1;4;38;2;247;248;255;4me[m[1;4;38;2;247;248;255;4ms[m[1;4;38;2;247;248;255;4mc[m [38;2;139;144;169mback[m            [1;4;38;2;247;248;255;4m?[m [38;2;139;144;169mkeys[m  

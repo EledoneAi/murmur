@@ -1,7 +1,8 @@
- ●─●─●  murmur                               ◆ 3   A ● live 
+ ●─●─●  murmur                               ◆ 4   A ● live 
                                                             
- ◆ Needs you  3                                             
+ ◆ Needs you  4                                             
    A api-1a             approve             ━━╸───── 3:12   
+   C carol ↝ 9b         answer              ━─────── 1:30   
    D dave               asks                ━─────── 1:05   
    B main-1 ┄⇢ 9b       held                ╸─────── 0:40   
                                                             
@@ -28,5 +29,4 @@
                                                             
                                                             
                                                             
-                                                            
- g terminal  ⏎ thread  ␣ inspect  w write  c copy   ? keys  
+ g terminal  ⏎ thread  ␣ inspect  w write           ? keys  

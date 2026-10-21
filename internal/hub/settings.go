@@ -62,6 +62,12 @@ type Settings struct {
 
 	AnnounceHours int `json:"announce_hours"` // how long an announcement to a repo stays up
 
+	// Btw lets people and their agents ask an agent a question by the way, which a throwaway copy of its conversation
+	// answers on its person's laptop, without the agent seeing it. BtwPerHour is how many one person and their agents
+	// can ask in an hour, each also counted in SendsPerMinute, and in LoopMax when an agent asks an agent.
+	Btw        bool `json:"btw"`
+	BtwPerHour int  `json:"btw_per_hour"`
+
 	// GitHub tells agents when a pull request merges over their unpushed work: GitHub sends pull request events
 	// signed with WebhookSecret to /github/webhook, and the hub reads changed files with Token (read-only).
 	GitHubWebhookSecret string `json:"github_webhook_secret,omitempty"`
@@ -75,7 +81,7 @@ type Settings struct {
 func Defaults() Settings {
 	return Settings{TokenDays: 90, SendsPerMinute: 20, LoopMax: 12, LoopMinutes: 10, MaxAgents: 64,
 		MaxLaptops: 10, DownloadsPerHour: 120, UpdatePolicy: "auto", CheckHours: 24, ReleaseCheck: true, WaitPingMinutes: 15,
-		WorkStart: 9, WorkEnd: 19, Weekdays: true, TimeZone: "UTC", WeeklyReport: true, AnnounceHours: 24}
+		WorkStart: 9, WorkEnd: 19, Weekdays: true, TimeZone: "UTC", WeeklyReport: true, AnnounceHours: 24, Btw: true, BtwPerHour: 30}
 }
 
 const settingsKey = "settings"
@@ -93,6 +99,7 @@ func (s Settings) Valid() error {
 	}{
 		{"token_days", "days a laptop stays signed in", s.TokenDays, 0, 3650},
 		{"sends_per_minute", "messages per minute", s.SendsPerMinute, 1, 1000},
+		{"btw_per_hour", "questions by the way per hour", s.BtwPerHour, 1, 1000},
 		{"loop_max", "messages between two agents", s.LoopMax, 1, 1000},
 		{"loop_minutes", "loop window", s.LoopMinutes, 1, 1440},
 		{"max_agents", "agents per laptop", s.MaxAgents, 1, 1000},

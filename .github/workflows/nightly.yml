@@ -1,7 +1,8 @@
 name: Claude Code compatibility
 
-# Murmur reads files Claude Code writes and talks to its inbox. Each night this checks those against the newest
-# Claude Code, so a change on their side shows up as an issue here before a team finds it.
+# Murmur reads files Claude Code writes, talks to its inbox, and runs copies of its sessions to answer questions by the
+# way. Each night this checks those against the newest Claude Code, so a change on their side shows up as an issue here
+# before a team finds it.
 on:
   schedule:
     - cron: "23 4 * * *"

@@ -266,6 +266,12 @@ func (m *model) homeLines(b *board) (pinned, body []line) {
 		for _, n := range shown {
 			person, _, _ := strings.Cut(n.who, "/")
 			pinned = append(pinned, line{text: m.glowing(n.key, m.needLine(b, lay, n), b.colours[person]), key: n.key})
+			if n.key != m.selected {
+				continue
+			}
+			if d, ok := m.needDetail(b, lay, n); ok { // a question by the way unfolds what settles it
+				pinned = append(pinned, d)
+			}
 		}
 		if more := len(b.needs) - len(shown); more > 0 {
 			pinned = append(pinned, line{text: pad("   "+st.dim.Render(fmt.Sprintf("+ %d more: ", more))+st.keyWord("n", "goes through them"), m.w),
@@ -437,9 +443,11 @@ func (m *model) needLine(b *board, lay layout, n need) string {
 	if agent != "" {
 		who = agent
 	}
-	if n.kind == needHeld {
-		_, to, _ := strings.Cut(n.to, "/")
-		who += " " + g.heldArrow + " " + shortName(to)
+	switch n.kind {
+	case needHeld:
+		who += " " + g.heldArrow + " " + shortName(agentName(n.to))
+	case needAsideHeld, needAsideCold: // who asked which of your agents
+		who += " " + g.aside + " " + shortName(agentName(n.to))
 	}
 	whoW := min(24, max(16, lay.name+8))
 	room := lay.right - 1 - 3 - cellWidth(initial) - whoW // for what they need
@@ -456,11 +464,15 @@ func (m *model) needLine(b *board, lay layout, n need) string {
 		text = quote("held ", st.dim.Render)
 	case needFailed:
 		text = quote("not delivered ", st.thorn.Render)
+	case needAsideHeld:
+		text = quote("by the way ", st.dim.Render)
+	case needAsideCold:
+		text = quote("by the way, cold ", st.dim.Render)
 	}
 	waited := m.now().Sub(n.since)
 	right := st.fuse(g, waited, true, 8) + " " + st.dim.Render(clock(waited))
 	if m.w < 64 {
-		text = st.teal.Render([...]string{"approve", "asks", "held", "failed"}[n.kind])
+		text = st.teal.Render([...]string{"approve", "asks", "held", "failed", "answer", "cold"}[n.kind])
 	}
 	if !m.motion && m.progress(animGlow, n.key) >= 0 {
 		text = st.tealBold.Render("new ") + text
@@ -559,6 +571,13 @@ func (m *model) agentLines(b *board, lay layout, r *agentRef, gutter, gap string
 	}
 	if r.a.Context > 0 {
 		parts = append(parts, st.dim.Render(fmt.Sprintf("context %d%%", r.a.Context)))
+	}
+	if said := m.said(r); said != "" { // in its own words: first when it waits for your answer, else last
+		if r.a.Needs == "input" {
+			parts = append([]string{st.italic.Render("“" + said + "”")}, parts...)
+		} else {
+			parts = append(parts, st.italic.Render("“"+said+"”"))
+		}
 	}
 	if len(parts) == 0 {
 		return out

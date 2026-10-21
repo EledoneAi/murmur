@@ -1,8 +1,9 @@
  ╭─┬─╮                                                                                                        
  ● ● ●  murmur    Near me    Team    All                            A alice · 23 online · 69 agents   ● live  
                                                                                                               
- ◆ Needs you  3                                                                                               
+ ◆ Needs you  4                                                                                               
 ▌  A  api-1a             approve running go test ./ocr/...                                    ━━╸───── 3:12   
+   C  carol ↝ 9b         by the way “Does rerun.go still call the old certifier?”             ━─────── 1:30   
    D  dave               asks you “ok to merge #1827 before v2?”                              ━─────── 1:05   
    B  main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until …” ╸─────── 0:40   
                                                                                                               
@@ -36,5 +37,4 @@
                                                                                                               
                                                                                                               
                                                                                                               
-                                                                                                              
- g terminal  ⏎ thread  ␣ inspect  w write  c copy  z mute                                             ? keys  
+ g terminal  ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute                               ? keys  

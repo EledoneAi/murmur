@@ -1,15 +1,16 @@
  ╭─┬─╮
  ● ● ●  murmur    Team    Mine    All                                A alice · 4 online · 12 agents   ● live
 
- ◆ Needs you  3    ╭──────────────────────────────────────────────────────────────────────╮
+ ◆ Needs you  4    ╭──────────────────────────────────────────────────────────────────────╮
    A api-1a        │ › api9b▏                           agents · people · files · actions │   ━━╸───── 3:12
-   D dave          │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:05
-   B main-1 ┄⇢ 9b  │   AGENTS                                                             │…” ╸─────── 0:40
-                   │ ▌ ● A api-9b                                         feat/billing-v2 │
- Billing   api · 3 │                                                                      │e on certifier.go
-   ╭────◆ A api-1a │   ACTIONS                                                            │   ━━╸───── 3:12
-▌╭─┴─┬┄┄● A api-9b │   Write to api-9b                                                  w │   ›▪·›››⇢›·▪››    
-▌│   ┆        ↳ Run│   Copy alice/api-9b                                                c │xt 78%             
+   C carol ↝ 9b    │ ──────────────────────────────────────────────────────────────────── │   ━─────── 1:30
+   D dave          │   AGENTS                                                             │   ━─────── 1:05
+   B main-1 ┄⇢ 9b  │ ▌ ● A api-9b                                         feat/billing-v2 │…” ╸─────── 0:40
+                   │                                                                      │
+ Billing   api · 3 │   ACTIONS                                                            │e on certifier.go
+   ╭────◆ A api-1a │   Write to api-9b                                                  w │   ━━╸───── 3:12
+▌╭─┴─┬┄┄● A api-9b │   Ask api-9b by the way; it won't see the question                 b │   ›▪·›››⇢›·▪››    
+▌│   ┆        ↳ Run│   Copy alice/api-9b                                                c │xt 78% · “The re…  
  │   ╰┄┄● B main-1 │   Mute where api-9b's messages come from                           z │   ·▪···∿······
  ╰──────◇ C billing│   Go to api-9b's terminal                                          g │   ━━━━━━━─ 8:40
                    │                                                                      │
@@ -28,5 +29,4 @@
  · 1 quiet agent, folded
 
 
-
- ⏎ thread  ␣ inspect  w write  c copy  z mute  g terminal  o open #1822                               ? keys
+ ⏎ thread  ␣ inspect  w write  b by the way  c copy  z mute  g terminal  o open #1822                 ? keys

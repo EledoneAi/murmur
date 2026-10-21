@@ -52,8 +52,8 @@ func tomlQuote(s string) string {
 	return b.String()
 }
 
-// codexServer is murmur's server, as config.toml's tables: the command, and its two tools approved, so Codex runs
-// them without asking. Codex starts MCP servers with a bare environment, so a MURMUR_HOME of the person's own goes
+// codexServer is murmur's server, as config.toml's tables: the command, and its tools approved, so Codex runs them
+// without asking. Codex starts MCP servers with a bare environment, so a MURMUR_HOME of the person's own goes
 // with it.
 func codexServer(exe string) string {
 	var b strings.Builder
@@ -61,7 +61,9 @@ func codexServer(exe string) string {
 	if os.Getenv("MURMUR_HOME") != "" {
 		b.WriteString("\n[mcp_servers.murmur.env]\nMURMUR_HOME = " + tomlQuote(config.Dir()) + "\n")
 	}
-	b.WriteString("\n[mcp_servers.murmur.tools.who]\napproval_mode = \"approve\"\n\n[mcp_servers.murmur.tools.send]\napproval_mode = \"approve\"\n")
+	for _, tool := range []string{"who", "send", "btw"} {
+		b.WriteString("\n[mcp_servers.murmur.tools." + tool + "]\napproval_mode = \"approve\"\n")
+	}
 	return b.String()
 }
 

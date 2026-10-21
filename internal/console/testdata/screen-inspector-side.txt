@@ -1,8 +1,9 @@
  ╭─┬─╮                                                                                                                                      
  ● ● ●  murmur    Team    Mine    All                                                              A alice · 4 online · 12 agents   ● live  
                                                                                                                                             
- ◆ Needs you  3                                                                                                                             
+ ◆ Needs you  4                                                                                                                             
    A api-1a             approve running go test ./ocr/...                                                                   ━━╸───── 3:12   
+   C carol ↝ 9b         by the way “Does rerun.go still call the old certifier?”                                            ━─────── 1:30   
    D dave               asks you “ok to merge #1827 before v2?”                                                             ━─────── 1:05   
    B main-1 ┄⇢ 9b       held “Staging uses the shadow certifier too; keep the alias until Friday.”                          ╸─────── 0:40   
                                                                                                                                             
@@ -16,17 +17,16 @@
  Search   web · 2 people                 ≈   │              ···›▪▪·›››▪›··⇢▪›››▪·›››⇢›·▪››                                                  
  ╭──────● A web-4c          ·▪▪▪▪··▪▪▪·▪     │              read 26% · edit 20% · run 46% · talk 6%                                         
  ╰──────● C web-2           ››▪▪▪··▪▪››▪     │                                                                                              
-                                             │   CHANGES    +214 −38 in 6 files · #1822                                                     
- Not in touch                          × 1   │   CONTEXT    ▆ 78% · compacts soon                                                           
-        ● A infra-3         ··▪›··▪››··›     │                                                                                              
-        ● A notes           ···▪··▪∿···▪     │   IN TOUCH   ─ C billing-2 2                                                                 
-        ○ A api-2f          idle 40m         │              ─ A api-1a 1                                                                    
-        ● D ingest-1        ››››·›››››››     │              ┄ B main-1 held for you                                                         
-        ○ D infra-1         idle 1h          │                                                                                              
-            × main.tf  introduce             │   HARMONY    ≈ certifier.go · talking with billing-2                                         
+                                             │   LAST SAID  “The rerun passes locally; staging next, once carol's split lands.”             
+ Not in touch                          × 1   │                                                                                              
+        ● A infra-3         ··▪›··▪››··›     │   CHANGES    +214 −38 in 6 files · #1822                                                     
+        ● A notes           ···▪··▪∿···▪     │   CONTEXT    ▆ 78% · compacts soon                                                           
+        ○ A api-2f          idle 40m         │                                                                                              
+        ● D ingest-1        ››››·›››››››     │   IN TOUCH   ─ C billing-2 2                                                                 
+        ○ D infra-1         idle 1h          │              ─ A api-1a 1                                                                    
+            × main.tf  introduce             │              ┄ B main-1 held for you                                                         
                                              │                                                                                              
- · 1 quiet agent, folded                     │   write  copy  open #1822  go to terminal                                                    
-                                             │                                                                                              
+ · 1 quiet agent, folded                     │   HARMONY    ≈ certifier.go · talking with billing-2                                         
                                                                                                                                             
                                                                                                                                             
- ⏎ thread  ␣ close  z mute                                                                                                          ? keys  
+ ⏎ thread  ␣ close  w write  b by the way  c copy  z mute  g terminal  o open #1822                                                 ? keys  

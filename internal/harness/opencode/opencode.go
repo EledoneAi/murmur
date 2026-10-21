@@ -1,5 +1,5 @@
 // Package opencode is murmur's adapter for OpenCode, whose hooks are plugins: murmur's runs inside OpenCode, reports
-// its sessions through `murmur hook opencode <event>`, gives agents who and send as tools of its own, and hands a
+// its sessions through `murmur hook opencode <event>`, gives agents who, send and btw as tools of its own, and hands a
 // session the messages murmur sends to its socket, even while the session is idle.
 package opencode
 
@@ -99,7 +99,7 @@ func (o OpenCode) Connect(exe string, _ func(string) bool) []protocol.Check {
 	if err != nil {
 		return []protocol.Check{{Name: "Plugin", Detail: err.Error()}}
 	}
-	return append([]protocol.Check{{Name: "Plugin", OK: true, Detail: config.Tildify(path) + ": hooks, who and send"}}, version()...)
+	return append([]protocol.Check{{Name: "Plugin", OK: true, Detail: config.Tildify(path) + ": hooks, who, send and btw"}}, version()...)
 }
 
 // Disconnect removes murmur's plugin, and nothing that isn't.
@@ -114,7 +114,7 @@ func (o OpenCode) Disconnect(string) error {
 }
 
 func (o OpenCode) Checks() []protocol.Check {
-	return append([]protocol.Check{harness.Check(o.Connected(), "Plugin", config.Tildify(pluginPath())+": hooks, who and send",
+	return append([]protocol.Check{harness.Check(o.Connected(), "Plugin", config.Tildify(pluginPath())+": hooks, who, send and btw",
 		"missing: run murmur join")}, version()...)
 }
 

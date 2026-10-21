@@ -9,14 +9,17 @@ import (
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 )
 
-// tell shows this person a desktop notification about message m, unless they turned notifications off. It shows
-// who the message is from and its first line, never more: notifications show on locked screens and in screen shares.
-func (d *Daemon) tell(who string, m protocol.Msg) {
-	if d.notify == nil || config.Load().Notifications == "off" {
+// tell shows this person a desktop notification about message m: who it is from and its first line.
+func (d *Daemon) tell(who string, m protocol.Msg) { d.show("Murmur: "+who, m.Text) }
+
+// show shows this person a desktop notification, unless they turned notifications off or there is no title. It
+// shows the title and the text's first line, never more: notifications show on locked screens and in screen shares.
+func (d *Daemon) show(title, text string) {
+	if d.notify == nil || title == "" || config.Load().Notifications == "off" {
 		return
 	}
-	first, _, _ := strings.Cut(strings.TrimSpace(m.Text), "\n")
-	d.notify("Murmur: "+who, string([]rune(first)[:min(len([]rune(first)), 200)]))
+	first, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	d.notify(title, string([]rune(first)[:min(len([]rune(first)), 200)]))
 }
 
 // toMeFromOthers says whether m is for this person rather than one of their agents, from someone else.
