@@ -281,7 +281,7 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 		}
 		from = s.name
 	}
-	out, state := d.out, d.state
+	out, state, wait := d.out, d.state, cmp.Or(d.wait, sendWait)
 	if out == nil && (strings.HasPrefix(state, "not signed in") || strings.HasPrefix(state, "signed out")) {
 		d.mu.Unlock()
 		return ipc.Reply{Err: "Murmur is " + state}
@@ -338,7 +338,7 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 			return ipc.Reply{OK: true, Note: f.Note}
 		}
 		return ipc.Reply{Err: f.Err}
-	case <-time.After(sendWait):
+	case <-time.After(wait):
 		return later
 	}
 }
