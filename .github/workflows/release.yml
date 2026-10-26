@@ -45,9 +45,8 @@ jobs:
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          # ponytail: a nightly for homebrew_casks install_steps (Homebrew 7 deprecated postflight); back to "~> v2"
-          # once v2.19.0 ships, here and in the Makefile.
-          version: v2.19.0-1015c53f-nightly
+          # 2.19 or later: homebrew_casks install_steps (Homebrew 7 deprecated postflight)
+          version: "~> v2.19"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

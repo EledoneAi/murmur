@@ -14,10 +14,10 @@
  ╰──────◇ C billing│   TEAMMATES ASKING YOUR AGENTS BY THE WAY                            │   ━━━━━━━─ 8:40
                    │   Each answer waits for you to share it    now · btw-answers approve │
  Search   web · 2 p│   Answers go out on their own                       btw-answers auto │                ≈
- ╭──────● A web-4c │                                                                      │   ·▪▪▪▪··▪▪▪·▪
- ╰──────● C web-2  │ ⏎ go   esc close                                                     │   ››▪▪▪··▪▪››▪
-                   ╰──────────────────────────────────────────────────────────────────────╯
- Not in touch                                                                                × 1 out of tune
+ ╭──────● A web-4c │   Every answer goes out, idle agents' too            btw-answers all │   ·▪▪▪▪··▪▪▪·▪
+ ╰──────● C web-2  │                                                                      │   ››▪▪▪··▪▪››▪
+                   │ ⏎ go   esc close                                                     │
+ Not in touch      ╰──────────────────────────────────────────────────────────────────────╯  × 1 out of tune
         ● A infra-3    chore/tf-providers      Upgrade the Terraform providers                ··▪›··▪››··›
         ● A notes      ⌂ notes                 Draft the weekly plan                          ···▪··▪∿···▪
         ○ A api-2f     feat/billing-v2         Billing fixtures for the rerun                 idle 40m

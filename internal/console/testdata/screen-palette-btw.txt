@@ -10,11 +10,11 @@
  Billing   api · 3 │   TEAMMATES ASKING YOUR AGENTS BY THE WAY                            │e on certifier.go
    ╭────◆ A api-1a │   Each answer waits for you to share it    now · btw-answers approve │   ━━╸───── 3:12
  ╭─┴─┬┄┄● A api-9b │   Answers go out on their own                       btw-answers auto │   ›▪·›››⇢›·▪››
-▌│   ╰┄┄● B main-1 │   Teammates can't ask; you still can                 btw-answers off │   ·▪···∿······    
-▌│            ↳ Rea│                                                                      │                   
- ╰──────◇ C billing│ ⏎ go   esc close                                                     │   ━━━━━━━─ 8:40
-                   ╰──────────────────────────────────────────────────────────────────────╯
- Search   web · 2 people                                                                                   ≈
+▌│   ╰┄┄● B main-1 │   Every answer goes out, idle agents' too            btw-answers all │   ·▪···∿······    
+▌│            ↳ Rea│   Teammates can't ask; you still can                 btw-answers off │                   
+ ╰──────◇ C billing│                                                                      │   ━━━━━━━─ 8:40
+                   │ ⏎ go   esc close                                                     │
+ Search   web · 2 p╰──────────────────────────────────────────────────────────────────────╯                ≈
  ╭──────● A web-4c     feat/search-ui          Search filters and empty states                ·▪▪▪▪··▪▪▪·▪
  ╰──────● C web-2      feat/search-api         Search endpoint pagination                     ››▪▪▪··▪▪››▪
 

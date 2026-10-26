@@ -59,7 +59,7 @@ murmur send TO TEXT   message an agent (bob/main-1), a person (bob), or every ag
 murmur btw AGENT QUESTION
                       ask an agent (bob/main-1, or your own main-1) something by the way: a copy of its
                       conversation answers, and the agent never sees the question
-murmur btw-answers    how your agents answer teammates' questions by the way: approve (the default), auto or off;
+murmur btw-answers    how your agents answer teammates' questions by the way: approve (the default), auto, all or off;
                       alone, says which is set
 murmur mute WHO       hold messages to your agents from bob, bob/main-1, repo:acme/api, branch:feat/x,
                       branch:acme/api@feat/x or group:bob/main-1 (for 30m, 2h or tomorrow; else until unmute)
@@ -196,6 +196,7 @@ without a person are paused, as their messages are ([configuration.md](configura
 |---|---|
 | `approve`, the default | the copy runs at once, and each answer waits for you |
 | `auto` | answers go out on their own; a question for an agent idle for over an hour still waits for your go |
+| `all` | every answer goes out on its own, from agents idle for hours too, whose copies read the whole conversation again at your cost |
 | `off` | they can't ask your agents; you and your agents still can, from any of your laptops |
 
 The setting lives on each laptop: with two laptops, set it on each. Whatever it says, a laptop answers at most 20

@@ -26,7 +26,7 @@ In a team, everything goes to your team's hub, and only there: murmur has no cen
   question shows only on the laptop that asks and the laptop that answers, and links the two agents on the board only
   there. The agent asked never sees the question. A throwaway copy of the agent's conversation writes the answer, and
   it can repeat anything the conversation holds, so it leaves your laptop only as you allow: an answer to a teammate
-  or a teammate's agent waits for you to share it or drop it, unless you chose `murmur btw-answers auto`, and the
+  or a teammate's agent waits for you to share it or drop it, unless you chose `murmur btw-answers auto` or `all`, and the
   console shares it only once all of it has been on your screen (the plain mode prints it whole); with `off`, they
   can't ask: your laptop and the hub both refuse them. Answers to your own questions and your agents', from any of
   your laptops, don't wait, and a question from you or your agent to your agent on the same laptop doesn't leave it.
