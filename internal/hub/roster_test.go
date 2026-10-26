@@ -98,9 +98,11 @@ func TestRostersWithManyPages(t *testing.T) {
 	h, links := bigTeam(t, 400)
 	var handed atomic.Int64
 	h.mu.Lock()
+	h.out.mu.Lock() // the roster loop hands rosters under it, and already runs
 	for _, l := range links {
 		l.roster = func(...[]byte) { handed.Add(1) }
 	}
+	h.out.mu.Unlock()
 	for range 100 {
 		c := make(chan struct{}, 1)
 		h.streams[c] = true
@@ -141,6 +143,7 @@ func TestMessageAfterItsSendersRoster(t *testing.T) {
 	var mu sync.Mutex
 	var log []string // what reached the recipient, in order
 	recipient, sender := links[0], links[len(links)-1]
+	h.out.mu.Lock() // the roster loop hands rosters under it, and already runs
 	recipient.roster = func(parts ...[]byte) {
 		if bytes.Contains(bytes.Join(parts, nil), []byte(`"acme/muted"`)) {
 			mu.Lock()
@@ -148,9 +151,7 @@ func TestMessageAfterItsSendersRoster(t *testing.T) {
 			mu.Unlock()
 		}
 	}
-	for _, l := range links[1:] {
-		l.roster = func(...[]byte) {}
-	}
+	h.out.mu.Unlock()
 	busy(t, h, links[1:len(links)-1])
 	time.Sleep(300 * time.Millisecond)
 
@@ -185,11 +186,6 @@ func TestMessageAfterItsSendersRoster(t *testing.T) {
 // out in between would miss them, and on a big, busy team the laptop would wait a whole round for one that has them.
 func TestRosterAfterHello(t *testing.T) {
 	h, links := bigTeam(t, 1000)
-	h.mu.Lock()
-	for _, l := range links {
-		l.roster = func(...[]byte) {}
-	}
-	h.mu.Unlock()
 	busy(t, h, links)
 	time.Sleep(300 * time.Millisecond)
 
