@@ -21,6 +21,6 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
     "svelte-check": "^4.7.7",
-    "typescript": "7.0.2"
+    "typescript": "6.0.3"
   }
 }

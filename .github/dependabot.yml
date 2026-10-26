@@ -24,6 +24,10 @@ updates:
     groups:
       web:
         patterns: ["*"]
+    ignore:
+      # astro check refuses TypeScript 7 (it says to stay on 6): take 7 once Astro checks with it
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   # The base images of the hub, pinned by digest in deploy/docker. The Go version comes from go.mod.
   - package-ecosystem: docker
