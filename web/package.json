@@ -10,17 +10,17 @@
     "demo": "ASTRO_TELEMETRY_DISABLED=1 DEMO=1 astro dev"
   },
   "dependencies": {
-    "@astrojs/svelte": "9.0.1",
+    "@astrojs/svelte": "9.1.1",
     "@fontsource-variable/ibm-plex-sans": "5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tailwindcss/vite": "4.3.3",
-    "astro": "7.3.8",
+    "astro": "7.4.2",
     "svelte": "5.57.2",
     "tailwindcss": "4.3.3"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.10",
-    "svelte-check": "^4.7.6",
+    "@astrojs/check": "^0.9.12",
+    "svelte-check": "^4.7.7",
     "typescript": "6.0.3"
   }
 }
