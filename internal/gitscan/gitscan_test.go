@@ -363,3 +363,26 @@ func TestRepoOf(t *testing.T) {
 		t.Fatalf("a folder that is gone: %q", got)
 	}
 }
+
+// TopOf finds a checkout by its .git, a worktree's file included, from a folder or a file that doesn't exist yet.
+func TestTopOf(t *testing.T) {
+	top := t.TempDir()
+	wt := filepath.Join(top, "wt")
+	if err := os.MkdirAll(filepath.Join(top, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for in, want := range map[string]string{
+		filepath.Join(top, "a", "new.go"): top, wt: wt, filepath.Join(wt, "b", "c.go"): wt,
+		filepath.Dir(top): "", "relative/x.go": "", "": "",
+	} {
+		if got := TopOf(in); got != want {
+			t.Errorf("TopOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

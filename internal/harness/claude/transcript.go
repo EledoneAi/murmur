@@ -174,6 +174,7 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 			Title       string `json:"title"`
 			PRNumber    int    `json:"prNumber"`
 			PRURL       string `json:"prUrl"`
+			PRRepo      string `json:"prRepository"`
 			Attachment  struct {
 				Type     string `json:"type"`
 				Identity struct {
@@ -199,7 +200,7 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		case "pr-link":
 			if e.PRNumber != 0 {
 				changed = changed || a.PR != e.PRNumber
-				a.PR, a.PRURL = e.PRNumber, e.PRURL
+				a.PR, a.PRURL, a.PRRepo = e.PRNumber, e.PRURL, e.PRRepo
 			}
 		case "attachment": // Claude Code tells the model which it is, again when its person switches
 			if id := e.Attachment.Identity.ModelID; e.Attachment.Type == "model" && id != "" && id != t.model {
@@ -215,14 +216,15 @@ func (t *Transcript) Read(a *harness.Activity) bool {
 		if title := t.title(); a.Title != title {
 			a.Title, changed = title, true
 		}
+		a.Custom = t.custom != ""
 	}
 	if len(before) > 0 { // nothing but lines too long to read came after it
 		changed = t.assistant(before, a) || changed
 		t.turn.move(held)
 	}
 	t.Offset = pos
-	// where the turn stands shows nowhere: it changes nothing
-	a.Turn, a.TurnCall = t.turn.at, t.turn.call
+	// where the turn stands shows nowhere, nor do the prompts: they change nothing
+	a.Turn, a.TurnCall, a.Prompts = t.turn.at, t.turn.call, t.turn.asked
 	return changed
 }
 
@@ -232,6 +234,7 @@ func (t *Transcript) assistant(line []byte, a *harness.Activity) bool {
 	var e struct {
 		Type      string    `json:"type"`
 		Sidechain bool      `json:"isSidechain"`
+		Cwd       string    `json:"cwd"` // Claude Code writes the session's folder on every line, as cd and worktrees move it
 		Timestamp time.Time `json:"timestamp"`
 		Message   struct {
 			Synthetic synthetic `json:"model"`
@@ -263,6 +266,9 @@ func (t *Transcript) assistant(line []byte, a *harness.Activity) bool {
 	own := !e.Sidechain && !bool(e.Message.Synthetic)
 	if own {
 		t.turn.answering()
+	}
+	if !e.Sidechain && e.Cwd != "" { // shows nowhere itself: the daemon reads the checkout there
+		a.Cwd = e.Cwd
 	}
 	for _, c := range e.Message.Content {
 		switch {

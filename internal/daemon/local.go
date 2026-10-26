@@ -205,6 +205,12 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 		s.needs = ev.Needs // its status comes from the harness's registry
 		d.changed()
 	}
+	if s := d.sessions[key]; s != nil && !ev.Sub { // hooks say where the session works now, whatever its registry says
+		d.followLocked(s, ev.Cwd, "")
+		for _, p := range ev.Paths {
+			d.followLocked(s, "", p)
+		}
+	}
 	d.mu.Unlock()
 	switch ev.Kind {
 	case harness.Start:

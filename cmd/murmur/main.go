@@ -51,6 +51,9 @@ const usage = `murmur: your team's coding agents, in one console.
                         how this laptop updates: as the team's admins chose, only when you run update, or never
   murmur notifications [on|off]
                         desktop notifications when someone messages you or a mute holds a message for your agents
+  murmur retitles [on|off]
+                        a new title for an agent's conversation once its focus moves on, from a copy of it, at
+                        your cost
   murmur version        print this laptop's version
   murmur uninstall      undo join and sign this laptop out (asks first; --yes skips the question)
 `
@@ -60,7 +63,7 @@ const usage = `murmur: your team's coding agents, in one console.
 var options = map[string][]string{
 	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "solo": nil, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
-	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "mutes": nil, "btw-answers": {"approve", "auto", "off"},
+	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "retitles": {"on", "off"}, "mutes": nil, "btw-answers": {"approve", "auto", "off"},
 }
 
 // harnesses are the names of the coding tools murmur connects: the MCP server is started for one of them.
@@ -233,6 +236,8 @@ func main() {
 		err = setUpdates(args[1:])
 	case "notifications":
 		err = setNotifications(args[1:])
+	case "retitles":
+		err = setRetitles(args[1:])
 	case "version", "--version":
 		fmt.Println("murmur", release.Version)
 	case "help", "--help", "-h":
@@ -294,6 +299,23 @@ func setUpdates(args []string) error {
 		"ask": "This laptop updates only when you run murmur update.",
 		"off": "This laptop never updates on its own. If the hub stops accepting its version, run murmur update.",
 	}[cfg.Updates])
+	return nil
+}
+
+// setRetitles shows or changes whether copies of this laptop's agents' conversations title them again.
+func setRetitles(args []string) error {
+	cfg := config.Load()
+	if len(args) == 1 {
+		cfg.Retitles = map[string]string{"on": "", "off": "off"}[args[0]]
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+	}
+	if cfg.Retitles == "off" {
+		fmt.Println("Your agents keep the titles their coding tool or you gave their conversations.")
+	} else {
+		fmt.Println("When an agent's focus moves on, a copy of its conversation gives it a new title, at your cost: a few cents a check, every 10 minutes at most.")
+	}
 	return nil
 }
 

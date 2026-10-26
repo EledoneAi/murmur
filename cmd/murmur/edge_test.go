@@ -22,6 +22,8 @@ func TestUnknownOptionEdges(t *testing.T) {
 		{[]string{"updates", "OFF"}, "OFF"},
 		{[]string{"updates", "off"}, ""},
 		{[]string{"notifications", "maybe"}, "maybe"},
+		{[]string{"retitles", "off"}, ""},
+		{[]string{"retitles", "never"}, "never"},
 		{[]string{"join", "--"}, "--"},
 		{[]string{"version", "--json"}, "--json"},
 		{[]string{"", "extra"}, "extra"},

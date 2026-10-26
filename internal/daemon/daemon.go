@@ -318,8 +318,15 @@ func (d *Daemon) listedLocked(l harness.Lister, e harness.Session, key string) {
 		d.sessions[key] = s
 	}
 	statusChanged := s.status != e.Status
-	// the name is cleaned as the hub cleans it, so this laptop, the hub and every message use the same one
-	s.name, s.cwd, s.sock, s.app, s.version = protocol.Clean(e.Name, false), e.Cwd, e.Socket, e.App, e.Version
+	// the name is cleaned as the hub cleans it, so this laptop, the hub and every message use the same one. A session
+	// its person didn't name is named after itself, never after a folder: it keeps its address wherever it works
+	switch {
+	case !e.Derived:
+		s.name = protocol.Clean(e.Name, false) // "" for a session Claude Code doesn't name (claude -p): shown nowhere
+	case s.name == "":
+		s.name = d.autoNameLocked(e.Harness, e.ID, key)
+	}
+	s.cwd, s.sock, s.app, s.version = e.Cwd, e.Socket, e.App, e.Version
 	if sock := d.sockets[procKey(e.Harness, e.ID, e.PID)]; sock != "" { // what the harness documents wins over its registry
 		s.sock = sock
 	}
@@ -335,11 +342,33 @@ func (d *Daemon) listedLocked(l harness.Lister, e harness.Session, key string) {
 	d.changed()
 }
 
+// autoNameLocked names session key, whose harness gives it no name its person chose, after its id: claude-0905 for
+// 0905d316-…, as its transcript is named. The name stays the session's wherever it works and across daemon restarts.
+// A name another session on this laptop has takes more of the id.
+// ponytail: only this laptop's sessions are checked, and only as a session comes: the same person's agent on another
+// laptop with the same 4 hex digits (1 in 65536 a pair) hides one of the two in the roster, and the longer name may
+// shorten at a daemon restart once the other session is gone. Keep names in the history if that ever bites.
+func (d *Daemon) autoNameLocked(h, id, key string) string {
+	short := strings.ReplaceAll(id, "-", "")
+	for n := 4; ; n += 2 {
+		name, taken := protocol.Clean(h+"-"+short[:min(n, len(short))], false), false
+		for k, s := range d.sessions {
+			taken = taken || (k != key && s.name == name)
+		}
+		if !taken || n >= len(short) {
+			return name
+		}
+	}
+}
+
 // statusLocked records a session's new status. One that works again gets the notes it was spared while idle.
 func (d *Daemon) statusLocked(s *session, status string, since int64) {
 	s.status, s.since = status, since
 	if status != protocol.StatusWaiting {
 		s.needs = ""
+	}
+	if status == protocol.StatusIdle {
+		s.ended = time.Now() // its title is checked once git has read where the turn left it
 	}
 	if status == protocol.StatusBusy && len(d.held[s.name]) > 0 {
 		held, name := d.unholdLocked(s.name), s.name
@@ -349,6 +378,63 @@ func (d *Daemon) statusLocked(s *session, status string, since int64) {
 			}
 		}()
 	}
+}
+
+// retitleEvery is the least time between two checks of a session's title that its person's prompts call for.
+const retitleEvery = 10 * time.Minute
+
+// retitleAsk is what a copy is asked about the title showing: whether it still says what the session works on, or
+// else what does.
+func retitleAsk(showing string) string {
+	if showing == "" {
+		return "Murmur shows your teammates and their agents a title for this conversation, so they know what you work " +
+			"on and whom to ask. Title what you are working on now: six words at most, in the conversation's language, " +
+			"and nothing else in your answer."
+	}
+	return fmt.Sprintf("Murmur shows your teammates and their agents this conversation titled %q, so they know what you "+
+		"work on and whom to ask. If that still says what you are working on now, answer KEEP. If your focus has moved "+
+		"on, answer with a title for what you work on now: six words at most, in the conversation's language. Answer "+
+		"KEEP or the title, and nothing else.", showing)
+}
+
+// retitleLocked checks, once git has read where a turn ended, whether the session's title still says what it works
+// on, when its work may have moved on: at once when it works in another repo or on another branch than at the last
+// check, and after a turn its person started, once retitleEvery has passed since. Claude Code titles a conversation
+// once, from its first prompt: a session its person turns to other things would show its first task to the agents
+// deciding whom to ask. A copy of the conversation answers KEEP or a new title, from the prompt cache the turn just
+// warmed, at the session's person's cost, unless they turned it off (murmur retitles off). A title its person set
+// stays.
+func (d *Daemon) retitleLocked(s *session) {
+	moved := !strings.EqualFold(s.repo, s.titleRepo) || s.branch != s.titleBranch
+	prompted := s.act.Prompts > s.titlePrompts && time.Since(s.titleAt) >= retitleEvery
+	if !moved && !prompted {
+		return
+	}
+	s.titleRepo, s.titleBranch, s.titlePrompts, s.titleAt = s.repo, s.branch, s.act.Prompts, time.Now()
+	if s.act.Custom || !copies(d.askerOf(s.harness)) || d.unaskable(s) != "" || config.Load().Retitles == "off" {
+		return
+	}
+	key, name, old, showing := s.key(), s.name, s.act.Title, s.title()
+	go func() {
+		ans, err := d.copyOf(name, "murmur", retitleAsk(showing))
+		if err != nil {
+			log.Printf("retitling %s: %v", name, err)
+			return
+		}
+		title := titleFrom(ans.Text)
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if s := d.sessions[key]; s != nil && s.act.Title == old && title != "" && !strings.EqualFold(title, "keep") {
+			s.newTitle, s.oldTitle = title, old
+			d.changed()
+		}
+	}()
+}
+
+// titleFrom is a copy's answer as a title: its first line, without the quotes, emphasis or full stop a model may add.
+func titleFrom(answer string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(answer), "\n")
+	return shortTitle(strings.Trim(strings.TrimSpace(line), "\"'*_`#. "))
 }
 
 func (d *Daemon) removeLocked(key string) {
@@ -378,6 +464,7 @@ func (d *Daemon) attachLocked(s *session) {
 	d.watched[path] = s.key()
 	_ = d.w.Add(path)
 	s.read(&s.act)
+	d.followLocked(s, s.act.Cwd, "")
 }
 
 func (d *Daemon) unwatchLocked(s *session) {
@@ -391,17 +478,49 @@ func (d *Daemon) onTranscript(path string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	s := d.sessions[d.watched[path]]
-	if s != nil && s.transcript == path && s.read(&s.act) {
+	if s == nil || s.transcript != path {
+		return
+	}
+	if s.read(&s.act) {
 		d.changed()
 	}
+	d.followLocked(s, s.act.Cwd, "")
+}
+
+// followLocked follows a session to where it works now: the folder its harness says it works in, cwd, which a cd or a
+// worktree moves, and the file it is about to edit, file, in a repo it reaches by path. Only a git checkout takes it:
+// a scratch file, or a look at a folder outside git, leaves it where it works. cwd moves it only when it changed, and
+// file only out of the checkout it works in, so editing deep in its own tree doesn't move it to that folder.
+func (d *Daemon) followLocked(s *session, cwd, file string) {
+	to := ""
+	if cwd != "" && cwd != s.wd {
+		s.wd = cwd
+		if gitscan.TopOf(cwd) != "" {
+			to = cwd
+		}
+	}
+	if top := gitscan.TopOf(file); top != "" {
+		if _, in := inCheckout(s.top, file); !in {
+			to = top
+		}
+	}
+	if to == "" || to == s.dir() {
+		return
+	}
+	s.at, s.gitAt = to, time.Time{} // read at once, not behind other checkouts
+	d.gitLocked(s)
 }
 
 func (d *Daemon) gitLocked(s *session) {
-	if s.gitBusy || time.Since(s.gitAt) < 3*time.Second || s.cwd == "" {
+	if s.dir() == "" {
 		return
 	}
-	s.gitBusy = true
-	cwd, dirs := s.cwd, slices.Clone(s.act.Dirs)
+	if s.gitBusy || time.Since(s.gitAt) < 3*time.Second {
+		s.gitAgain = true // else a branch switched just before the turn ended would show until the next turn
+		return
+	}
+	s.gitBusy, s.gitAgain = true, false
+	cwd, dirs, from := s.dir(), slices.Clone(s.act.Dirs), time.Now()
 	read := gitscan.Read
 	if s.gitAt.IsZero() { // the session's start brief waits for its first read: not behind another checkout's
 		read = gitscan.ReadNow
@@ -412,10 +531,21 @@ func (d *Daemon) gitLocked(s *session) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		s.gitBusy, s.gitAt = false, time.Now()
+		if cwd != s.dir() { // it moved while git read where it was
+			s.gitAgain = true
+			return
+		}
 		if s.top != r.Top || s.repo != r.Repo || s.branch != r.Branch || !slices.Equal(s.files, r.Files) || s.st != r.State ||
 			!slices.Equal(s.also, also) {
 			s.top, s.repo, s.branch, s.tree, s.files, s.st, s.also = r.Top, r.Repo, r.Branch, r.Tree, r.Files, r.State, also
 			d.changed()
+		}
+		if s.titleAt.IsZero() { // the title showing is the one the session came with, here
+			s.titleRepo, s.titleBranch, s.titlePrompts, s.titleAt = s.repo, s.branch, s.act.Prompts, time.Now()
+		}
+		if !s.ended.IsZero() && from.After(s.ended) { // read where the turn left it
+			s.ended = time.Time{}
+			d.retitleLocked(s)
 		}
 	}()
 }
@@ -506,7 +636,7 @@ func (d *Daemon) tickLoop() {
 			if s.transcript == "" {
 				d.attachLocked(s)
 			}
-			if (s.status == protocol.StatusBusy || s.status == protocol.StatusWaiting) && time.Since(s.gitAt) > gitEvery {
+			if s.gitAgain || (s.status == protocol.StatusBusy || s.status == protocol.StatusWaiting) && time.Since(s.gitAt) > gitEvery {
 				d.gitLocked(s)
 			}
 		}

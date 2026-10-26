@@ -291,3 +291,37 @@ func TestWindowOf(t *testing.T) {
 		}
 	}
 }
+
+// The folder the session works in comes from its own answers, not a subagent's, and a PR says its repo.
+func TestTranscriptCwd(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	body := `{"type":"assistant","cwd":"/w/app","message":{"role":"assistant","content":[]}}` + "\n" +
+		`{"type":"pr-link","sessionId":"s","prNumber":3,"prUrl":"https://github.com/acme/web/pull/3","prRepository":"acme/web"}` + "\n" +
+		`{"type":"assistant","cwd":"/w/web","message":{"role":"assistant","content":[]}}` + "\n" +
+		`{"type":"assistant","isSidechain":true,"cwd":"/w/app/.claude/worktrees/x","message":{"role":"assistant","content":[]}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &reading{Transcript: &Transcript{Path: path}}
+	s.Read()
+	if s.Cwd != "/w/web" || s.PRRepo != "acme/web" {
+		t.Fatalf("cwd %q, pr repo %q", s.Cwd, s.PRRepo)
+	}
+}
+
+// Only its person's prompts count, not the messages handed to the session nor a task's notification.
+func TestTranscriptPrompts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	prompt := func(origin string) string {
+		return `{"type":"user","message":{"role":"user","content":"look at the billing export"},"turnOrigin":"` + origin + `"}` + "\n"
+	}
+	body := prompt("human") + prompt("peer") + prompt("task_notification") + prompt("human")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &reading{Transcript: &Transcript{Path: path}}
+	s.Read()
+	if s.Prompts != 2 {
+		t.Fatalf("%d prompts", s.Prompts)
+	}
+}

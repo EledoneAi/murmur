@@ -157,6 +157,9 @@ type Event struct {
 	// Carries says the harness reads this hook's answer into the agent's context, so messages waiting for the
 	// session may leave with it. Some harnesses ignore what some of their hooks print.
 	Carries bool `json:"carries,omitempty"`
+	// Sub says a subagent of the session makes the call, which may work in a checkout of its own: it doesn't say
+	// where the session works.
+	Sub bool `json:"sub,omitempty"`
 }
 
 // Key names a session across harnesses.
@@ -179,6 +182,7 @@ type Session struct {
 	PID        int
 	Started    string
 	Name       string // the harness's name for it; the daemon names the sessions of harnesses that don't
+	Derived    bool   // the harness made Name up from the folder the session started in: the daemon names it instead
 	Cwd        string
 	Status     string // protocol.Status*
 	Since      int64  // unix ms of the last status change
@@ -199,8 +203,12 @@ type Call struct {
 // Activity is what a session's transcript and tool calls say about it.
 type Activity struct {
 	Title   string
+	Custom  bool // its person set the title
+	Prompts int  // the prompts its person sent in the conversation, not the messages handed to it
 	PR      int
 	PRURL   string
+	PRRepo  string   // owner/name of the PR's repo, when the harness says it
+	Cwd     string   // the folder the agent works in now, as its transcript last said: it follows cd and worktrees
 	Doing   string   // the last tool call in a few words
 	Kinds   string   // the kinds of the last tool calls, oldest first, one letter each (see protocol.Kind*)
 	Loop    bool     // the same command in most of the last tool calls
