@@ -107,8 +107,11 @@ func (s *fireStore) ReportDevice(ctx context.Context, id string, report []byte, 
 	return s.changeDevice(ctx, id, []firestore.Update{{Path: "Report", Value: report}, {Path: "ReportAt", Value: at}})
 }
 
+// changeDevice writes in a transaction, which the client tries again when Firestore aborts the write: a laptop's
+// document takes writes from several instances at once, and Firestore aborts some under contention.
 func (s *fireStore) changeDevice(ctx context.Context, id string, u []firestore.Update) error {
-	_, err := s.doc("devices", id).Update(ctx, u)
+	ref := s.doc("devices", id)
+	err := s.c.RunTransaction(ctx, func(_ context.Context, tx *firestore.Transaction) error { return tx.Update(ref, u) })
 	if status.Code(err) == codes.NotFound {
 		return ErrNotFound
 	}
