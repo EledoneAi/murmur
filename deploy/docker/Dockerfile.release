@@ -4,7 +4,7 @@
 # It carries the laptop binaries of the same release with the signed checksums, so a hub serves installs and
 # updates without reaching the internet. To build from source instead, use deploy/docker/Dockerfile.
 
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
+FROM gcr.io/distroless/static-debian13:nonroot@sha256:18f4cc26c9ffa7f20a359298be7deadac5c607c8e03a02b8119f1a5fc2f82c99
 ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/murmur-hub /usr/local/bin/murmur-hub
 COPY dist/client/ dist/checksums.txt dist/checksums.txt.sig /usr/share/murmur/dist/
