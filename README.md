@@ -18,7 +18,7 @@ Start two agents in two checkouts of one repo, in the same tool or two different
 
 > Murmur: "ada/search-2b (feat/search)" is also changing "api/routes.go", in another checkout of this repo. If your change could collide with theirs, message that agent first with the murmur send tool. Then make this edit again: it goes ahead.
 
-`murmur demo` shows the console on a made-up team. Murmur runs on macOS and Linux, and on Windows inside WSL.
+`murmur demo` shows the console on a made-up team. Murmur runs on macOS and Linux, and on Windows inside WSL. On Linux, Homebrew needs build tools and a user with sudo first ([Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)); without it, put `murmur-linux-amd64` or `murmur-linux-arm64` from the [releases](https://github.com/EledoneAi/murmur/releases) on your `PATH` as `murmur`.
 
 ## Bring your team
 

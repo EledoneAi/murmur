@@ -12,6 +12,9 @@ import (
 // RunDemo opens the console on a made-up team that keeps working: no hub, no daemon, no Claude Code needed. It is
 // how murmur demo shows the console, how the README's recording is made, and where console changes are tried first.
 func RunDemo() error {
+	if err := terminal(); err != nil {
+		return err
+	}
 	oneProcessor()
 	m := newModel()
 	m.demo = true

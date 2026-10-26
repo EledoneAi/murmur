@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -226,13 +227,30 @@ func Solo() error {
 		cfg.Hub = "" // the daemon picks a free port
 	}
 	// the handle comes from the email: the login name, as the terminal knows its person
-	cfg.Solo, cfg.Token, cfg.Email = true, "", strings.ToLower(cmp.Or(os.Getenv("USER"), "me"))+"@localhost"
+	cfg.Solo, cfg.Token, cfg.Email = true, "", strings.ToLower(cmp.Or(os.Getenv("USER"), loginName(), "me"))+"@localhost"
 	if out, err := exec.Command("git", "config", "--get", "user.name").Output(); err == nil {
 		cfg.Name = strings.TrimSpace(string(out))
 	}
 	fmt.Println("Murmur")
 	step(true, "On your own", "a hub of this laptop's own, which only it reaches: murmur join moves it to a team")
 	return connect(cfg)
+}
+
+// loginName is the person's login name as the system knows it, for a shell that doesn't set USER (docker exec, cron).
+func loginName() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return ""
+}
+
+// rejoin is the command that connects the coding tools again: solo on a laptop on its own, where join would move it
+// to a team.
+func rejoin(cfg config.Config) string {
+	if cfg.Solo {
+		return "murmur solo"
+	}
+	return "murmur join"
 }
 
 // connect connects each coding tool installed here, saves the config and starts the daemon on it.
@@ -246,7 +264,7 @@ func connect(cfg config.Config) error {
 		}
 	}
 	if !found {
-		step(false, "Coding tools", "none found: install one of "+titles()+", then run murmur join again")
+		step(false, "Coding tools", "none found: install one of "+titles()+", then run "+rejoin(cfg)+" again")
 	}
 	cfg.Dirs = map[string]string{} // where the tools are, for a daemon that a tool with a bare environment starts
 	for _, k := range config.DirVars {
@@ -362,7 +380,7 @@ func Doctor() bool {
 		case h.Connected():
 			ok = steps(h, h.Checks()) && ok
 		case h.Installed():
-			step(false, h.Title(), "installed, not connected: run murmur join")
+			step(false, h.Title(), "installed, not connected: run "+rejoin(cfg))
 			ok = false
 		default:
 			continue
@@ -370,7 +388,7 @@ func Doctor() bool {
 		found = true
 	}
 	if !found {
-		step(false, "Coding tools", "none found: install one of "+titles()+", then run murmur join")
+		step(false, "Coding tools", "none found: install one of "+titles()+", then run "+rejoin(cfg))
 		ok = false
 	}
 	return ok

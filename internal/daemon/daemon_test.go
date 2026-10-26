@@ -1509,3 +1509,31 @@ func TestAgentsFitTheHubsLimit(t *testing.T) {
 		t.Fatalf("the latest session lost its files: %s has %d", latest.Name, len(latest.Files))
 	}
 }
+
+// The daemon makes no folder for a coding tool that isn't installed: Claude Code's would make doctor take it for
+// installed. Once it is, its sessions folder is watched.
+func TestWatchListersSkipsMissingTools(t *testing.T) {
+	cc := filepath.Join(t.TempDir(), "claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", cc)
+	t.Setenv("PATH", t.TempDir()) // no claude on it
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := watchListers(w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cc); !os.IsNotExist(err) {
+		t.Fatalf("made %s for a Claude Code that isn't installed", cc)
+	}
+	if err := os.Mkdir(cc, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := watchListers(w); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(w.WatchList(), filepath.Join(cc, "sessions")) {
+		t.Fatalf("watching %v, want Claude Code's sessions folder", w.WatchList())
+	}
+}
