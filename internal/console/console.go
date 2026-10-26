@@ -5,6 +5,7 @@ package console
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image/color"
 	"os"
@@ -124,8 +125,21 @@ func oneProcessor() {
 	}
 }
 
+// terminal refuses to open the console where there is no terminal to draw it in, more plainly than bubbletea's error
+// about /dev/tty.
+func terminal() error {
+	f, err := os.Open("/dev/tty")
+	if err != nil {
+		return errors.New("the console needs a terminal")
+	}
+	return f.Close()
+}
+
 // Run opens the console on this laptop's daemon, starting it when it isn't running.
 func Run() error {
+	if err := terminal(); err != nil {
+		return err
+	}
 	if err := ipc.EnsureDaemon(); err != nil {
 		return err
 	}

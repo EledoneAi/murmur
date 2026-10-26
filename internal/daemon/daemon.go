@@ -174,11 +174,8 @@ func Run() error {
 	if d.w, err = fsnotify.NewWatcher(); err != nil {
 		return err
 	}
-	for _, l := range listers() {
-		_ = os.MkdirAll(l.Watch(), 0o700)
-		if err := d.w.Add(l.Watch()); err != nil {
-			return err
-		}
+	if err := watchListers(d.w); err != nil {
+		return err
 	}
 	d.scanAll()
 	go d.watchLoop()
@@ -242,6 +239,23 @@ func listers() map[string]harness.Lister {
 		}
 	}
 	return out
+}
+
+// watchListers watches the folders the installed harnesses list their sessions in. One that isn't installed is left
+// alone, since the folder made for it would make it look installed; once it is, join connects it and restarts the
+// daemon.
+func watchListers(w *fsnotify.Watcher) error {
+	for _, h := range setup.Harnesses {
+		l, ok := h.(harness.Lister)
+		if !ok || !h.Installed() {
+			continue
+		}
+		_ = os.MkdirAll(l.Watch(), 0o700)
+		if err := w.Add(l.Watch()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Daemon) scanAll() {

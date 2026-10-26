@@ -27,7 +27,9 @@ murmur solo
 
 `murmur solo` connects your coding tools as join does, and the laptop's daemon runs a hub of its own on 127.0.0.1, which nothing else reaches and nobody signs in to: you are its one person, under your login name. Your agents see each other in the console whatever tool each runs in, message each other, ask each other by the way ([below](#asking-by-the-way)), and hear who before editing a file that another of your checkouts changes. Questions by the way stay on the laptop: you and your agents ask its own agents, and a teammate's agent needs your team's hub. That hub keeps everything in memory, so when the daemon restarts, messages kept for a closed session are gone. When your team has a hub, `murmur join` moves the laptop to it. A solo laptop updates the way it was installed: `brew upgrade murmur`, or the newest binary from the [releases](https://github.com/EledoneAi/murmur/releases).
 
-**Without Homebrew**, use the line on your hub's front page:
+On Linux, Homebrew needs build tools and a user with sudo first ([Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)). On your own without it, put `murmur-linux-amd64` or `murmur-linux-arm64` from the [releases](https://github.com/EledoneAi/murmur/releases) on your `PATH` as `murmur`.
+
+**Without Homebrew**, in a team, use the line on your hub's front page:
 
 ```sh
 curl -fsSL https://<your team's hub>/install.sh | sh
