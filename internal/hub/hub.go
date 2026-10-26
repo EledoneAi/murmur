@@ -116,6 +116,7 @@ type link struct {
 
 type waiter struct {
 	from    string // the sending laptop, or page:<instance> for a team page waiting there
+	email   string // the recipient: only their laptops say it is delivered
 	stored  bool   // a message kept in the store: drop it there once delivered
 	created time.Time
 }

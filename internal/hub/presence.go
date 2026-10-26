@@ -228,7 +228,7 @@ func (h *Hub) onFrameEvent(f frameEvent) {
 	if f.Device != "" {
 		if l := h.links[f.Device]; l != nil && l.gone.IsZero() && carries(l.btw, f.Frame) {
 			if f.ReplyTo != "" && f.Frame.Msg != nil {
-				h.waiting[f.Frame.Msg.ID] = &waiter{from: f.ReplyTo, created: time.Now()}
+				h.waiting[f.Frame.Msg.ID] = &waiter{from: f.ReplyTo, email: l.email, created: time.Now()}
 			}
 			l.send(f.Frame)
 		}
@@ -291,7 +291,7 @@ func (h *Hub) toDeviceLocked(dev string, f protocol.Frame, replyTo string, cause
 			return false
 		}
 		if replyTo != "" && f.Msg != nil {
-			h.waiting[f.Msg.ID] = &waiter{from: replyTo, created: time.Now()}
+			h.waiting[f.Msg.ID] = &waiter{from: replyTo, email: l.email, created: time.Now()}
 		}
 		h.out.before(l, cause)
 		l.send(f)

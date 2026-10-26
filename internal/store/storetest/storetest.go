@@ -132,10 +132,17 @@ func pending(t *testing.T, s store.Store) {
 		same(t, "pending for "+email, got, want)
 	}
 
-	must(t, s.DropPending(ctx, "m1"), s.DropPending(ctx, "unknown"))
+	must(t, s.DropPending(ctx, "alice@example.com", "m1"), s.DropPending(ctx, "alice@example.com", "unknown"))
 	got, err := s.Pending(ctx, "alice@example.com")
 	must(t, err)
 	same(t, "pending after a drop", got, []store.Pending{second})
+
+	// laptops choose message ids: the same id for another person neither replaces nor drops alice's
+	sameID := store.Pending{Msg: msg("m2"), Email: "bob@example.com", Created: at, Expires: at.Add(time.Hour)}
+	must(t, s.AddPending(ctx, sameID), s.DropPending(ctx, "bob@example.com", "m2"))
+	got, err = s.Pending(ctx, "alice@example.com")
+	must(t, err)
+	same(t, "alice's pending after bob's m2 came and went", got, []store.Pending{second})
 }
 
 func takeExpired(t *testing.T, s store.Store) {

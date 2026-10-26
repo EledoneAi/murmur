@@ -628,7 +628,7 @@ func (h *Hub) setRemoved(w http.ResponseWriter, r *http.Request, me store.User, 
 		kept, e := h.store.Pending(ctx, person.Email)
 		for _, p := range kept {
 			if e == nil {
-				e = h.store.DropPending(ctx, p.Msg.ID)
+				e = h.store.DropPending(ctx, p.Email, p.Msg.ID)
 			}
 		}
 		if e != nil {

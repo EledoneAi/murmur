@@ -147,6 +147,11 @@ func TestHub(t *testing.T) {
 		t.Fatalf("delivery: %+v", got)
 	}
 	alice.expect(func(f protocol.Frame) bool { return f.T == "msg" && f.Msg.ID == "m1" && f.Echo }) // alice's console copy
+	// only bob's laptops say whether it is delivered
+	alice.send(protocol.Frame{T: protocol.FrameDelivered, ID: "m1", OK: false, Err: "forged"})
+	if a := alice.acks("m1", 100*time.Millisecond); len(a) != 0 {
+		t.Fatalf("a delivered from a laptop that isn't the recipient's was passed on: %+v", a)
+	}
 	bob.send(protocol.Frame{T: protocol.FrameDelivered, ID: "m1", OK: true})
 	if a := alice.expect(func(f protocol.Frame) bool { return f.T == "ack" && f.ID == "m1" }); !a.OK || a.Note != "delivered" {
 		t.Fatalf("ack: %+v", a)
