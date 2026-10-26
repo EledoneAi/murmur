@@ -76,6 +76,7 @@ const (
 const (
 	BtwApprove = protocol.BtwApprove // each answer waits for this person
 	BtwAuto    = protocol.BtwAuto    // answers go out on their own, except a cold question's
+	BtwAll     = "all"               // every answer goes out on its own, a cold question's too
 	BtwOff     = "off"               // teammates can't ask this person's agents
 )
 
@@ -94,7 +95,7 @@ const (
 //     waiting (a tool call its coding tool cancelled): a final answer it didn't read reaches the agent as a message.
 //   - "btw-approve", "btw-decline": ID, of an aside AsideHeld (send the answer, or drop it) or AsideCold (run the
 //     copy, or decline the question) for this person.
-//   - "btw-answers": Text is BtwApprove, BtwAuto or BtwOff, saved as this laptop's setting.
+//   - "btw-answers": Text is BtwApprove, BtwAuto, BtwAll or BtwOff, saved as this laptop's setting.
 type Request struct {
 	Op      string         `json:"op"`
 	Hook    *harness.Event `json:"hook,omitempty"`    // what a harness's hook reports
@@ -337,7 +338,7 @@ func Btw(to, question string) (answer, note string, err error) {
 	return r.Text, r.Note, nil
 }
 
-// SetBtwAnswers saves how this laptop answers teammates' questions by the way: BtwApprove, BtwAuto or BtwOff.
+// SetBtwAnswers saves how this laptop answers teammates' questions by the way: BtwApprove, BtwAuto, BtwAll or BtwOff.
 func SetBtwAnswers(setting string) error {
 	var r Reply
 	if err := Call(Request{Op: "btw-answers", Text: setting}, &r, 5*time.Second); err != nil {

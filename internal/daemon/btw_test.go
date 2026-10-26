@@ -724,6 +724,21 @@ func TestBtwColdQuestionWaits(t *testing.T) {
 	if b := nextFrame(t, d.out, protocol.FrameBtwAnswer).Btw; b.Answer != "a1: anything left?" {
 		t.Fatalf("alice's own: %+v", b)
 	}
+
+	// with all, a teammate's question to the cold agent runs at once, and its answer goes out on its own
+	if err := d.setBtwAnswers(ipc.BtwAll); err != nil {
+		t.Fatal(err)
+	}
+	ask(d, "q4", "carol", "alice/a1", "and the tests?")
+	if b := nextFrame(t, d.out, protocol.FrameBtwAnswer).Btw; b.Answer != "a1: and the tests?" {
+		t.Fatalf("cold with all: %+v", b)
+	}
+	d.mu.Lock()
+	btw := d.btwOfLocked(a1)
+	d.mu.Unlock()
+	if btw != protocol.BtwAuto || config.Load().BtwAnswers != ipc.BtwAll {
+		t.Fatalf("the team hears %q, the config says %q", btw, config.Load().BtwAnswers)
+	}
 }
 
 // A laptop answers at most btwPerHour teammates' questions an hour; its person's own go on.

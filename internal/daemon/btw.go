@@ -640,7 +640,7 @@ func (d *Daemon) admitLocked(a *aside) bool {
 		return refuse(fmt.Sprintf("%s's agents answer at most %d questions by the way an hour; ask again later", me, btwPerHour))
 	}
 	a.Counted = true
-	if idle := idleFor(s); idle > coldAfter {
+	if idle := idleFor(s); idle > coldAfter && d.btwAnswers != ipc.BtwAll {
 		a.State, a.Cold = ipc.AsideCold, s.act.Tokens
 		a.Note = fmt.Sprintf("%s has been idle for %s; the question waits for %s's go", agent, howLong(idle), me)
 		return false
@@ -670,7 +670,7 @@ func (d *Daemon) countedLocked() int {
 }
 
 // runAside runs the copy for aside key and settles it. A teammate's answer waits for this person unless they chose
-// auto; questions from this person and their agents never wait.
+// auto or all; questions from this person and their agents never wait.
 func (d *Daemon) runAside(key string) {
 	d.mu.Lock()
 	a := d.asides[key]
@@ -701,7 +701,7 @@ func (d *Daemon) runAside(key string) {
 		case errors.As(err, &failed):
 			a.Told = "the copy failed on " + me + "'s laptop; " + me + " sees why"
 		}
-	case !a.Mine && protocol.PersonOf(a.From) != me && d.btwAnswers != ipc.BtwAuto:
+	case !a.Mine && protocol.PersonOf(a.From) != me && d.btwAnswers != ipc.BtwAuto && d.btwAnswers != ipc.BtwAll:
 		a.State, a.Answer, a.Note = ipc.AsideHeld, ans.Text, "answered; waits for "+me+" to share it"
 	default:
 		a.State, a.Answer, a.Note = ipc.AsideAnswered, ans.Text, ""
@@ -842,9 +842,9 @@ func (d *Daemon) restartedLocked() {
 // setBtwAnswers saves how this laptop answers teammates' questions, and tells the hub what its agents now take.
 func (d *Daemon) setBtwAnswers(v string) error {
 	switch v {
-	case ipc.BtwApprove, ipc.BtwAuto, ipc.BtwOff:
+	case ipc.BtwApprove, ipc.BtwAuto, ipc.BtwAll, ipc.BtwOff:
 	default:
-		return fmt.Errorf("%q: say approve, auto or off", v)
+		return fmt.Errorf("%q: say approve, auto, all or off", v)
 	}
 	if v == ipc.BtwApprove {
 		v = ""
@@ -871,7 +871,9 @@ func (d *Daemon) btwOfLocked(s *session) string {
 		return ""
 	case d.btwAnswers == ipc.BtwOff:
 		return protocol.BtwMine
-	case d.btwAnswers == ipc.BtwAuto:
+	case d.btwAnswers == ipc.BtwAuto, d.btwAnswers == ipc.BtwAll:
+		// ponytail: all goes out as auto, which every laptop reads; a teammate's console then says a question to a cold
+		// agent waits for its person's go, when it doesn't. A value of its own needs laptops that all read it.
 		return protocol.BtwAuto
 	}
 	return protocol.BtwApprove

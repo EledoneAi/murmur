@@ -486,6 +486,8 @@ func (m *model) btwLines(b *board, r *agentRef, w int) []string {
 		how = b.whyNot(r)
 	case r.mine && r.a.Btw == protocol.BtwApprove:
 		how = "teammates and agents can ask it; you share answers"
+	case r.mine && r.a.Btw == protocol.BtwAuto && m.snap.BtwAnswers == ipc.BtwAll:
+		how = "teammates and agents can ask it; every answer goes out on its own"
 	case r.mine && r.a.Btw == protocol.BtwAuto:
 		how = "teammates and agents can ask it; answers go out on their own"
 	case r.mine && r.a.Btw == protocol.BtwMine:
@@ -530,6 +532,7 @@ func (m *model) btwItems() []item {
 	for _, o := range []struct{ v, text, done string }{
 		{ipc.BtwApprove, "Each answer waits for you to share it", "Answers to teammates now wait for you to share them"},
 		{ipc.BtwAuto, "Answers go out on their own", "Answers to teammates now go out on their own, but for cold questions"},
+		{ipc.BtwAll, "Every answer goes out, idle agents' too", "Every answer to teammates now goes out on its own"},
 		{ipc.BtwOff, "Teammates can't ask; you still can", "Teammates can no longer ask your agents by the way"},
 	} {
 		hint := "btw-answers " + o.v

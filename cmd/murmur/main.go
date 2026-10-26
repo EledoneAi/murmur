@@ -35,9 +35,10 @@ const usage = `murmur: your team's coding agents, in one console.
   murmur btw AGENT QUESTION
                         ask an agent (bob/main-1, or your own main-1) something by the way: a copy of its
                         conversation answers, and the agent never sees the question
-  murmur btw-answers [approve|auto|off]
+  murmur btw-answers [approve|auto|all|off]
                         how teammates' questions to your agents are answered: each answer waits for you to share
-                        it, answers go on their own, or teammates can't ask
+                        it, answers go on their own (but for an agent idle over an hour), every answer goes on
+                        its own, or teammates can't ask
   murmur mute WHO [30m|2h|tomorrow]
                         hold messages for your agents from a person (bob), an agent (bob/main-1), repo:acme/api,
                         branch:feat/x or group:bob/main-1 (that agent and those it talks with); held ones wait in
@@ -63,7 +64,7 @@ const usage = `murmur: your team's coding agents, in one console.
 var options = map[string][]string{
 	"": nil, "--plain": nil, "demo": nil, "watch": nil, "join": {"--relogin", "--no-browser"}, "solo": nil, "uninstall": {"--yes", "-y"}, "daemon": nil, "mcp": harnesses(),
 	"who": nil, "status": {"--json"}, "doctor": nil, "version": nil, "--version": nil, "update": {"--check", "--auto"},
-	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "retitles": {"on", "off"}, "mutes": nil, "btw-answers": {"approve", "auto", "off"},
+	"updates": {"team", "ask", "off"}, "notifications": {"on", "off"}, "retitles": {"on", "off"}, "mutes": nil, "btw-answers": {"approve", "auto", "all", "off"},
 }
 
 // harnesses are the names of the coding tools murmur connects: the MCP server is started for one of them.
@@ -377,6 +378,8 @@ var btwAnswersSaid = map[string]string{
 	"approve": "Teammates can ask your agents by the way. Each answer waits for you to share it, in the console.",
 	"auto": "Teammates can ask your agents by the way, and the answers go to them on their own. A question to an agent " +
 		"idle for over an hour still waits for you.",
+	"all": "Teammates can ask your agents by the way, and every answer goes to them on its own, from agents idle for " +
+		"hours too: their copies read the whole conversation again, at your cost.",
 	"off": "Teammates can't ask your agents by the way. You still can.",
 }
 
