@@ -38,6 +38,7 @@ type fakeAsker struct {
 	mostOneRan int               // copies of one session at once, at most
 	gate       chan struct{}     // when set, each copy waits for a value from it
 	err        error
+	answer     string                   // what each copy answers, when set
 	during     func(q harness.Question) // runs while the copy runs
 }
 
@@ -50,7 +51,7 @@ func (f *fakeAsker) Ask(ctx context.Context, s harness.Session, q harness.Questi
 	f.now++
 	f.running[s.ID]++
 	f.most, f.mostOneRan = max(f.most, f.now), max(f.mostOneRan, f.running[s.ID])
-	gate, err, during := f.gate, f.err, f.during
+	gate, err, during, answer := f.gate, f.err, f.during, f.answer
 	f.mu.Unlock()
 	defer func() {
 		f.mu.Lock()
@@ -71,6 +72,9 @@ func (f *fakeAsker) Ask(ctx context.Context, s harness.Session, q harness.Questi
 	if err != nil {
 		return harness.Answer{}, err
 	}
+	if answer != "" {
+		return harness.Answer{Text: answer, Tokens: 1200, Took: time.Second}, nil
+	}
 	return harness.Answer{Text: s.Name + ": " + q.Text, Tokens: 1200, Took: time.Second}, nil
 }
 
@@ -90,6 +94,82 @@ func fakeAskers(d *Daemon) *fakeAsker {
 		return nil
 	}
 	return f
+}
+
+// A session's title is checked as a turn ends where its work may have moved on: after its person's prompts, once
+// retitleEvery has passed since the last check, and at once in another repo. A copy answers KEEP or a new title, and
+// its person's title wins over it. Its person can turn it off.
+func TestRetitled(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	resolve := func(dir string) string { dir, _ = filepath.EvalSymlinks(dir); return dir }
+	app := resolve(checkout(t, "git@github.com:Org/App.git"))
+	web := resolve(checkout(t, "https://github.com/Org/Web.git"))
+	s := &session{id: "s1", name: "a1", cwd: app, status: protocol.StatusBusy}
+	s.act.Title = "Murmur sync"
+	d, f := btwLaptop(t, s)
+	f.answer = "KEEP"
+	locked := func(do func()) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		do()
+	}
+	title := func() (got string) {
+		locked(func() { got = s.agent(false).Title })
+		return got
+	}
+	turnEnds := func() {
+		t.Helper()
+		locked(func() {
+			d.statusLocked(s, protocol.StatusBusy, 1)
+			d.statusLocked(s, protocol.StatusIdle, 2)
+			s.gitAt = time.Time{} // past the 3 s between two reads
+			d.gitLocked(s)
+		})
+		eventually(t, "git's read", func() (done bool) {
+			locked(func() { done = !s.gitBusy && s.ended.IsZero() })
+			return done
+		})
+	}
+	checks := func(n int) { // n checks, and no more for a moment: the copy runs on its own
+		t.Helper()
+		eventually(t, fmt.Sprint(n, " checks"), func() bool { return len(f.questions()) >= n })
+		for end := time.Now().Add(200 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+			if got := len(f.questions()); got != n {
+				t.Fatalf("%d checks, want %d", got, n)
+			}
+		}
+	}
+	turnEnds() // git's first read: the title is the one the session came with
+	checks(0)
+	locked(func() { s.act.Prompts++ })
+	turnEnds()
+	checks(0) // too soon after the last
+	locked(func() { s.act.Prompts++; s.titleAt = time.Now().Add(-retitleEvery) })
+	turnEnds()
+	checks(1)
+	if q := f.questions()[0]; q.From != "murmur" || !strings.Contains(q.Text, `"Murmur sync"`) || title() != "Murmur sync" {
+		t.Fatalf("asked %+v, title %q", q, title())
+	}
+	locked(func() { s.titleAt = time.Now().Add(-retitleEvery) })
+	turnEnds()
+	checks(1) // no prompt since
+	f.mu.Lock()
+	f.answer = "\"Fix the Leonard importer.\"\nMore words"
+	f.mu.Unlock()
+	locked(func() { s.at = web })
+	turnEnds()
+	checks(2)
+	eventually(t, "the new title", func() bool { return title() == "Fix the Leonard importer" })
+	locked(func() { s.act.Custom, s.act.Title = true, "Mine" })
+	if title() != "Mine" {
+		t.Fatalf("its person's title lost to %q", title())
+	}
+	locked(func() { s.act.Custom, s.at = false, app })
+	if err := config.Save(config.Config{Retitles: "off"}); err != nil {
+		t.Fatal(err)
+	}
+	turnEnds()
+	checks(2) // moved, but turned off
 }
 
 // btwLaptop is alice's daemon, in MURMUR_HOME as the test set it, online with a hub that carries questions by the

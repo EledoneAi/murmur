@@ -36,6 +36,7 @@ type turn struct {
 	calls  []pending // the last answer's tool calls whose results haven't come
 	answer bool      // the last line that moved the turn is an answer's: the next answer line is of the same answer
 	marked bool      // this Claude Code marks the prompts the model answers (turnOrigin)
+	asked  int       // the prompts its person sent: harness.Activity.Prompts
 }
 
 // The marks of the lines that move the turn, as Claude Code writes them: in a JSON string, a quote is escaped, so
@@ -48,6 +49,7 @@ var (
 	toolUseID      = []byte(`"tool_use_id":"`)
 	interruption   = []byte(`:"[Request interrupted`)
 	turnOrigin     = []byte(`"turnOrigin":"`)
+	humanOrigin    = []byte(`"turnOrigin":"human"`)
 	metaLine       = []byte(`"isMeta":true`)
 	compactSummary = []byte(`"isCompactSummary":true`)
 	transcriptOnly = []byte(`"isVisibleInTranscriptOnly":true`)
@@ -89,17 +91,22 @@ func userOf(line []byte) (move, bool) {
 // prompted reads the end of a line of text, where Claude Code says what it is. The prompt the model answers says where
 // it came from (turnOrigin: its person, a message handed to the session, a task's notification); the lines the model
 // isn't asked to answer don't (a local command and its output, a skill's text, a caveat). Before Claude Code marked
-// prompts, a prompt was any line of text but its own (isMeta). A compaction's summary is never one.
+// prompts, a prompt was any line of text but its own (isMeta), and any may be its person's. A compaction's summary is
+// never one.
 func (t *turn) prompted(end []byte) move {
 	switch {
 	case bytes.Contains(end, compactSummary) || bytes.Contains(end, transcriptOnly):
 		return move{}
 	case bytes.Contains(end, turnOrigin):
 		t.marked = true
+		if bytes.Contains(end, humanOrigin) {
+			t.asked++
+		}
 		return move{kind: promptMove}
 	case t.marked || bytes.Contains(end, metaLine):
 		return move{}
 	}
+	t.asked++
 	return move{kind: promptMove}
 }
 

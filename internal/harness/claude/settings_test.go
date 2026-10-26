@@ -178,7 +178,7 @@ func TestRegistryFormat(t *testing.T) {
 	_ = os.WriteFile(path, []byte(fixture), 0o600)
 	e, err := ReadEntry(path)
 	if err != nil || e.PID != 4242 || e.SessionID != "0b9c" || e.Name != "widgets-4e" || e.Status != "busy" || e.Socket != "/tmp/in.sock" ||
-		e.ProcStart == "" || e.Version != "2.1.299" || AppOf(e.Entry) != "" {
+		e.ProcStart == "" || e.Version != "2.1.299" || AppOf(e.Entry) != "" || !e.Derived() {
 		t.Fatalf("entry: %+v, %v", e, err)
 	}
 	dir := os.Getenv("MURMUR_REAL_REGISTRY")

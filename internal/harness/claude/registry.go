@@ -20,6 +20,7 @@ type Entry struct {
 	SessionID string `json:"sessionId"`
 	Cwd       string `json:"cwd"`
 	Name      string `json:"name"`
+	NameSrc   string `json:"nameSource"` // set when Claude Code made the name up from the folder it started in
 	Kind      string `json:"kind"`
 	Status    string `json:"status"`
 	StatusAt  int64  `json:"statusUpdatedAt"`
@@ -28,6 +29,10 @@ type Entry struct {
 	Entry     string `json:"entrypoint"`
 	Version   string `json:"version"` // Claude Code's version in that session
 }
+
+// Derived says Claude Code made the session's name up from the folder it started in ("derived" since 2.1.310, "auto"
+// before), rather than its person naming it, which leaves nameSource out.
+func (e Entry) Derived() bool { return e.NameSrc == "derived" || e.NameSrc == "auto" }
 
 // AppOf names where a session runs. The VS Code and Desktop apps run the same Claude Code, so their sessions
 // register, get an inbox and pick up the hooks and MCP server exactly like a terminal session.
@@ -114,7 +119,8 @@ func (Claude) Sessions() []harness.Session {
 			out = append(out, harness.Session{Harness: Name, PID: pid}) // half-written: read again on its next event
 		case harness.Alive(e.PID) && e.Kind != "daemon":
 			out = append(out, harness.Session{Harness: Name, ID: e.SessionID, PID: pid, Started: e.ProcStart, Name: e.Name,
-				Cwd: e.Cwd, Status: e.Status, Since: e.StatusAt, App: AppOf(e.Entry), Version: e.Version, Socket: e.Socket})
+				Derived: e.Derived(), Cwd: e.Cwd, Status: e.Status, Since: e.StatusAt, App: AppOf(e.Entry),
+				Version: e.Version, Socket: e.Socket})
 		}
 	}
 	return out

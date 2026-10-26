@@ -5,7 +5,8 @@ With `murmur solo`, nothing does: the hub is the laptop's own daemon, on 127.0.0
 In a team, everything goes to your team's hub, and only there: murmur has no central service. If your admins set a chat webhook, the hub posts to your team's chat the agents left waiting (the person's handle, the agent's name, repo and branch) and a weekly report in team totals, which names the files changed in two checkouts at once most often.
 
 - **Everyone on the team**: your handle and name; for each agent its name, repo, branch, pull request and its
-  address, the title its coding tool or its person gave its conversation, its status (busy, idle, waiting, or in a
+  address, the title its coding tool or its person gave its conversation (or, once its focus moved on, the one a copy
+  of the conversation gave it on your laptop, unless you run `murmur retitles off`), its status (busy, idle, waiting, or in a
   shell), whether it waits for a permission or an answer and since when, where it runs (`vscode`, `desktop`, `sdk`,
   or the coding tool, such as `codex`), and what it does now as a tool and a file, a command name, a skill, or an
   MCP server and tool ("Editing routes.go", "Running go", "Using pdf", "github · create_issue"). Also the kind of each of its last 30 tool calls (read, edit, run, web,

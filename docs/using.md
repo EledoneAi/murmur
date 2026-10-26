@@ -70,6 +70,7 @@ murmur doctor         check the setup and say what to fix
 murmur update         move to your team's version now (--check only says whether there is one)
 murmur updates        how this laptop updates: team (the admins' choice), ask, or off
 murmur notifications  desktop notifications: on or off
+murmur retitles       new titles for your agents' conversations once their focus moves on: on (the default) or off
 murmur version        this laptop's version
 murmur uninstall      undo join and sign the laptop out (asks first; --yes for scripts)
 ```
@@ -239,15 +240,23 @@ in how a message reaches their agents:
 
 | Tool | Status and activity | Title | A message reaches an agent | "Needs you" |
 |---|---|---|---|---|
-| Claude Code | its session files and transcripts | Claude Code's, or yours | between tool calls; an idle agent starts a turn | yes |
+| Claude Code | its session files and transcripts | Claude Code's, a new one once its focus moves on, or yours | between tool calls; an idle agent starts a turn | yes |
 | OpenCode | murmur's plugin | OpenCode's | between steps; an idle agent starts a turn | permission requests |
 | Codex | its hooks | the name you give with `/rename` | after a tool call, or at the end of a turn; an idle agent gets it with your next prompt | approval requests |
 | Gemini CLI | its hooks | none | as Codex | tool confirmations |
 | Copilot CLI | its hooks | none | after a tool call, or at the end of a turn; an idle agent gets it once it works again | permission prompts |
 | Cursor | its hooks, in the editor and the CLI | none | as Copilot CLI | no: Cursor has no hook for it |
 
-- **Names.** Claude Code names its sessions. Murmur names the others' after the tool: `codex-1`, `cursor-2`. A
-  session keeps its name while it runs, across restarts of murmur.
+- **Names.** A name belongs to its session, never to a folder: an agent keeps its address wherever it works.
+  Murmur names a Claude Code session after its id, `claude-0905` for `0905d316-…`, unless you named it (`/rename`,
+  `claude --name`), and the others' after the tool: `codex-1`, `cursor-2`. A session keeps its name while it runs,
+  across restarts of murmur.
+- **Where an agent works.** Its repo and branch are those of the checkout it works in now: one it moved to (`cd`, a
+  worktree) or one it edits files in, not the folder it started in. Claude Code titles a conversation once, from its
+  first prompt. Murmur checks the title when the work may have moved on: when a turn ends in another repo or on
+  another branch, and after your prompts, every 10 minutes at most. A copy of the conversation, as a question by the
+  way would run, keeps the title or gives a new one, at your cost: a few cents a check. A title you set stays, and
+  `murmur retitles off` keeps the coding tool's.
 - **Messages to an idle agent.** Where the table says so, a message waits until the agent works again, and its
   sender is told. Murmur keeps it for a day; if the session closes first, its sender hears that it wasn't read.
   Each message comes into the agent's context under a line that says it comes from another session, not from its

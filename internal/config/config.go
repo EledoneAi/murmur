@@ -28,6 +28,9 @@ type Config struct {
 	Updates string `json:"updates,omitempty"`
 	// Notifications is "off" when this laptop's person doesn't want desktop notifications.
 	Notifications string `json:"notifications,omitempty"`
+	// Retitles is "off" when this laptop's person doesn't want copies of their agents' conversations, at their cost,
+	// to give a conversation a new title once its focus moved on.
+	Retitles string `json:"retitles,omitempty"`
 	// BtwAnswers is how this laptop answers teammates' questions asked of its agents by the way: "" or "approve"
 	// (each answer waits for this person), "auto", or "off" (teammates can't ask).
 	BtwAnswers string `json:"btw_answers,omitempty"`

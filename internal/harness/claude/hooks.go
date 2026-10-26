@@ -13,6 +13,7 @@ type HookInput struct {
 	SessionID  string `json:"session_id"`
 	Transcript string `json:"transcript_path"`
 	Cwd        string `json:"cwd"`
+	Agent      string `json:"agent_id"`          // a subagent's, when one makes the call
 	Type       string `json:"notification_type"` // on Notification
 	ToolInput  struct {
 		FilePath     string `json:"file_path"`     // Edit, MultiEdit and Write
@@ -42,7 +43,7 @@ func (Claude) Parse(event string, stdin []byte) (harness.Event, error) {
 		return harness.Event{}, err
 	}
 	// Claude Code documents this variable for hooks: the session's inbox, where murmur hands it messages
-	ev := harness.Event{Harness: Name, SessionID: in.SessionID, Cwd: in.Cwd, Transcript: in.Transcript,
+	ev := harness.Event{Harness: Name, SessionID: in.SessionID, Cwd: in.Cwd, Transcript: in.Transcript, Sub: in.Agent != "",
 		Socket: os.Getenv("CLAUDE_CODE_MESSAGING_SOCKET")}
 	switch event {
 	case "start":

@@ -445,6 +445,25 @@ func RepoOf(dir string) string {
 	return repoName("", top)
 }
 
+// TopOf is the top folder of the checkout path is in, the nearest that holds .git, or "" outside git. It starts no
+// git, so a hook can ask for every file an agent edits. A file names its folder's checkout, and a path that doesn't
+// exist yet its parent's.
+func TopOf(path string) string {
+	if !filepath.IsAbs(path) {
+		return ""
+	}
+	for dir := filepath.Clean(path); ; {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		up := filepath.Dir(dir)
+		if up == dir {
+			return ""
+		}
+		dir = up
+	}
+}
+
 // Lockfiles change with every dependency bump and merge cleanly: two checkouts touching them is not an overlap.
 var lockfiles = map[string]bool{
 	"package-lock.json": true, "yarn.lock": true, "pnpm-lock.yaml": true, "bun.lock": true, "bun.lockb": true,

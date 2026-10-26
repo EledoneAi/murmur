@@ -235,6 +235,42 @@ func TestOwnSessionsAreCleaned(t *testing.T) {
 	}
 }
 
+// A session Claude Code named after the folder it started in is named after its id instead, and keeps that name; one
+// its person named keeps theirs. Two ids that start alike get names that differ.
+func TestNamedAfterTheSession(t *testing.T) {
+	ccDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", ccDir)
+	_ = os.MkdirAll(filepath.Join(ccDir, "sessions"), 0o700)
+	pid := os.Getpid()
+	write := func(id, name, src string) {
+		entry := fmt.Sprintf(`{"pid":%d,"sessionId":%q,"cwd":%q,"name":%q,"nameSource":%q,"status":"idle","procStart":"1"}`,
+			pid, id, t.TempDir(), name, src)
+		if err := os.WriteFile(filepath.Join(ccDir, "sessions", fmt.Sprintf("%d.json", pid)), []byte(entry), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &Daemon{sessions: map[string]*session{}, hints: map[string]string{}, watched: map[string]string{}, kick: make(chan struct{}, 1)}
+	d.add(&session{id: "0905aaaa-0000", name: "claude-0905"}) // another session whose id starts the same
+	nameOf := func(id string) string {
+		d.scan(claude.Name, claude.Claude{})
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.sessions["claude/"+id].name
+	}
+	write("0905d316-e3c1-41cf", "murmur-79", "derived")
+	if got := nameOf("0905d316-e3c1-41cf"); got != "claude-0905d3" {
+		t.Fatalf("named %q", got)
+	}
+	write("0905d316-e3c1-41cf", "backend-79", "derived") // Claude Code renaming it as it moves
+	if got := nameOf("0905d316-e3c1-41cf"); got != "claude-0905d3" {
+		t.Fatalf("renamed %q", got)
+	}
+	write("0905d316-e3c1-41cf", "billing fix", "")
+	if got := nameOf("0905d316-e3c1-41cf"); got != "billing fix" {
+		t.Fatalf("its person's name became %q", got)
+	}
+}
+
 // join signs in again when the hub refuses this laptop's token, and only then.
 
 func TestLateFailureReachesTheSender(t *testing.T) {
@@ -886,6 +922,69 @@ func TestAgentDetails(t *testing.T) {
 	if a.Kinds != "rex" || !a.Loop || a.Context != 42 || a.Dir != "api" || a.Added != 1 || a.Changed != 1 || a.Repo != "Org/App" ||
 		strings.Join(a.Also, ",") != "Org/Web" {
 		t.Fatalf("agent: %+v", a)
+	}
+}
+
+// A session follows its work: into another repo it edits by path, to the folder it moves to, and not to a scratch
+// file outside git nor along a subagent's calls. Its pull request shows only in that PR's repo, and a read asked for
+// while git still reads happens on the next tick, not never.
+func TestFollowsItsWork(t *testing.T) {
+	resolve := func(dir string) string { dir, _ = filepath.EvalSymlinks(dir); return dir }
+	app := resolve(checkout(t, "git@github.com:Org/App.git", "api/routes.go"))
+	web := resolve(checkout(t, "https://github.com/Org/Web.git"))
+	d := newDaemon("alice")
+	s := &session{id: "c1", name: "a1", cwd: app, status: protocol.StatusBusy}
+	s.act.PR, s.act.PRURL, s.act.PRRepo = 7, "https://github.com/Org/Web/pull/7", "Org/Web"
+	d.add(s)
+	agent := func(want string) protocol.Agent {
+		t.Helper()
+		var a protocol.Agent
+		eventually(t, "the repo "+want, func() bool {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			if s.gitAgain && !s.gitBusy {
+				d.gitLocked(s) // the tick's job
+			}
+			a = s.agent(false)
+			return a.Repo == want && !s.gitBusy && !s.gitAgain
+		})
+		return a
+	}
+	d.mu.Lock()
+	d.gitLocked(s)
+	d.mu.Unlock()
+	if a := agent("Org/App"); a.PR != 0 {
+		t.Fatalf("a PR of Org/Web shows in Org/App: %+v", a)
+	}
+	edit := func(file string, sub bool) {
+		d.onHook(harness.Event{Kind: harness.BeforeTool, Harness: claude.Name, SessionID: "c1", Cwd: app, Sub: sub,
+			Paths: []string{file}})
+	}
+	edit(filepath.Join(web, "index.html"), true)
+	d.mu.Lock()
+	moved := s.at != ""
+	d.mu.Unlock()
+	if moved {
+		t.Fatal("a subagent's edit moved the session")
+	}
+	edit(filepath.Join(web, "index.html"), false)
+	if a := agent("Org/Web"); a.PR != 7 || a.Dir != "" {
+		t.Fatalf("after an edit in Org/Web: %+v", a)
+	}
+	edit(filepath.Join(t.TempDir(), "scratch.py"), false)
+	d.mu.Lock()
+	d.followLocked(s, t.TempDir(), "") // a look outside git
+	at := s.at
+	d.mu.Unlock()
+	if at != web {
+		t.Fatalf("a scratch file or a folder outside git moved the session to %q", at)
+	}
+	d.mu.Lock()
+	s.act.Cwd = filepath.Join(app, "api") // its transcript says it moved there
+	d.followLocked(s, s.act.Cwd, "")
+	d.mu.Unlock()
+	if a := agent("Org/App"); a.Dir != "api" || a.PR != 0 {
+		t.Fatalf("after a cd into Org/App's api: %+v", a)
 	}
 }
 
