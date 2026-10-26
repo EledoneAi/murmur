@@ -90,11 +90,12 @@ type Store interface {
 	SeenDevice(ctx context.Context, id, version string, at time.Time) error
 	ReportDevice(ctx context.Context, id string, report []byte, at time.Time) error
 
-	// AddPending keeps a message under its Msg.ID; adding the same id again replaces it.
+	// AddPending keeps a message under its Email and Msg.ID; adding the same id for the same person again replaces
+	// it. Laptops choose message ids, so one person's id never touches what waits for another.
 	AddPending(ctx context.Context, p Pending) error
 	// Pending lists what waits for a person and hasn't expired, oldest first.
 	Pending(ctx context.Context, email string) ([]Pending, error)
-	DropPending(ctx context.Context, id string) error
+	DropPending(ctx context.Context, email, id string) error
 	// TakeExpired removes and returns what expired before now, so exactly one instance tells each sender. When it
 	// fails part way, it returns what it already took along with the error.
 	TakeExpired(ctx context.Context, now time.Time) ([]Pending, error)

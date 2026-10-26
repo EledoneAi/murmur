@@ -12,7 +12,7 @@ type Memory struct {
 	mu      sync.Mutex
 	users   map[string]User
 	devices map[string]Device
-	pending map[string]Pending
+	pending map[[2]string]Pending // by email and message id
 	codes   map[string]Code
 	kv      map[string][]byte
 	events  []Event
@@ -26,7 +26,7 @@ type lease struct {
 }
 
 func NewMemory() *Memory {
-	return &Memory{users: map[string]User{}, devices: map[string]Device{}, pending: map[string]Pending{},
+	return &Memory{users: map[string]User{}, devices: map[string]Device{}, pending: map[[2]string]Pending{},
 		codes: map[string]Code{}, kv: map[string][]byte{}, leases: map[string]lease{}}
 }
 
@@ -89,7 +89,7 @@ func (s *Memory) changeDevice(id string, change func(*Device)) error {
 func (s *Memory) AddPending(_ context.Context, p Pending) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pending[p.Msg.ID] = p
+	s.pending[[2]string{p.Email, p.Msg.ID}] = p
 	return nil
 }
 
@@ -107,10 +107,10 @@ func (s *Memory) Pending(_ context.Context, email string) ([]Pending, error) {
 	return out, nil
 }
 
-func (s *Memory) DropPending(_ context.Context, id string) error {
+func (s *Memory) DropPending(_ context.Context, email, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.pending, id)
+	delete(s.pending, [2]string{email, id})
 	return nil
 }
 

@@ -116,7 +116,7 @@ func (s *fireStore) changeDevice(ctx context.Context, id string, u []firestore.U
 }
 
 func (s *fireStore) AddPending(ctx context.Context, p Pending) error {
-	_, err := s.doc("pending", p.Msg.ID).Set(ctx, pendingDoc{p, p.Expires.Add(forgetPending)})
+	_, err := s.doc("pending", pendingID(p.Email, p.Msg.ID)).Set(ctx, pendingDoc{p, p.Expires.Add(forgetPending)})
 	return err
 }
 
@@ -132,10 +132,14 @@ func (s *fireStore) Pending(ctx context.Context, email string) ([]Pending, error
 	return ps, nil
 }
 
-func (s *fireStore) DropPending(ctx context.Context, id string) error {
-	_, err := s.doc("pending", id).Delete(ctx)
+func (s *fireStore) DropPending(ctx context.Context, email, id string) error {
+	_, err := s.doc("pending", pendingID(email, id)).Delete(ctx)
 	return err
 }
+
+// pendingID names a kept message's document by its person and id: message ids have no slash, so it can't be
+// ambiguous.
+func pendingID(email, id string) string { return email + "/" + id }
 
 // TakeExpired returns what it took even when a later transaction fails: that much is gone from the store.
 func (s *fireStore) TakeExpired(ctx context.Context, now time.Time) ([]Pending, error) {

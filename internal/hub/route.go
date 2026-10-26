@@ -258,12 +258,13 @@ func sooner(a protocol.Agent, x holder, b protocol.Agent, y holder) bool {
 	return x.dev < y.dev
 }
 
-// delivered passes the recipient's answer on to the laptop that sent the message.
-func (h *Hub) delivered(f protocol.Frame) {
+// delivered passes the recipient's answer, from laptop l, on to the laptop that sent the message. Laptops choose
+// message ids, so another person's laptop that knows one can't answer for the recipient.
+func (h *Hub) delivered(l *link, f protocol.Frame) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	w := h.waiting[f.ID]
-	if w == nil {
+	if w == nil || w.email != l.email {
 		return
 	}
 	delete(h.waiting, f.ID)
@@ -272,7 +273,7 @@ func (h *Hub) delivered(f protocol.Frame) {
 		go func() {
 			ctx, done := context.WithTimeout(context.Background(), 5*time.Second)
 			defer done()
-			if err := h.store.DropPending(ctx, f.ID); err != nil {
+			if err := h.store.DropPending(ctx, w.email, f.ID); err != nil {
 				h.log.Error("database", "op", "drop a delivered message", "id", f.ID, "error", err.Error())
 			}
 		}()

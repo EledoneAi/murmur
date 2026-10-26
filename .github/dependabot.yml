@@ -16,6 +16,15 @@ updates:
       actions:
         patterns: ["*"]
 
+  # The hub's web pages: their build tools, which pull in most of these packages, never ship in the hub.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        patterns: ["*"]
+
   # The base images of the hub, pinned by digest in deploy/docker. The Go version comes from go.mod.
   - package-ecosystem: docker
     directory: /deploy/docker

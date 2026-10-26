@@ -162,7 +162,7 @@ func (h *Hub) deliverKept(ctx context.Context, l *link) {
 	for _, p := range kept {
 		if p.Device == "" || p.Device == l.dev {
 			m := p.Msg
-			h.waiting[m.ID] = &waiter{from: p.Sender, stored: true, created: time.Now()}
+			h.waiting[m.ID] = &waiter{from: p.Sender, email: l.email, stored: true, created: time.Now()}
 			l.send(protocol.Frame{T: protocol.FrameMsg, Msg: &m})
 		}
 	}
@@ -221,7 +221,7 @@ func (h *Hub) handle(l *link, f protocol.Frame) {
 	case protocol.FrameDelivered:
 		// the recipient's laptop wrote that error: it reaches the sender's terminal and agent. Cleaned before the lock.
 		f.Err, f.Note = protocol.Clean(protocol.Cut(f.Err, 300), false), protocol.Clean(protocol.Cut(f.Note, 200), false)
-		h.delivered(f)
+		h.delivered(l, f)
 	}
 }
 

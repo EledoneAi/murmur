@@ -174,7 +174,7 @@ func (s *sqlStore) AddPending(ctx context.Context, p Pending) error {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO pending (id, `+pendingColumns+`) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (id) DO UPDATE SET msg = excluded.msg, email = excluded.email, device = excluded.device,
+		ON CONFLICT (email, id) DO UPDATE SET msg = excluded.msg, device = excluded.device,
 			sender = excluded.sender, created = excluded.created, expires = excluded.expires`,
 		p.Msg.ID, string(msg), p.Email, p.Device, p.Sender, p.Created.UnixMicro(), p.Expires.UnixMicro())
 	return err
@@ -185,8 +185,8 @@ func (s *sqlStore) Pending(ctx context.Context, email string) ([]Pending, error)
 		scanPending, email, time.Now().UnixMicro())
 }
 
-func (s *sqlStore) DropPending(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM pending WHERE id = $1`, id)
+func (s *sqlStore) DropPending(ctx context.Context, email, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM pending WHERE email = $1 AND id = $2`, email, id)
 	return err
 }
 
