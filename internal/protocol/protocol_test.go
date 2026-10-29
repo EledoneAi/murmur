@@ -3,6 +3,7 @@ package protocol
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClean(t *testing.T) {
@@ -47,5 +48,33 @@ func TestPromptLateBtw(t *testing.T) {
 	m.ID, m.Text = LateBtw+"q1", "Answer to your question by the way (\"live?\"):\nYes.\n\n(From a copy of bob/api-9a's conversation.)"
 	if p := Prompt(m); p != "[murmur] bob/api-9a: Answer to your question by the way (\"live?\"):\nYes.\n\n(From a copy of bob/api-9a's conversation.)" {
 		t.Fatalf("a late answer: %q", p)
+	}
+}
+
+// A topic and a last message change what the footer asks of the agent: keep the topic, answer only if it needs more.
+func TestPromptTopicAndLast(t *testing.T) {
+	m := Msg{ID: "m1", From: "bob/api-9a", Text: "Freeze lifted.", Topic: "Release freeze", Last: true}
+	want := "\n\n(From bob's agent api-9a, through murmur, on \"Release freeze\". It is the sender's last message on this: they expect " +
+		"no answer. If you need more, answer with the murmur `send` tool, to \"bob/api-9a\", topic \"Release freeze\" unless the subject moved.)"
+	if p := Prompt(m); !strings.HasSuffix(p, want) {
+		t.Fatalf("%q", p)
+	}
+}
+
+// Two agents are in touch until an hour after their latest message, or at once when it was its sender's last; a
+// reply after a last message brings them back.
+func TestInTouch(t *testing.T) {
+	now := time.UnixMilli(10 * 3600_000)
+	at := func(ago time.Duration) int64 { return now.Add(-ago).UnixMilli() }
+	in := InTouch([]Msg{
+		{From: "a/1", To: "b/1", At: at(50 * time.Minute)},
+		{From: "b/1", To: "a/1", At: at(40 * time.Minute), Last: true}, // settled
+		{From: "a/1", To: "c/1", At: at(30 * time.Minute), Last: true},
+		{From: "c/1", To: "a/1", At: at(20 * time.Minute)}, // asked again
+		{From: "a/1", To: "d/1", At: at(61 * time.Minute)}, // went quiet
+		{From: "e/1", To: "a/1", At: at(5 * time.Minute)},
+	}, now)
+	if len(in) != 2 || !in[[2]string{"a/1", "c/1"}] || !in[[2]string{"a/1", "e/1"}] {
+		t.Fatalf("in touch: %v", in)
 	}
 }

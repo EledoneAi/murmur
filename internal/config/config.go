@@ -32,7 +32,8 @@ type Config struct {
 	// to give a conversation a new title once its focus moved on.
 	Retitles string `json:"retitles,omitempty"`
 	// BtwAnswers is how this laptop answers teammates' questions asked of its agents by the way: "" or "approve"
-	// (each answer waits for this person), "auto", or "off" (teammates can't ask).
+	// (each answer waits for this person), "auto" (but for an agent idle over an hour), "all", or "off" (teammates
+	// can't ask).
 	BtwAnswers string `json:"btw_answers,omitempty"`
 	// Agreements are the team's, as its hub last sent them: sessions that start before the daemon reaches the hub
 	// get them too.
@@ -66,7 +67,8 @@ func Home() string {
 }
 
 // Dir holds the config, the daemon's socket, its log and the message history: nothing else is written anywhere
-// except the hook and MCP entries in Claude Code's own settings.
+// except murmur's entries in the coding tools' own settings (hooks, the MCP server, OpenCode's plugin), which join
+// adds and uninstall takes out.
 func Dir() string {
 	d := os.Getenv("MURMUR_HOME")
 	switch {
@@ -168,12 +170,27 @@ func Exe() string {
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r
 	}
+	return linked(exe)
+}
+
+// linked is the link a package manager keeps to exe, when exe is one version's binary: the one on PATH, or else
+// Homebrew's in its bin folder, for a daemon a desktop app started with a PATH that has no Homebrew.
+func linked(exe string) string {
 	if !versioned(exe) {
 		return exe
 	}
+	var links []string
 	if onPath, err := exec.LookPath("murmur"); err == nil {
-		if r, err := filepath.EvalSymlinks(onPath); err == nil && r == exe {
-			return onPath
+		links = append(links, onPath)
+	}
+	for _, p := range []string{"/Cellar/", "/Caskroom/"} {
+		if i := strings.Index(exe, p); i >= 0 {
+			links = append(links, exe[:i]+"/bin/murmur")
+		}
+	}
+	for _, l := range links {
+		if r, err := filepath.EvalSymlinks(l); err == nil && r == exe {
+			return l
 		}
 	}
 	return exe

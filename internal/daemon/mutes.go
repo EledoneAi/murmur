@@ -36,7 +36,7 @@ func (m mute) String() string {
 }
 
 // parseMute reads what a person typed: bob, bob/main-1, repo:acme/api, branch:feat/x, branch:acme/api@feat/x, or
-// group:bob/main-1 for that agent and every agent it has talked with lately.
+// group:bob/main-1 for that agent and every agent in touch with it.
 func parseMute(who string) (mute, error) {
 	who = strings.TrimSpace(who)
 	if kind, value, ok := strings.Cut(who, ":"); ok {
@@ -203,23 +203,26 @@ func (d *Daemon) agentLocked(addr string) protocol.Agent {
 	return protocol.Agent{}
 }
 
-// groupLocked is an agent and every agent linked to it by messages in the last day, directly or through others: the
-// agents working together on something.
+// groupLocked is an agent and every agent in touch with it, directly or through others: the agents working together on
+// something, as the console shows their constellation, from messages and from questions one asked another by the way.
 func (d *Daemon) groupLocked(addr string) []string {
-	since := time.Now().Add(-24 * time.Hour).UnixMilli()
-	linked := map[string][]string{}
+	var between []protocol.Msg
 	for _, m := range d.history {
-		if m.At < since || m.From == protocol.System {
-			continue
+		_, a := protocol.Split(m.From)
+		_, b := protocol.Split(m.To)
+		if m.From != protocol.System && a != "" && b != "" {
+			between = append(between, m)
 		}
-		if _, a := protocol.Split(m.From); a == "" {
-			continue
+	}
+	for _, a := range d.asidesLocked() {
+		if strings.Contains(a.From, "/") {
+			between = append(between, protocol.Msg{From: a.From, To: a.To, At: a.At})
 		}
-		if _, b := protocol.Split(m.To); b == "" {
-			continue
-		}
-		linked[m.From] = append(linked[m.From], m.To)
-		linked[m.To] = append(linked[m.To], m.From)
+	}
+	linked := map[string][]string{}
+	for k := range protocol.InTouch(between, time.Now()) {
+		linked[k[0]] = append(linked[k[0]], k[1])
+		linked[k[1]] = append(linked[k[1]], k[0])
 	}
 	group := []string{addr}
 	for i := 0; i < len(group); i++ {

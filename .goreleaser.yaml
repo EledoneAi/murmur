@@ -149,8 +149,8 @@ homebrew_casks:
           end
     caveats: |
       Connect this laptop to your team's hub with: murmur join https://<your hub>
-      Murmur installed from Homebrew never updates itself.
-      When your team's hub moves to a newer version, run: brew upgrade murmur
+      When your team's hub moves to a newer version, murmur runs brew upgrade
+      as your team's admins chose, or its console offers U to update.
 
 changelog:
   use: git

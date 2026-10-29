@@ -202,8 +202,9 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 		return config.ErrNoHub
 	}
 	exe := installed()
-	if pm := Managed(exe); pm != "" {
-		return fmt.Errorf("%s installed this murmur: update it with %s", pm, map[string]string{"Homebrew": "brew upgrade murmur", "Nix": "your Nix configuration"}[pm])
+	brew := brewOf(exe)
+	if brew == "" && Managed(exe) != "" {
+		return errors.New("this murmur came from Nix: update it with your Nix configuration")
 	}
 	if cfg.Solo {
 		return errors.New("murmur solo has no team to update with: install the newest release from github.com/EledoneAi/murmur/releases")
@@ -225,6 +226,9 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 		if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); errors.Is(err, syscall.EWOULDBLOCK) {
 			return errors.New("another murmur update is running")
 		}
+	}
+	if brew != "" {
+		return brewUpgrade(brew, exe, say)
 	}
 	say("Downloading " + info.Version + " from " + cfg.Hub)
 	v, err := download(cfg.Hub, exe)
@@ -249,6 +253,57 @@ func Run(cfg config.Config, auto bool, say func(string)) error {
 		_ = stopDaemon()
 		_ = ipc.StartDaemon(exe)
 		return fmt.Errorf("%s didn't work on this laptop; back on %s", v, release.Version)
+	}
+	say("Murmur " + v + " is online")
+	return nil
+}
+
+// brewOf is the brew of the Homebrew that installed exe, or "" when Homebrew didn't. It is found from exe, as the
+// daemon's PATH may not have it.
+var brewOf = func(exe string) string {
+	if Managed(exe) != "Homebrew" {
+		return ""
+	}
+	r, _ := filepath.EvalSymlinks(exe)
+	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/home/linuxbrew/.linuxbrew"} {
+		if strings.HasPrefix(r, prefix+"/") {
+			return prefix + "/bin/brew"
+		}
+	}
+	return "brew"
+}
+
+// brewUpgrade moves a Homebrew install to the tap's newest version, which Homebrew installs at exe, its link on PATH.
+// Homebrew keeps no previous version to go back to: when the new daemon doesn't come online, the daemon doesn't try
+// that version again for a while, and its person reinstalls.
+func brewUpgrade(brew, exe string, say func(string)) error {
+	say("Upgrading " + release.Tap + " with Homebrew")
+	run := func(args ...string) error {
+		cmd := exec.Command(brew, args...)
+		cmd.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ENV_HINTS=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			return fmt.Errorf("brew %s: %v: %s", args[0], err, protocol.Cut(lines[len(lines)-1], 200))
+		}
+		return nil
+	}
+	if err := run("update", "--quiet"); err != nil { // brew may not have read the tap today; what it read last may do
+		say(err.Error() + ": upgrading from what Homebrew read last")
+	}
+	if err := run("upgrade", "--cask", release.Tap); err != nil {
+		return err
+	}
+	v, err := versionOf(exe)
+	if err != nil {
+		return err
+	}
+	if !Newer(v) {
+		return fmt.Errorf("no version newer than %s in Homebrew yet: the tap may not have the team's version", release.Version)
+	}
+	say("Installed " + v + ": restarting the daemon")
+	if err := restart(exe, v); err != nil {
+		config.SkipUpdate(v)
+		return fmt.Errorf("%s didn't come online (%v): run brew reinstall %s, or see daemon.log", v, err, release.Tap)
 	}
 	say("Murmur " + v + " is online")
 	return nil

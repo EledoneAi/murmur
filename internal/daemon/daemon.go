@@ -1061,6 +1061,7 @@ func (d *Daemon) onFrame(f protocol.Frame) {
 		if f.Msg != nil {
 			m := *f.Msg
 			m.From, m.To, m.Text = protocol.Clean(m.From, false), protocol.Clean(m.To, false), protocol.Clean(m.Text, true)
+			m.Topic = protocol.CleanTopic(m.Topic)
 			d.onMsg(m, f.Echo)
 		}
 	case protocol.FrameAck:
@@ -1506,7 +1507,7 @@ func (d *Daemon) maybeUpdate() {
 		policy = cfg.Updates
 	}
 	ok := d.available != "" && (policy == "auto" || (d.forced && cfg.Updates != "off")) &&
-		time.Since(d.updating) > time.Hour && !config.UpdateSkipped(d.available) && update.Managed(exe) == ""
+		time.Since(d.updating) > time.Hour && !config.UpdateSkipped(d.available) && update.Managed(exe) != "Nix"
 	for _, s := range d.sessions {
 		ok = ok && s.status != protocol.StatusBusy
 	}

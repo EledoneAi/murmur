@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -34,5 +35,22 @@ func TestUseDirs(t *testing.T) {
 	UseDirs(Config{}) // a laptop that joined with an older version keeps its environment
 	if os.Getenv("CLAUDE_CONFIG_DIR") != "/at/join" {
 		t.Fatal("an empty record changed the environment")
+	}
+}
+
+// A Homebrew version's binary is reached through Homebrew's link in its bin folder, which an upgrade keeps, even when
+// PATH has no Homebrew.
+func TestLinkedWithoutPath(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin:/bin")
+	prefix, _ := filepath.EvalSymlinks(t.TempDir())
+	exe := filepath.Join(prefix, "Caskroom", "murmur", "2.3.3", "murmur-darwin-arm64")
+	_ = os.MkdirAll(filepath.Dir(exe), 0o755)
+	_ = os.WriteFile(exe, []byte("x"), 0o755)
+	_ = os.MkdirAll(filepath.Join(prefix, "bin"), 0o755)
+	if err := os.Symlink(exe, filepath.Join(prefix, "bin", "murmur")); err != nil {
+		t.Fatal(err)
+	}
+	if got := linked(exe); got != filepath.Join(prefix, "bin", "murmur") {
+		t.Fatalf("linked: %s", got)
 	}
 }

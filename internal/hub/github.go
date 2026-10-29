@@ -188,6 +188,7 @@ func (h *Hub) mergeNoticesLocked(ev prEvent, files []string) int {
 	}
 	// the title is the pull request author's words: agents get only the number and the branch, as data
 	base := protocol.Clean(protocol.Cut(ev.PR.Base.Ref, 200), false)
+	repo := protocol.Clean(protocol.Cut(ev.Repo.FullName, 200), false)
 	sent := 0
 	for _, x := range h.holdersLocked() {
 		if !x.online {
@@ -205,7 +206,7 @@ func (h *Hub) mergeNoticesLocked(ev prEvent, files []string) int {
 			m := protocol.Msg{
 				ID: mergeID(ev, to), From: protocol.System, To: to, At: time.Now().UnixMilli(),
 				Text: fmt.Sprintf("pull request #%d in %s merged into %q, changing %s. Rebase before you push.",
-					ev.PR.Number, ev.Repo.FullName, base, fileList(common)),
+					ev.PR.Number, repo, base, fileList(common)),
 			}
 			h.toDeviceLocked(x.dev, protocol.Frame{T: protocol.FrameMsg, Msg: &m}, "", 0)
 			h.toPeopleLocked([]string{x.handle}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, []string{x.dev}, 0)

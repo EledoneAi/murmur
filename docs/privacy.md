@@ -14,7 +14,7 @@ In a team, everything goes to your team's hub, and only there: murmur has no cen
   and files its branch changes, the local branch it is stacked on, a detached commit or a rebase in progress, the
   folder it runs in under its checkout, the names of other repos it touched, and whether teammates can ask it
   something by the way and whether its answers wait for you. Announcements you send to a repo stay on the team page
-  for a day.
+  for as many hours as your admins set, a day unless they change it.
 - **The hub only, for overlaps**: the paths of files your checkouts change (commits no remote has, changed and
   untracked files), and the path of each file an agent is about to edit, as it checks it. When two checkouts
   change the same file, their people see it in the console, and an agent about to edit it hears which other agent

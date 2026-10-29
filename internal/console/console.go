@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/update"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -85,6 +87,7 @@ type model struct {
 	clock      func() time.Time
 	sub        chan tea.Msg
 	exe        string      // the binary this console started from: an update replacing it restarts the console
+	nix        bool        // Nix installed it: its person updates their Nix configuration, U can't
 	bin        os.FileInfo // that binary, to notice the replacement
 	restart    bool
 
@@ -105,7 +108,9 @@ func newModel() *model {
 	m := &model{st: newStyles(pickTheme(true)), g: pickGlyphs(), folded: map[string]bool{}, unfolded: map[string]bool{}, pinned: map[string]bool{},
 		resending: map[string]bool{}, read: map[string]bool{}, clock: time.Now, sub: make(chan tea.Msg, 16), themeFixed: os.Getenv("MURMUR_THEME") != "",
 		motion: motionOn()}
+	m.st.ascii = m.g == asciiGlyphs
 	m.exe = config.Exe()
+	m.nix = update.Managed(m.exe) == "Nix"
 	m.bin, _ = os.Stat(m.exe)
 	if from := os.Getenv("MURMUR_UPDATED_FROM"); from != "" {
 		os.Unsetenv("MURMUR_UPDATED_FROM")
@@ -301,6 +306,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bg = msg.Color
 		if !m.themeFixed {
 			m.st = newStyles(pickTheme(msg.IsDark()))
+			m.st.ascii = m.g == asciiGlyphs
 		}
 	case snapMsg:
 		old, before := m.snap, m.board().needs
@@ -339,15 +345,47 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	case tea.MouseClickMsg:
-		return m, m.click(msg.Mouse())
+		if m.sheet == nil && m.thread == nil { // rows under a sheet or a thread aren't on screen
+			return m, m.click(msg.Mouse())
+		}
 	case tea.MouseWheelMsg:
-		if msg.Mouse().Button == tea.MouseWheelUp {
+		up := msg.Mouse().Button == tea.MouseWheelUp
+		switch {
+		case m.sheet != nil:
+		case m.thread != nil: // the wheel scrolls what is on screen: the thread's messages
+			if up {
+				m.thread.scroll++
+			} else {
+				m.thread.scroll = max(0, m.thread.scroll-1)
+			}
+		case up:
 			m.move(-1)
-		} else {
+		default:
 			m.move(1)
 		}
 	}
 	return m, nil
+}
+
+// update runs murmur update now, whatever the team's policy, in a session of its own that logs to daemon.log: the
+// daemon it restarts restarts this console into the new version, which says so.
+func (m *model) update() tea.Cmd {
+	v, exe := m.snap.Update, m.exe
+	m.outcome = outcome{text: "Updating to " + v + "…", at: m.now()}
+	return func() tea.Msg {
+		logf, err := os.OpenFile(filepath.Join(config.Dir(), "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return doneMsg{text: err.Error(), err: true}
+		}
+		defer logf.Close()
+		cmd := exec.Command(exe, "update")
+		cmd.Stdout, cmd.Stderr = logf, logf
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // it outlives this console, which the new version replaces
+		if err := cmd.Run(); err != nil {
+			return doneMsg{text: "The update to " + v + " failed: murmur update says why", err: true}
+		}
+		return nil
+	}
 }
 
 // replaced says whether an update replaced this console's binary while the daemon moved to another version: the
@@ -415,6 +453,10 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "N":
 		if r := m.selectedAgent(b); r != nil && r.st == waitsOwner {
 			return m, m.nudge(r)
+		}
+	case "U":
+		if m.snap.Update != "" && !m.nix {
+			return m, m.update()
 		}
 	case "*":
 		if gr := m.groupAround(b); gr != nil {
@@ -906,7 +948,10 @@ func (m *model) threadKeys(b *board) []string {
 	if m.canAskHere(b) {
 		keys = append(keys, "b", "by the way")
 	}
-	keys = append(keys, "⇥", "recipient", "[ ]", "constellation")
+	keys = append(keys, "⇥", "recipient")
+	if len(b.groups) > 0 {
+		keys = append(keys, "[ ]", "constellation")
+	}
 	if !waiting { // x marks the conversation done
 		keys = append(keys, "x", "done")
 	}

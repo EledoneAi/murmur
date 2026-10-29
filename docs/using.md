@@ -15,8 +15,9 @@ tool installed on the laptop: Claude Code, Codex, Cursor, OpenCode, Copilot CLI 
 after you install another. Run it once per laptop; `murmur` alone asks for the hub
 on a laptop that hasn't joined one. Murmur runs on macOS and Linux, and on Windows inside WSL.
 
-Homebrew installs never update themselves: run `brew upgrade murmur` when your team's hub moves to a newer version.
-The hooks murmur adds point at Homebrew's link on your `PATH`, so they keep working after an upgrade.
+When your team's hub moves to a newer version, a Homebrew install updates through Homebrew, as the team's admins
+chose: the daemon runs `brew upgrade` once your agents are idle, or the console says the version is available and
+`U` updates now. The hooks murmur adds point at Homebrew's link on your `PATH`, so they keep working after an upgrade.
 
 **On your own**, with no team and no hub to run:
 
@@ -82,11 +83,15 @@ murmur uninstall      undo join and sign the laptop out (asks first; --yes for s
 What needs you comes first, oldest first, and stays in view: your agents waiting for you in their terminal,
 questions to you, messages a mute holds for your agents, questions by the way from teammates and their agents that
 wait for you, and messages that didn't get through. `n` goes to the next one from anywhere. Below it, agents that
-exchanged messages, or asked one another by the way, in the last 24 hours form constellations, with lines between
+exchanged messages, or asked one another by the way, in the last hour form constellations, with lines between
 those that talk: bright between people, dim between one person's agents, dashed for a held message or a question by
 the way that waits for you. When two agents change the same file, the constellation says whether they are in tune
 (`≈`, they talk) or not (`×`); agents not in touch that change the same file are listed as out of tune, and `i`
-introduces them. Agents idle for over two hours fold away.
+introduces them. A constellation is named after what its agents talk about: each message has a topic, a reply
+keeps the one it answers, and the header shows its exchanges' latest topics, or a shared branch when none has one. An
+agent whose part is done says so on its last message, which expects no answer: the two agents part at once, and a
+reply brings them back. Agents that stop without saying so part an hour after their latest message. A thread marks a
+last message. Agents idle for over two hours fold away.
 
 Each agent is one line: its state (`●` working, `◆` needs you, `◇` waits on its owner, `○` idle), its owner's
 initial, its name, where it works (its branch, `²` for a second checkout, `⟵` for the branch it is stacked on,
@@ -119,7 +124,8 @@ the footer names the keys for the selection that the screen doesn't show already
 `murmur demo` shows the console on a made-up team. `murmur --plain` says the same in sentences, one line at a time,
 for screen readers, and takes commands; `murmur watch` prints the sentences and `murmur status --json` gives
 scripts everything. `MURMUR_THEME` picks `dark`, `light`, `ansi` (your terminal's 16 colours) or `contrast`;
-`MURMUR_MOTION=0` stops the animations (off over SSH anyway); `MURMUR_GLYPHS=ascii` draws with ASCII only;
+`MURMUR_MOTION=0` stops the animations (off over SSH anyway); `MURMUR_GLYPHS=ascii` draws the board's signs and
+the keys' names in ASCII (text from your team stays as it is written);
 `MURMUR_BELL=1` rings when one of your agents starts waiting for you. The window title counts what needs you.
 
 ## Mutes
@@ -129,8 +135,8 @@ Needs you until you let it through (`y`) or drop it (`x`). `unmute` only stops h
 held still wait for `y` or `x`.
 
 A mute lasts for any duration Go reads (`30m`, `2h`, `1h30m`), until `tomorrow` (08:00 the next day on your
-laptop's clock), or until you unmute. `group:bob/main-1` mutes that agent and every agent linked to it by messages
-in the last 24 hours, as they are when you mute, except your own agents. Muting one of your own agents holds what
+laptop's clock), or until you unmute. `group:bob/main-1` mutes that agent and every agent in its constellation, as
+they are when you mute, except your own agents. Muting one of your own agents holds what
 reaches it, so it can work undisturbed. Mutes live on each laptop: with two laptops, mute on each.
 
 ## Asking by the way
@@ -373,8 +379,9 @@ console, MCP server (who, send, btw) <--(local socket)------------------ daemon
   each person decides, or never; they can also refuse versions older than one they name. Each person can set their
   own laptop to `ask` or `off`. A refused laptop updates itself anyway, unless its person chose `off`. A laptop
   checks the release signature and the download's checksum, never moves to an older version, and goes back to its
-  previous version if the new one doesn't reach the hub within a minute. Homebrew and Nix installs update through
-  their package manager. The first time murmur's background process starts on a new version, it sets up again the
+  previous version if the new one doesn't reach the hub within a minute. A Homebrew install updates through
+  Homebrew, which keeps no previous version: `brew reinstall` brings back one that fails. A Nix install updates through
+  its configuration. The first time murmur's background process starts on a new version, it sets up again the
   coding tools join connected, so their hooks and MCP server are what that version needs, and leaves the others
   alone. A session already running keeps the hooks it loaded when it started: restart it to give it the new ones.
 

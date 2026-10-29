@@ -17,7 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var update = flag.Bool("update", false, "rewrite the golden files in testdata")
+var rewrite = flag.Bool("update", false, "rewrite the golden files in testdata")
 
 // demo is the console on the demo team at demoNow, w by h, in a theme.
 func demo(w, h int, t theme) *model {
@@ -71,7 +71,7 @@ func TestGolden(t *testing.T) {
 func golden(t *testing.T, name, got string) {
 	t.Helper()
 	path := filepath.Join("testdata", name)
-	if *update {
+	if *rewrite {
 		_ = os.MkdirAll("testdata", 0o755)
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatal(err)

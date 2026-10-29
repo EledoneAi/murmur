@@ -140,12 +140,24 @@ export const Murmur = async ({ client, directory }) => {
       murmur_send: {
         description:
           'Send a message to a teammate\'s coding agent (to: "bob/main-1") or to a teammate (to: "bob"), who sees it in their murmur console. ' +
-          "The agent reads it between two of its tool calls. Make the first line say what the message is about. Use it when another agent's work affects yours, to answer a [murmur] message, or when a decision needs a specific person.",
+          "The agent reads it between two of its tool calls. Make the first line say what the message is about. Use it when another agent's work affects yours, to answer a [murmur] message, or when a decision needs a specific person. " +
+          "When your part is done, say so on your last message with last rather than in a message of its own: a thank-you interrupts the other agent for nothing.",
         args: {
           to: { type: "string", description: "person/agent for an agent, or a person's handle" },
           text: { type: "string", description: "the message; plain text" },
+          topic: {
+            type: "string",
+            description:
+              'what the exchange is about, in a few words ("Release freeze tonight"), the same on every message of it: answering a [murmur] message, reuse its topic unless the subject moved',
+          },
+          last: {
+            type: "boolean",
+            description:
+              "true when this message ends your part of the exchange and you expect no answer: an answer that settles the question, an agreement, a hand-off. Murmur stops showing you together; a reply brings you back",
+          },
         },
-        execute: async (args, ctx) => tool("send", ctx.sessionID, { to: args.to, text: args.text }),
+        execute: async (args, ctx) =>
+          tool("send", ctx.sessionID, { to: args.to, text: args.text, topic: args.topic, last: args.last }),
       },
       murmur_btw: {
         description:

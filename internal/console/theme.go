@@ -81,6 +81,7 @@ func pickTheme(isDark bool) theme {
 // styles are the theme turned into lipgloss styles, once per theme.
 type styles struct {
 	t                                    theme
+	ascii                                bool // the glyphs are ASCII: keys are spelled out
 	fg, dim, faint, name, bold, wordmark ink
 	teal, tealBold, thorn, link, sib     ink
 	hotkey, tab, label, italic           ink
@@ -163,5 +164,16 @@ func (s styles) hot(label string, i int, base ink) string {
 
 // keyWord is a key, then a word for what it does: the footer's way, and a label's when the letter isn't in its word.
 func (s styles) keyWord(key, word string) string {
-	return s.hotkey.Render(key) + " " + s.dim.Render(word)
+	return s.key(key) + " " + s.dim.Render(word)
 }
+
+// key draws a key's name, spelled out where the glyphs are ASCII: enter for ⏎, ctrl+k for ⌃k.
+func (s styles) key(k string) string {
+	if s.ascii {
+		k = asciiKeys.Replace(k)
+	}
+	return s.hotkey.Render(k)
+}
+
+var asciiKeys = strings.NewReplacer("⏎", "enter", "␣", "space", "←", "left", "→", "right", "↑", "up ", "↓", "down", "⌃", "ctrl+",
+	"⇥", "tab", "⇧", "shift+", "⌥", "alt+")
