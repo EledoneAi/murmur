@@ -318,6 +318,38 @@ func TestConstellationNameInWholeLetters(t *testing.T) {
 	}
 }
 
+// A constellation is named after what its agents talk about now, each exchange's latest topic, not after one member's
+// branch. An exchange over an hour old no longer holds its agents, nor one whose latest message was its sender's last.
+func TestConstellationNamedByTopics(t *testing.T) {
+	at := func(ago time.Duration) int64 { return demoNow.Add(-ago).UnixMilli() }
+	s := ipc.Snapshot{Me: protocol.Person{Handle: "alice"}, People: []protocol.Person{
+		{Handle: "alice", Online: true, Agents: []protocol.Agent{{Name: "api", Branch: "auth-v2", Status: "idle"}}},
+		{Handle: "bob", Online: true, Agents: []protocol.Agent{{Name: "web", Branch: "billing", Status: "idle"}, {Name: "old", Status: "idle"}}},
+		{Handle: "carol", Online: true, Agents: []protocol.Agent{{Name: "ops", Status: "idle"}}},
+	}, Msgs: []protocol.Msg{
+		{ID: "1", From: "alice/api", To: "bob/web", Text: "x", Topic: "Token format", At: at(30 * time.Minute)},
+		{ID: "2", From: "bob/web", To: "alice/api", Text: "y", Topic: "Token format v2", At: at(20 * time.Minute)},
+		{ID: "3", From: "carol/ops", To: "bob/web", Text: "z", Topic: "Release freeze", At: at(10 * time.Minute)},
+		{ID: "4", From: "alice/api", To: "bob/old", Text: "w", Topic: "Stale", At: at(2 * time.Hour)},
+	}}
+	b := buildBoard(s, demoNow, scopeAll)
+	if len(b.groups) != 1 || len(b.groups[0].members) != 3 {
+		t.Fatalf("constellations: %+v", b.groups)
+	}
+	if got := b.groups[0].name; got != "Release freeze · Token format v2" {
+		t.Fatalf("named %q", got)
+	}
+	// bob's agent settles carol's question: carol's agent leaves, and comes back when it asks again
+	s.Msgs = append(s.Msgs, protocol.Msg{ID: "5", From: "bob/web", To: "carol/ops", Text: "v", Topic: "Release freeze", Last: true, At: at(5 * time.Minute)})
+	if b := buildBoard(s, demoNow, scopeAll); len(b.groups) != 1 || len(b.groups[0].members) != 2 || b.groups[0].name != "Token format v2" {
+		t.Fatalf("after a last message: %+v", b.groups)
+	}
+	s.Msgs = append(s.Msgs, protocol.Msg{ID: "6", From: "carol/ops", To: "bob/web", Text: "u", Topic: "Release freeze", At: at(time.Minute)})
+	if b := buildBoard(s, demoNow, scopeAll); len(b.groups) != 1 || len(b.groups[0].members) != 3 {
+		t.Fatalf("after a reply: %+v", b.groups)
+	}
+}
+
 // evil is what a terminal would act on: a clipboard write, clearing the screen, a right-to-left override, an 8-bit
 // CSI, a link to a file, a bell.
 const evil = "\x1b]52;c;ZXZpbA==\x07\x1b[2J\u202e\u009b31m\x1b]8;;file:///etc/passwd\x1b\\"

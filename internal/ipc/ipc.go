@@ -36,7 +36,7 @@ type Snapshot struct {
 	Done    map[string]bool   `json:"done"`
 	Asks    []protocol.Msg    `json:"asks,omitempty"` // messages a mute holds, waiting for this person
 	Version string            `json:"version"`
-	Update  string            `json:"update,omitempty"` // the team's version, when this laptop can update to it
+	Update  string            `json:"update,omitempty"` // the team's version, when it is newer than this laptop's
 	Mutes   []string          `json:"mutes,omitempty"`  // what this person muted, in force now
 	// Asides are the questions asked by the way in the last day: this person's, and those asked of this person's
 	// agents, oldest first. Said has every agent of this laptop's that its coding tool lets be asked by the way, by name,
@@ -104,6 +104,8 @@ type Request struct {
 	Session string         `json:"session,omitempty"` // and its session id, when the harness gives the MCP server one
 	To      string         `json:"to,omitempty"`
 	Text    string         `json:"text,omitempty"`
+	Topic   string         `json:"topic,omitempty"` // on send: what the exchange is about
+	Last    bool           `json:"last,omitempty"`  // on send: the exchange ends with it for the sender
 	ID      string         `json:"id,omitempty"`
 	IDs     []string       `json:"ids,omitempty"`
 	Version string         `json:"version,omitempty"` // on stop: the version of the daemon meant, which refuses if it isn't

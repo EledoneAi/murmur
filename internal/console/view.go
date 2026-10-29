@@ -148,6 +148,9 @@ func (m *model) header(b *board) []string {
 	}
 	if m.w < 64 { // one row: the m lies down
 		right := conn
+		if v := m.snap.Update; v != "" && !m.nix {
+			right = st.dim.Render(v+" ") + st.hot("U", 0, st.dim) + "  " + right
+		}
 		if you != "" {
 			right = you + " " + right
 		}
@@ -168,9 +171,10 @@ func (m *model) header(b *board) []string {
 	left := lamps + "  " + st.wordmark.Render("murmur") + "   " + tabs
 	// you and the counts, as much as fits beside the tabs: the people online drop out first, then the agents, then
 	// your handle
-	counts := []string{fmt.Sprintf("%d agents", b.agents)}
+	agents := fmt.Sprintf("%d %s", b.agents, plural(b.agents, "agent", "agents"))
+	counts := []string{agents}
 	if !b.solo {
-		counts = []string{fmt.Sprintf("%d online · %d agents", b.people, b.agents), counts[0]}
+		counts = []string{fmt.Sprintf("%d online · %s", b.people, agents), agents}
 	}
 	var rights []string
 	for _, c := range counts {
@@ -188,6 +192,11 @@ func (m *model) header(b *board) []string {
 		if right = r + "   " + conn + "  "; cellWidth(left)+cellWidth(right) <= m.w {
 			break
 		}
+	}
+	if v := m.snap.Update; v != "" && m.nix { // the daemon updates on its own when the team's policy says so; U doesn't wait
+		logo = spread(logo, st.dim.Render(v+" is available: update your Nix configuration")+"  ", m.w)
+	} else if v != "" {
+		logo = spread(logo, st.dim.Render(v+" is available · ")+st.hot("U", 0, st.dim)+st.dim.Render(" updates")+"  ", m.w)
 	}
 	return []string{pad(logo, m.w), spread(left, right, m.w)}
 }
@@ -260,8 +269,9 @@ func (m *model) homeLines(b *board) (pinned, body []line) {
 		pinned = append(pinned, line{text: pad(" "+st.teal.Render(g.needs)+" "+st.hot("Needs you", 0, st.bold)+"  "+st.dim.Render(fmt.Sprint(len(b.needs))), m.w),
 			hot: []string{"n"}})
 		shown := b.needs
-		if most := max(1, (m.h-8)/2); len(shown) > most {
-			shown = shown[:most]
+		if most := max(1, (m.h-8)/2); len(shown) > most { // the window follows n past the needs that fit
+			start := max(0, slices.IndexFunc(b.needs, func(n need) bool { return n.key == m.selected })-most+1)
+			shown = shown[start : start+most]
 		}
 		for _, n := range shown {
 			person, _, _ := strings.Cut(n.who, "/")
@@ -338,6 +348,8 @@ func (m *model) homeLines(b *board) (pinned, body []line) {
 	}
 	if b.agents == 0 {
 		body = append(body, m.empty()...)
+	} else if m.filter != "" && len(b.groups)+len(b.elsewhere)+len(b.lone)+len(b.quiet)+len(b.dissonant) == 0 {
+		body = append(body, line{text: pad("   "+st.dim.Render("Nothing matches “"+m.filter+"”: ")+st.keyWord("esc", "clears the filter"), m.w)})
 	}
 	return pinned, body
 }
@@ -498,9 +510,10 @@ func (m *model) groupHeader(b *board, lay layout, gr *group, folded bool) string
 	if gr.people > 1 {
 		meta += fmt.Sprintf(" · %d people", gr.people)
 	}
-	left := " " + st.bold.Render(gr.name) + "   "
+	name := st.bold.Render(fit(gr.name, max(12, m.w/2), g)) // two topics leave room for its repos and people
+	left := " " + name + "   "
 	if m.pinned[gr.key] {
-		left = " " + st.dim.Render("* ") + st.bold.Render(gr.name) + "   "
+		left = " " + st.dim.Render("* ") + name + "   "
 	}
 	if folded {
 		var chord strings.Builder
@@ -582,7 +595,7 @@ func (m *model) agentLines(b *board, lay layout, r *agentRef, gutter, gap string
 	if len(parts) == 0 {
 		return out
 	}
-	detail := " " + gap + strings.Repeat(" ", 2+lay.initial+2) + st.dim.Render("↳ ") + strings.Join(parts, st.dim.Render(" · "))
+	detail := " " + gap + strings.Repeat(" ", 2+lay.initial+2) + st.dim.Render(g.answer+" ") + strings.Join(parts, st.dim.Render(" · "))
 	return append(out, line{text: pad(ansi.Truncate(detail, m.w-2, g.ellipsis), m.w), key: key})
 }
 

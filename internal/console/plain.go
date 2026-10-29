@@ -93,7 +93,10 @@ func call(req ipc.Request) (ipc.Reply, error) {
 // summary is the team in sentences: who you are, what needs you, and every agent.
 func summary(s ipc.Snapshot, now time.Time) []string {
 	b := buildBoard(s, now, scopeAll)
-	out := []string{fmt.Sprintf("murmur, as %s. %s. %d people online, %d agents.", s.Me.Handle, stateWord(s.State), b.people, b.agents)}
+	out := []string{fmt.Sprintf("murmur, as %s. %s. %d people online, %d %s.", s.Me.Handle, stateWord(s.State), b.people, b.agents, plural(b.agents, "agent", "agents"))}
+	if s.Update != "" { // murmur update says how when Nix installed it
+		out = append(out, "Murmur "+s.Update+" is available: run murmur update.")
+	}
 	if len(b.needs) == 0 {
 		out = append(out, "Nothing needs you.")
 	} else {
@@ -123,6 +126,9 @@ func changes(old, now ipc.Snapshot, at time.Time) []string {
 	var out []string
 	if old.State != now.State {
 		out = append(out, stateWord(now.State)+".")
+	}
+	if now.Update != "" && now.Update != old.Update {
+		out = append(out, "Murmur "+now.Update+" is available: run murmur update.")
 	}
 	ob, nb := buildBoard(old, at, scopeAll), buildBoard(now, at, scopeAll)
 	before := map[string]need{}

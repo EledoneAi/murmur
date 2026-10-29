@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -141,6 +142,12 @@ type Msg struct {
 	To   string `json:"to"`
 	Text string `json:"text"`
 	At   int64  `json:"at"`
+	// Topic names the exchange in a few words, the same on every message of it: a reply keeps the one it answers
+	// unless the subject moved. Consoles name a constellation after its exchanges' topics.
+	Topic string `json:"topic,omitempty"`
+	// Last says the exchange ends with it for its sender, who expects no answer: the two agents are no longer in
+	// touch, until either writes again.
+	Last bool `json:"last,omitempty"`
 	// Announce is the repo of an announcement, on the copy the hub sends each agent working in it. To is that
 	// agent's address, so laptops deliver it as any message.
 	Announce string `json:"announce,omitempty"`
@@ -234,6 +241,40 @@ type Check struct {
 // MaxText caps one message. Claude Code accepts far more; people and agents should not need it.
 const MaxText = 8000
 
+// MaxTopic caps a message's topic, in characters: it names a constellation in a header.
+const MaxTopic = 60
+
+// CleanTopic is a topic as anyone may see it: one line, cleaned, MaxTopic characters at most.
+func CleanTopic(t string) string {
+	t = strings.TrimSpace(Clean(Cut(t, MaxTopic*4), false))
+	return string([]rune(t)[:min(utf8.RuneCountInString(t), MaxTopic)])
+}
+
+// TouchWindow is how long after their latest message two agents stay in touch, when neither said it was its last:
+// one constellation on the board, one group to mute. It catches the agents that stop without saying so; nearly every
+// reply comes within half an hour, and an exchange that resumes later brings them together again.
+const TouchWindow = time.Hour
+
+// InTouch is which agents are in touch at now, from the messages between them: two are while their latest message is
+// under TouchWindow old and isn't the last of the exchange for its sender. Callers pass only messages between agents.
+// Each pair is its two addresses, the smaller first.
+func InTouch(ms []Msg, now time.Time) map[[2]string]bool {
+	latest := map[[2]string]Msg{}
+	for _, m := range ms {
+		k := [2]string{min(m.From, m.To), max(m.From, m.To)}
+		if l, ok := latest[k]; !ok || m.At >= l.At {
+			latest[k] = m
+		}
+	}
+	in := map[[2]string]bool{}
+	for k, m := range latest {
+		if !m.Last && now.Sub(time.UnixMilli(m.At)) <= TouchWindow {
+			in[k] = true
+		}
+	}
+	return in
+}
+
 // TooMany is the hub's answer to a message past its sender's limit for the minute. A laptop sends a message its
 // outbox resent again later; a fresh one fails, so its agent hears to group them.
 const TooMany = "too many messages in the last minute; group them into one"
@@ -278,7 +319,20 @@ func Prompt(m Msg) string {
 		if p, a := Split(m.From); a != "" {
 			who = p + "'s agent " + a
 		}
-		fmt.Fprintf(&b, "\n\n(From %s, through murmur. Answer with the murmur `send` tool, to %q.)", who, m.From)
+		fmt.Fprintf(&b, "\n\n(From %s, through murmur", who)
+		if m.Topic != "" {
+			fmt.Fprintf(&b, ", on %q", m.Topic)
+		}
+		if m.Last {
+			b.WriteString(". It is the sender's last message on this: they expect no answer. If you need more, answer")
+		} else {
+			b.WriteString(". Answer")
+		}
+		fmt.Fprintf(&b, " with the murmur `send` tool, to %q", m.From)
+		if m.Topic != "" {
+			fmt.Fprintf(&b, ", topic %q unless the subject moved", m.Topic)
+		}
+		b.WriteString(".)")
 	}
 	return b.String()
 }

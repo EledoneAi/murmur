@@ -393,3 +393,41 @@ func TestCheckCleansTheHubsVersion(t *testing.T) {
 		t.Fatalf("version %q", i.Version)
 	}
 }
+
+// A Homebrew install updates with Homebrew: it reads the tap, upgrades the cask, and keeps the new version even when
+// its daemon doesn't come online, which automatic updates then skip. A tap without the team's version yet is no
+// failure to skip.
+func TestRunUpgradesHomebrewInstalls(t *testing.T) {
+	exe, started, hub := laptop(t, "1.2.0", "1.3.0", "1.3.0", "0")
+	calls := filepath.Join(t.TempDir(), "calls")
+	brew := filepath.Join(t.TempDir(), "brew")
+	fake := func(upgrade string) {
+		_ = os.WriteFile(brew, []byte("#!/bin/sh\necho \"$*\" >> '"+calls+"'\n"+upgrade), 0o755)
+	}
+	was := brewOf
+	t.Cleanup(func() { brewOf = was })
+	brewOf = func(string) string { return brew }
+
+	fake("") // the tap doesn't have 1.3.0 yet
+	if err := Run(config.Config{Hub: hub}, true, func(string) {}); err == nil || !strings.Contains(err.Error(), "no version newer") {
+		t.Fatalf("Run with a stale tap: %v", err)
+	}
+	if config.UpdateSkipped("1.3.0") {
+		t.Fatal("a stale tap skips 1.3.0")
+	}
+
+	fake("if [ \"$1\" = upgrade ]; then printf '#!/bin/sh\\ncase \"$1\" in version) echo murmur 1.3.0 ;; daemon) : > " + started + "; exit 1 ;; esac\\n' > '" + exe + "'; fi\n")
+	err := Run(config.Config{Hub: hub}, true, func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "brew reinstall") {
+		t.Fatalf("Run: %v", err)
+	}
+	if b, _ := os.ReadFile(calls); !strings.HasSuffix(string(b), "update --quiet\nupgrade --cask "+release.Tap+"\n") {
+		t.Fatalf("brew ran %q", b)
+	}
+	if v, _ := versionOf(exe); v != "1.3.0" {
+		t.Fatalf("murmur is %s after the upgrade", v)
+	}
+	if _, err := os.Stat(started); err != nil || !config.UpdateSkipped("1.3.0") {
+		t.Fatalf("the new daemon started (%v), 1.3.0 skipped %v", err, config.UpdateSkipped("1.3.0"))
+	}
+}

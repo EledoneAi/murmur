@@ -194,11 +194,20 @@ func (h *Hub) ensureUser(ctx context.Context, email, name string) (store.User, e
 	for i := 2; taken(handle); i++ {
 		handle = fmt.Sprintf("%s%d", strings.Trim(nonHandle.ReplaceAllString(first, ""), "-"), i)
 	}
+	u := store.User{Email: email, Handle: handle, Name: name, Admin: admin, Created: time.Now()}
+	h.handles[handle] = &u // reserved while it is saved: another sign-up meanwhile gets another handle
 	h.mu.Unlock()
 	// ponytail: two instances can give one handle to two people signing up in the same second; unique handles in
 	// the store if teams ever sign up that fast
-	u := store.User{Email: email, Handle: handle, Name: name, Admin: admin, Created: time.Now()}
-	return u, h.putUser(ctx, u)
+	if err := h.putUser(ctx, u); err != nil {
+		h.mu.Lock()
+		if h.handles[handle] == &u {
+			delete(h.handles, handle)
+		}
+		h.mu.Unlock()
+		return u, err
+	}
+	return u, nil
 }
 
 // putUser saves a person, then updates this instance and tells the others.

@@ -18,8 +18,8 @@ import (
 // ones, folded. It is built from one snapshot of the daemon, so it can be tested without a terminal.
 
 const (
-	touchWindow = 24 * time.Hour // agents that exchanged a message within it are in touch
-	quietAfter  = 2 * time.Hour  // idle agents not in touch fold away after it
+	touchWindow = protocol.TouchWindow // agents that exchanged a message within it are in touch
+	quietAfter  = 2 * time.Hour        // idle agents not in touch fold away after it
 )
 
 // agentRef is one agent on the board, with what the console derives about it.
@@ -50,7 +50,7 @@ type link struct {
 
 // group is a constellation: agents in touch with each other.
 type group struct {
-	key     string // stable across snapshots: its first member's address
+	key     string // stable across snapshots while its oldest exchange lasts: that exchange's first address
 	name    string
 	repos   []string
 	people  int
@@ -202,30 +202,50 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 
 	// links, from the messages this laptop saw lately between agents still running, and the questions an agent asked
 	// another by the way: the asker learned from the other's conversation. An answer delivered as a message is the
-	// question's already.
+	// question's already. Two agents stay linked while they are in touch: until an hour after their latest message, or
+	// at once when it was the last of the exchange for its sender.
 	b.delivered = deliveries(s)
-	counts, held := map[pair]int{}, map[pair]bool{}
-	latest := map[string]int64{}
-	add := func(m protocol.Msg, isHeld bool) {
-		if now.Sub(time.UnixMilli(m.At)) > touchWindow || byAddr[m.From] == nil || byAddr[m.To] == nil || m.From == m.To {
-			return
-		}
-		k := pair{min(m.From, m.To), max(m.From, m.To)}
-		counts[k]++
-		held[k] = held[k] || isHeld
-		latest[m.From], latest[m.To] = max(latest[m.From], m.At), max(latest[m.To], m.At)
+	type seen struct {
+		m    protocol.Msg
+		held bool
 	}
+	var links []seen
 	for _, m := range s.Msgs {
 		if !b.delivered[m.ID] {
-			add(m, false)
+			links = append(links, seen{m, false})
 		}
 	}
 	for _, m := range s.Asks {
-		add(m, true)
+		links = append(links, seen{m, true})
 	}
 	for _, a := range s.Asides { // one that waits for you is dashed, as a held message
 		if byAgent(a) {
-			add(protocol.Msg{From: a.From, To: a.To, At: a.At}, waits(a))
+			links = append(links, seen{protocol.Msg{From: a.From, To: a.To, At: a.At}, waits(a)})
+		}
+	}
+	links = slices.DeleteFunc(links, func(l seen) bool { return byAddr[l.m.From] == nil || byAddr[l.m.To] == nil || l.m.From == l.m.To })
+	ms := make([]protocol.Msg, len(links))
+	for i, l := range links {
+		ms[i] = l.m
+	}
+	inTouch := protocol.InTouch(ms, now)
+	counts, held := map[pair]int{}, map[pair]bool{}
+	latest := map[string]int64{}
+	topics := map[pair]protocol.Msg{} // each link's latest message with a topic: what the two agents talk about now
+	first := map[pair]int64{}         // when each link's exchange began, in the window: the oldest keys its constellation
+	for _, l := range links {
+		m, k := l.m, pair{min(l.m.From, l.m.To), max(l.m.From, l.m.To)}
+		if !inTouch[[2]string{k.a, k.b}] || now.Sub(time.UnixMilli(m.At)) > touchWindow {
+			continue
+		}
+		if first[k] == 0 || m.At < first[k] {
+			first[k] = m.At
+		}
+		counts[k]++
+		held[k] = held[k] || l.held
+		latest[m.From], latest[m.To] = max(latest[m.From], m.At), max(latest[m.To], m.At)
+		if m.Topic != "" && m.At >= topics[k].At {
+			topics[k] = m
 		}
 	}
 
@@ -288,6 +308,13 @@ func buildBoard(s ipc.Snapshot, now time.Time, sc scope) *board {
 	}
 	for root, ms := range members {
 		g := b.group(root, ms, pairs[root], counts, held, latest)
+		// keyed by its oldest exchange, not by whichever member sorts first: an agent joining or leaving keeps the
+		// constellation's pin, fold and place in [ and ]
+		oldest := slices.MinFunc(pairs[root], func(x, y pair) int { return cmp.Or(cmp.Compare(first[x], first[y]), cmp.Compare(x.a, y.a)) })
+		g.key = oldest.a
+		if t := topicName(pairs[root], topics); t != "" {
+			g.name = t
+		}
 		g.tune = groupTune[root]
 		b.groups = append(b.groups, g)
 	}
@@ -394,7 +421,12 @@ func (b *board) filterBy(f string) {
 	hit := func(r *agentRef) bool {
 		return strings.Contains(strings.ToLower(r.addr+" "+r.a.Repo+" "+r.a.Branch+" "+r.a.Title), f)
 	}
-	b.groups = slices.DeleteFunc(b.groups, func(g *group) bool { return !slices.ContainsFunc(g.members, hit) })
+	miss := func(g *group) bool { // a constellation matches by its name, its topics, or one of its agents
+		return !strings.Contains(strings.ToLower(g.name), f) && !slices.ContainsFunc(g.members, hit)
+	}
+	b.groups = slices.DeleteFunc(b.groups, miss)
+	b.elsewhere = slices.DeleteFunc(b.elsewhere, miss)
+	b.elseLone, b.elseQuiet = 0, 0 // counted, not listed: a filter can't say whether they match
 	b.lone = slices.DeleteFunc(b.lone, func(r *agentRef) bool { return !hit(r) })
 	b.quiet = slices.DeleteFunc(b.quiet, func(r *agentRef) bool { return !hit(r) })
 	b.dissonant = slices.DeleteFunc(b.dissonant, func(d dissonance) bool {
@@ -457,7 +489,30 @@ func (b *board) group(root string, ms []*agentRef, pairs []pair, counts map[pair
 	return g
 }
 
-// groupName names a constellation from what its agents share: a branch, else the repo, else the first title.
+// topicName names a constellation after what its agents talk about: each link's latest topic, the latest first, two
+// at most. A constellation of two exchanges is both, not one member's.
+func topicName(links []pair, topics map[pair]protocol.Msg) string {
+	var ms []protocol.Msg
+	for _, k := range links {
+		if m, ok := topics[k]; ok {
+			ms = append(ms, m)
+		}
+	}
+	slices.SortFunc(ms, func(x, y protocol.Msg) int { return cmp.Or(-cmp.Compare(x.At, y.At), cmp.Compare(x.ID, y.ID)) })
+	var names []string
+	for _, m := range ms {
+		if !slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, m.Topic) }) {
+			names = append(names, m.Topic)
+		}
+	}
+	if len(names) > 2 {
+		return fmt.Sprintf("%s · %s +%d", names[0], names[1], len(names)-2)
+	}
+	return strings.Join(names, " · ")
+}
+
+// groupName names a constellation without topics (its agents' coding tools give none) from what its agents share: a
+// branch, else the repo, else the first title.
 func groupName(ms []*agentRef) string {
 	branches := map[string]int{}
 	for _, r := range ms {

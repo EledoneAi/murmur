@@ -81,7 +81,7 @@ func (m *model) openSheet(kind sheetKind, b *board) {
 	case sheetMute:
 		s.all = m.muteItems(b)
 		if len(s.all) == 0 {
-			m.outcome = outcome{text: "Select an agent or a message to mute where it comes from", err: true, at: m.now()}
+			m.outcome = outcome{text: "Select an agent, a constellation or a message to mute where it comes from", err: true, at: m.now()}
 			return
 		}
 	}
@@ -114,7 +114,7 @@ func (m *model) sheetKey(k tea.KeyPressMsg) tea.Cmd {
 		if s.kind == sheetMute { // d and f pick how long, on the selected target
 			if (k.String() == "d" || k.String() == "f") && s.sel < len(items) {
 				m.sheet = nil
-				return m.mute(items[s.sel].hint, map[string]string{"d": "24h", "f": ""}[k.String()])
+				return m.mute(items[s.sel].hint, items[s.sel].text, map[string]string{"d": "24h", "f": ""}[k.String()])
 			}
 		}
 		if k.Text != "" && k.Mod&^tea.ModShift == 0 {
@@ -154,7 +154,7 @@ func (m *model) sheetBox(maxH int) (string, int) {
 		text := highlight(st, it.text, s.query)
 		hint := st.dim.Render(it.hint)
 		if it.key != "" {
-			hint = st.hotkey.Render(it.key)
+			hint = st.key(it.key)
 		}
 		if it.lead != "" {
 			text = it.lead + " " + text
@@ -220,7 +220,16 @@ func (m *model) paletteItems(b *board) []item {
 		if !b.solo {
 			lead += " " + st.person(b.colours[r.person]).Render(b.initials[r.person])
 		}
-		out = append(out, item{section: "AGENTS", lead: lead, text: r.a.Name, hint: r.a.Branch, run: selectKey("agent:" + r.addr)})
+		out = append(out, item{section: "AGENTS", lead: lead, text: r.a.Name, hint: r.a.Branch, run: func(m *model) tea.Cmd {
+			if gr := b.groupOf(r); gr != nil { // a folded agent has no row to select: its fold opens
+				delete(m.folded, gr.key)
+				m.unfolded[gr.key] = true
+			}
+			if slices.Contains(b.quiet, r) {
+				m.unfolded["quiet"] = true
+			}
+			return selectKey("agent:" + r.addr)(m)
+		}})
 	}
 	if !b.solo {
 		for _, p := range m.snap.People {
@@ -282,6 +291,9 @@ func (m *model) paletteItems(b *board) []item {
 		m.compact = !m.compact
 		return nil
 	}})
+	if m.snap.Update != "" && !m.nix {
+		out = append(out, act("Update murmur to "+m.snap.Update+" now", "U"))
+	}
 	out = append(out, act("Next thing that needs you", "n"))
 	if !b.solo {
 		for _, sc := range scopes(len(b.colours)) {
@@ -309,26 +321,46 @@ func sortedKeys(m map[string]int) []string {
 	return out
 }
 
+// helpItems are the keys that work where the help was opened: in a thread, its own; on a laptop alone, none of the
+// team's.
 func (m *model) helpItems() []item {
-	keys := [][3]string{
-		{"MOVE", "↑↓ j k", "previous or next row"}, {"MOVE", "← → h l", "fold or unfold"}, {"MOVE", "[ ]", "previous or next constellation"},
-		{"MOVE", "home end", "top, bottom"}, {"MOVE", "n", "next thing that needs you, from anywhere"},
-		{"ACT", "⏎", "open the thread"}, {"ACT", "␣", "inspector on or off"}, {"ACT", "w", "write to the selected agent"},
-		{"ACT", "r", "reply to the selected question"}, {"ACT", "b", "ask the selected agent by the way; it won't see it"},
-		{"ACT", "y x", "let a held message through, or drop it"},
-		{"ACT", "y x", "share an answer by the way once you read it whole, or drop it"}, {"ACT", "y x", "let a cold question by the way run, or decline it"},
-		{"ACT", "x", "mark a question or a failed message done"}, {"ACT", "i", "introduce two agents that are out of tune"},
-		{"ACT", "o", "open the pull request"}, {"ACT", "c", "copy the address"}, {"ACT", "z", "mute for an hour, a day, until unmuted"},
-		{"ACT", "g", "go to your agent's terminal (tmux, iTerm2, WezTerm, kitty)"}, {"ACT", "*", "pin a constellation to the top"},
-		{"ACT", "N", "nudge a teammate whose agent waits for them"}, {"ACT", "x", "in a thread: mark it done"},
-		{"VIEWS", "t", "Team: everyone's agents"}, {"VIEWS", "m", "Mine: your agents and their constellations; Near me past ten people"},
-		{"VIEWS", "a", "All: every fold open"}, {"VIEWS", ": ⌃k", "palette"}, {"VIEWS", "/", "filter in place"}, {"VIEWS", "p", "people"},
-		{"VIEWS", "?", "these keys"}, {"VIEWS", "esc", "back one level, never quits"}, {"VIEWS", "q ⌃c", "quit"},
-		{"COMPOSER", "⏎", "send"}, {"COMPOSER", "⇧⏎ ⌥⏎", "new line"}, {"COMPOSER", "⇥", "change the recipient"},
-		{"COMPOSER", "esc", "stop writing, or asking"},
+	b := m.board()
+	composer := [][3]string{{"COMPOSER", "⏎", "send"}, {"COMPOSER", "⇧⏎ ⌥⏎", "new line"}, {"COMPOSER", "⇥", "change the recipient"},
+		{"COMPOSER", "esc", "stop writing, or asking"}}
+	var keys [][3]string
+	if m.thread != nil {
+		keys = [][3]string{
+			{"THREAD", "w ⏎", "write"}, {"THREAD", "b", "ask by the way; the agent won't see it"}, {"THREAD", "⇥", "change the recipient"},
+			{"THREAD", "↑↓ j k", "scroll"}, {"THREAD", "y x", "let a held message or a question by the way through, or drop it"},
+			{"THREAD", "x", "mark the conversation done"}, {"THREAD", "?", "these keys"}, {"THREAD", "esc q", "back to the board"},
+			{"THREAD", "⌃c", "quit"},
+		}
+		if len(b.groups) > 0 {
+			keys = append(keys, [3]string{"THREAD", "[ ]", "previous or next constellation's thread"})
+		}
+	} else {
+		keys = [][3]string{
+			{"MOVE", "↑↓ j k", "previous or next row"}, {"MOVE", "← → h l", "fold or unfold"}, {"MOVE", "[ ]", "previous or next constellation"},
+			{"MOVE", "home end", "top, bottom"}, {"MOVE", "n", "next thing that needs you, from anywhere"},
+			{"ACT", "⏎", "open the thread"}, {"ACT", "␣", "inspector on or off"}, {"ACT", "w", "write to the selected agent"},
+			{"ACT", "r", "reply to the selected question"}, {"ACT", "b", "ask the selected agent by the way; it won't see it"},
+			{"ACT", "y x", "let a held message through, or drop it"},
+			{"ACT", "y x", "share an answer by the way once you read it whole, or drop it"}, {"ACT", "y x", "let a cold question by the way run, or decline it"},
+			{"ACT", "x", "mark a question or a failed message done"}, {"ACT", "i", "introduce two agents that are out of tune"},
+			{"ACT", "o", "open the pull request"}, {"ACT", "c", "copy the address"}, {"ACT", "z", "mute for an hour, a day, until unmuted"},
+			{"ACT", "g", "go to your agent's terminal (tmux, iTerm2, WezTerm, kitty)"}, {"ACT", "*", "pin a constellation to the top"},
+			{"ACT", "N", "nudge a teammate whose agent waits for them"},
+			{"ACT", "U", "update murmur to your team's version, when the header says one is available"},
+			{"VIEWS", "t", "Team: everyone's agents"}, {"VIEWS", "m", "Mine: your agents and their constellations; Near me past ten people"},
+			{"VIEWS", "a", "All: every fold open"}, {"VIEWS", ": ⌃k", "palette"}, {"VIEWS", "/", "filter in place"}, {"VIEWS", "p", "people"},
+			{"VIEWS", "?", "these keys"}, {"VIEWS", "esc", "back one level, never quits"}, {"VIEWS", "q ⌃c", "quit"},
+		}
+		if b.solo { // no teammates, no scopes
+			keys = slices.DeleteFunc(keys, func(k [3]string) bool { return slices.Contains([]string{"t", "m", "a", "p", "N"}, k[1]) })
+		}
 	}
 	var out []item
-	for _, k := range keys {
+	for _, k := range append(keys, composer...) {
 		out = append(out, item{section: k[0], text: k[2], key: k[1]})
 	}
 	return out
@@ -361,10 +393,14 @@ func (m *model) peopleItems(b *board) []item {
 	return out
 }
 
-// muteItems are what the selection lets you mute: the agent, its person, its constellation, its repo, its branch.
+// muteItems are what the selection lets you mute: the agent, its person, its constellation, its repo, its branch; on a
+// constellation's header, the constellation.
 func (m *model) muteItems(b *board) []item {
 	r := m.selectedAgent(b)
 	if r == nil {
+		if gr := m.selectedGroup(b); gr != nil {
+			return m.muteTargets([][2]string{{"Constellation " + gr.name, "group:" + gr.members[0].addr}})
+		}
 		return nil
 	}
 	targets := [][2]string{{"Agent " + r.a.Name, r.addr}}
@@ -380,15 +416,21 @@ func (m *model) muteItems(b *board) []item {
 			targets = append(targets, [2]string{"Branch " + r.a.Branch, "branch:" + r.a.Repo + "@" + r.a.Branch})
 		}
 	}
+	return m.muteTargets(targets)
+}
+
+// muteTargets are the mute sheet's lines: what it mutes in words, and as murmur mute takes it.
+func (m *model) muteTargets(targets [][2]string) []item {
 	var out []item
 	for _, t := range targets {
 		out = append(out, item{section: "HOLD MESSAGES TO YOUR AGENTS FROM", text: t[0], hint: t[1],
-			run: func(m *model) tea.Cmd { return m.mute(t[1], "1h") }})
+			run: func(m *model) tea.Cmd { return m.mute(t[1], t[0], "1h") }})
 	}
 	return out
 }
 
-func (m *model) mute(who, howLong string) tea.Cmd {
+// mute mutes who, which the outcome names as label says it: "Muted constellation Billing for an hour".
+func (m *model) mute(who, label, howLong string) tea.Cmd {
 	how := map[string]string{"1h": "for an hour", "24h": "for a day", "": "until you unmute"}[howLong]
-	return m.do(ipc.Request{Op: "mute", To: who, Text: howLong}, "Muted "+who+" "+how)
+	return m.do(ipc.Request{Op: "mute", To: who, Text: howLong}, "Muted "+strings.ToLower(label[:1])+label[1:]+" "+how)
 }

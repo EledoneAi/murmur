@@ -205,8 +205,12 @@ func main() {
 			os.Exit(1)
 		}
 	case "mute", "unmute":
+		if cmd == "unmute" && len(args) != 2 { // an unmute lifts the mute now: it takes no duration
+			err = errors.New("usage: murmur unmute WHO")
+			break
+		}
 		if len(args) < 2 || len(args) > 3 {
-			err = fmt.Errorf("usage: murmur %s WHO [30m|2h|tomorrow]", cmd)
+			err = errors.New("usage: murmur mute WHO [30m|2h|tomorrow]")
 			break
 		}
 		var r ipc.Reply

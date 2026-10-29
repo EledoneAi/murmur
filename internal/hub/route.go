@@ -63,6 +63,7 @@ func (h *Hub) send(s sender, m protocol.Msg) {
 		return
 	}
 	m.Text = strings.TrimSpace(protocol.Clean(m.Text, true)) // before taking the lock, like agent fields
+	m.Topic = protocol.CleanTopic(m.Topic)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	switch {
@@ -222,6 +223,14 @@ func (h *Hub) keepLocked(s sender, m protocol.Msg, email, dev string, ttl time.D
 		h.mu.Lock()
 		h.toPeopleLocked([]string{protocol.PersonOf(m.From), protocol.PersonOf(m.To)}, protocol.Frame{T: protocol.FrameMsg, Msg: &m, Echo: true}, nil,
 			s.causeLocked())
+		// a laptop of the recipient that connected while the message was being stored read the store before it: it
+		// gets the message now, as it would have from the store (a laptop takes a message once, whatever the copies)
+		for _, l := range h.links {
+			if l.email == email && l.gone.IsZero() && (dev == "" || l.dev == dev) {
+				h.waiting[m.ID] = &waiter{from: p.Sender, email: email, stored: true, created: time.Now()}
+				l.send(protocol.Frame{T: protocol.FrameMsg, Msg: &m})
+			}
+		}
 		h.mu.Unlock()
 		h.log.Info("message kept", "id", m.ID, "from", m.From, "to", m.To, "why", why)
 	}()

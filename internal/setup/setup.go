@@ -35,6 +35,7 @@ import (
 	"github.com/EledoneAi/murmur/v2/internal/ipc"
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
+	"github.com/EledoneAi/murmur/v2/internal/update"
 )
 
 // Harnesses are the AI coding tools murmur connects, in the order join sets them up.
@@ -500,7 +501,14 @@ func Uninstall() error {
 	}
 	_ = os.RemoveAll(config.Dir())
 	step(true, "Data", "removed "+config.Tildify(config.Dir()))
-	fmt.Printf("\nThe binary stays at %s; delete it with: rm -f %s %s\n", config.Exe(), config.Exe(), config.Exe()+".prev")
+	switch exe := config.Exe(); update.Managed(exe) {
+	case "Homebrew": // brew keeps its record of the cask, which a deleted binary would leave dangling
+		fmt.Printf("\nThe binary stays at %s; remove it with: brew uninstall --cask %s\n", exe, release.Tap)
+	case "Nix":
+		fmt.Printf("\nThe binary stays at %s; remove it from your Nix configuration\n", exe)
+	default:
+		fmt.Printf("\nThe binary stays at %s; delete it with: rm -f %s %s\n", exe, exe, exe+".prev")
+	}
 	if len(failed) > 0 {
 		return fmt.Errorf("murmur's entries are still in %s: see above", strings.Join(failed, ", "))
 	}

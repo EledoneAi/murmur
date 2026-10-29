@@ -220,27 +220,27 @@ func (d *Daemon) editCheck(ev harness.Event) string {
 	for _, rel := range rels {
 		s.warned[rel] = true
 	}
-	return editReason(strings.Join(rels, ", "), lines)
+	return editReason(lines)
 }
 
-// editReason tells an agent why its edit of file was turned back, and what to do about it. The other agents are
-// named as the hub's lines name them, quoted: their names and branches are theirs.
-func editReason(file string, lines []string) string {
+// editReason tells an agent why its edit was turned back, and what to do about it: which agent changes which of its
+// files, as the hub's lines say, quoted: their names, branches and paths are theirs.
+func editReason(lines []string) string {
 	var who []string
 	for _, l := range lines[:min(len(lines), 3)] {
-		w, _ := splitOverlap(l)
-		who = append(who, fmt.Sprintf("%q", w))
+		if w, files := splitOverlap(l); files != "" {
+			who = append(who, fmt.Sprintf("%q is also changing %q", w, files))
+		} else {
+			who = append(who, fmt.Sprintf("%q changes one of these files too", w))
+		}
 	}
-	list, verb := strings.Join(who, ", "), "is"
+	list := strings.Join(who, "; ")
 	if n := len(lines) - len(who); n > 0 {
-		list += fmt.Sprintf(" and %d more", n)
+		list += fmt.Sprintf("; and %d more", n)
 	}
-	if len(lines) > 1 {
-		verb = "are"
-	}
-	return fmt.Sprintf("Murmur: %s %s also changing %q, in another checkout of this repo. "+
-		"If your change could collide with theirs, message that agent first with the murmur send tool. "+
-		"Then make this edit again: it goes ahead.", list, verb, file)
+	return "Murmur: " + list + ", in another checkout of this repo. " +
+		"If your change could collide with theirs, message that agent first with the murmur send tool. " +
+		"Then make this edit again: it goes ahead."
 }
 
 // inCheckout is path relative to a checkout's top folder, as git names its files, when path is inside it. git gives

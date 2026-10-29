@@ -240,8 +240,10 @@ func (m *model) harmony(b *board, r *agentRef) []string {
 		}
 		_, other, _ := strings.Cut(o.Other, "/")
 		talked := false
-		if gr := b.groupOf(r); gr != nil {
-			talked = slices.ContainsFunc(gr.members, func(x *agentRef) bool { return x.addr == o.Other })
+		if gr := b.groupOf(r); gr != nil { // they talk to each other, as the header's harmony says, not only through others
+			i := slices.Index(gr.members, r)
+			j := slices.IndexFunc(gr.members, func(x *agentRef) bool { return x.addr == o.Other })
+			talked = j >= 0 && slices.ContainsFunc(gr.links, func(l link) bool { return l.a == min(i, j) && l.b == max(i, j) })
 		}
 		if talked {
 			out = append(out, st.fg.Render(g.inTune+" ")+st.fg.Render(path.Base(o.Files[0]))+st.dim.Render(" · talking with "+other))

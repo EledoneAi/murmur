@@ -19,6 +19,7 @@ import (
 	"github.com/EledoneAi/murmur/v2/internal/protocol"
 	"github.com/EledoneAi/murmur/v2/internal/release"
 	"github.com/EledoneAi/murmur/v2/internal/setup"
+	"github.com/EledoneAi/murmur/v2/internal/update"
 )
 
 // ---------------------------------------------------------------- local requests
@@ -83,9 +84,12 @@ func (d *Daemon) serve(c net.Conn) {
 		d.mu.Lock()
 		r := ipc.Reply{OK: true, State: d.state, Text: fmt.Sprintf("%d agent sessions", len(d.sessions)), Version: release.Version,
 			Update: d.available}
-		if v := config.FailedUpdate(); v != "" {
-			r.Text += "; the update to " + v + " failed and was undone (see daemon.log)"
-		} else if d.available != "" {
+		switch v := config.FailedUpdate(); {
+		case v != "":
+			r.Text += "; the update to " + v + " failed (daemon.log says why)"
+		case d.available != "" && update.Managed(config.Exe()) == "Nix":
+			r.Text += "; " + d.available + " is available: update your Nix configuration"
+		case d.available != "":
 			r.Text += "; " + d.available + " is available: murmur update"
 		}
 		d.mu.Unlock()
@@ -323,7 +327,8 @@ func (d *Daemon) send(req ipc.Request) ipc.Reply {
 	}
 	// into the outbox first: until the hub confirms it, it goes again with every reconnect
 	// the hub stamps its own time; this one is for the console while it sends, or once it failed
-	m := protocol.Msg{ID: protocol.RandomHex(8), From: from, To: req.To, Text: req.Text, At: time.Now().UnixMilli()}
+	m := protocol.Msg{ID: protocol.RandomHex(8), From: from, To: req.To, Text: req.Text, At: time.Now().UnixMilli(),
+		Topic: protocol.CleanTopic(req.Topic), Last: req.Last}
 	ch := make(chan protocol.Frame, 1)
 	d.acks[m.ID] = ch
 	d.outbox[m.ID] = outMsg{Msg: m, At: time.Now()}

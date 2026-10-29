@@ -169,7 +169,14 @@ func (m *model) threadScreen(b *board, room int) []line {
 		case m.snap.Failed[x.ID] != "":
 			status = st.thorn.Render(g.failed + " " + m.snap.Failed[x.ID])
 		}
-		add(spread(" "+st.dim.Render(at)+"  "+who(x.From)+" "+arrow+" "+who(x.To), status+"  ", m.w))
+		head := " " + st.dim.Render(at) + "  " + who(x.From) + " " + arrow + " " + who(x.To)
+		if x.Topic != "" {
+			head += st.dim.Render("  on " + fit(x.Topic, 30, g))
+		}
+		if x.Last { // its sender expects no answer: the two agents are no longer in touch
+			status = st.dim.Render("last message  ") + status
+		}
+		add(spread(head, status+"  ", m.w))
 		voice := st.italic
 		if !strings.Contains(x.From, "/") {
 			voice = st.fg
@@ -412,6 +419,8 @@ func (m *model) threadKey(b *board, k tea.KeyPressMsg) tea.Cmd {
 		}
 	case "[", "]":
 		m.switchThread(b, k.String() == "]")
+	case "?":
+		m.openSheet(sheetHelp, b)
 	case "ctrl+c":
 		return tea.Quit
 	}
@@ -441,6 +450,9 @@ func (m *model) switchThread(b *board, forward bool) {
 		return
 	}
 	i := slices.IndexFunc(b.groups, func(g *group) bool { return g.key == m.thread.group })
+	if i < 0 && !forward { // a lone agent's thread: ] goes to the first constellation, [ to the last
+		i = 0
+	}
 	if forward {
 		i = (i + 1) % len(b.groups)
 	} else {

@@ -325,8 +325,8 @@ oldest accepted version: the hub refuses older laptops, and they update themselv
 their person chose `off`.
 
 A laptop checks the release signature and each download's checksum, keeps its previous binary, and goes back to it
-if the new version doesn't reach the hub within a minute. Installs from Homebrew or Nix never replace themselves:
-their people run `brew upgrade murmur` or update their Nix configuration.
+if the new version doesn't reach the hub within a minute. An install from Homebrew updates through Homebrew, with
+no previous version to go back to; one from Nix never replaces itself: its people update their Nix configuration.
 
 Laptops never move to an older version because a hub says so, so rolling a hub back doesn't roll laptops back.
 

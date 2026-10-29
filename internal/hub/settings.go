@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/EledoneAi/murmur/v2/internal/store"
 )
@@ -127,7 +128,7 @@ func (s Settings) Valid() error {
 	if !slices.Contains([]string{"", "slack", "google-chat", "discord", "teams", "generic"}, s.ChatKind) {
 		return settingError{"chat_kind", fmt.Sprintf("chat kind %q: use slack, google-chat, discord, teams or generic", s.ChatKind)}
 	}
-	if len(s.Agreements) > 4000 {
+	if utf8.RuneCountInString(s.Agreements) > 4000 { // characters, as the admin form counts them
 		return settingError{"agreements", "the agreements are longer than 4000 characters: keep them to one page"}
 	}
 	if !slices.Contains([]string{"auto", "notify", "off"}, s.UpdatePolicy) {
