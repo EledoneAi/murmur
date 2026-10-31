@@ -269,6 +269,11 @@ func TestNamedAfterTheSession(t *testing.T) {
 	if got := nameOf("0905d316-e3c1-41cf"); got != "billing fix" {
 		t.Fatalf("its person's name became %q", got)
 	}
+	d.add(&session{id: "77aa0000-0000", name: "api work"}) // its person gave another session that name first
+	write("0905d316-e3c1-41cf", "api work", "")
+	if got := nameOf("0905d316-e3c1-41cf"); got != "api work-0905" {
+		t.Fatalf("a second %q took %q", "api work", got)
+	}
 }
 
 // join signs in again when the hub refuses this laptop's token, and only then.

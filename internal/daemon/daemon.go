@@ -336,7 +336,7 @@ func (d *Daemon) listedLocked(l harness.Lister, e harness.Session, key string) {
 	// its person didn't name is named after itself, never after a folder: it keeps its address wherever it works
 	switch {
 	case !e.Derived:
-		s.name = protocol.Clean(e.Name, false) // "" for a session Claude Code doesn't name (claude -p): shown nowhere
+		s.name = d.namedLocked(protocol.Clean(e.Name, false), e.ID, key) // "" for a session Claude Code doesn't name (claude -p): shown nowhere
 	case s.name == "":
 		s.name = d.autoNameLocked(e.Harness, e.ID, key)
 	}
@@ -373,6 +373,23 @@ func (d *Daemon) autoNameLocked(h, id, key string) string {
 			return name
 		}
 	}
+}
+
+// namedLocked keeps the name a person gave session key, unless another session on this laptop has it already: then
+// the name takes the first 4 hex digits of the id, so two sessions named alike keep two addresses and a message
+// reaches the one it was sent to. The session that had the name first keeps it.
+// ponytail: same laptop only, as autoNameLocked; the suffix goes once the other session ends.
+func (d *Daemon) namedLocked(name, id, key string) string {
+	if name == "" {
+		return ""
+	}
+	for k, s := range d.sessions {
+		if k != key && s.name == name {
+			short := strings.ReplaceAll(id, "-", "")
+			return protocol.Clean(name+"-"+short[:min(4, len(short))], false)
+		}
+	}
+	return name
 }
 
 // statusLocked records a session's new status. One that works again gets the notes it was spared while idle.
