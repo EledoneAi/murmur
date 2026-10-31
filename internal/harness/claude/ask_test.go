@@ -39,6 +39,7 @@ const (
 const fakeScript = `#!/bin/sh
 d=$(dirname "$0")
 basename "$0" > "$d/ran"
+echo run >> "$d/runs"
 printf '%s\0' "$@" > "$d/argv"
 env > "$d/env"
 pwd -P > "$d/cwd"
@@ -61,6 +62,10 @@ fi
 if [ -f "$d/orphan" ]; then
 	sleep 30 >/dev/null 2>&1 &
 	echo $! > "$d/child"
+fi
+if [ -f "$d/token-expired" ] && [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+	echo 'Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.' >&2
+	exit 1
 fi
 [ -f "$d/stderr" ] && cat "$d/stderr" >&2
 [ -f "$d/stdout" ] && cat "$d/stdout"
@@ -323,6 +328,37 @@ func TestAskTrustsOnlyTheSessionsProcess(t *testing.T) {
 
 // The copy's spending cap leaves room for a full cache write of the conversation and a few reads: only a runaway copy
 // reaches it.
+// A session that started with an access token which has expired since, as Claude Desktop's do after a few hours, is
+// copied once more without the token; a token that works is the one its copy uses, once.
+func TestAskSignsInAgainWithoutAnExpiredToken(t *testing.T) {
+	for _, expired := range []bool{true, false} {
+		t.Run(fmt.Sprint("expired ", expired), func(t *testing.T) {
+			dir := fakeClaude(t)
+			if expired {
+				leave(t, dir, "token-expired", "")
+			}
+			leave(t, dir, "stdout", answered+"\n")
+			pid := sessionProcess(t, "CLAUDE_CODE_OAUTH_TOKEN=session-oauth", "ANTHROPIC_BASE_URL=https://api.anthropic.com")
+			s := harness.Session{Harness: Name, ID: sessionID, PID: pid, Started: harness.StartTime(pid), Cwd: t.TempDir()}
+			a, err := Claude{}.Ask(context.Background(), s, harness.Question{From: "alice", Text: "?", Fork: forkID})
+			if err != nil || a.Text == "" {
+				t.Fatalf("answer %+v, error %v", a, err)
+			}
+			runs, _ := os.ReadFile(filepath.Join(dir, "runs"))
+			env, _ := os.ReadFile(filepath.Join(dir, "env"))
+			wantRuns, withToken := 1, true
+			if expired {
+				wantRuns, withToken = 2, false
+			}
+			if n := strings.Count(string(runs), "\n"); n != wantRuns ||
+				strings.Contains(string(env), "CLAUDE_CODE_OAUTH_TOKEN=session-oauth") != withToken ||
+				!strings.Contains(string(env), "ANTHROPIC_BASE_URL=https://api.anthropic.com") {
+				t.Fatalf("%d runs, want %d; the last copy's environment:\n%s", n, wantRuns, env)
+			}
+		})
+	}
+}
+
 func TestBudget(t *testing.T) {
 	for tokens, want := range map[int]string{0: "35.00", -1: "35.00", 20_000: "5.00", 200_000: "7.00", 1_000_000: "35.00"} {
 		if got := budget(tokens); got != want {
