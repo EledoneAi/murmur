@@ -118,7 +118,6 @@ func (Claude) Ask(ctx context.Context, s harness.Session, q harness.Question) (h
 		return harness.Answer{}, errNoClaude
 	}
 	mine := userSettings()
-	env := copyEnv(os.Environ(), session, known)
 	tried := filepath.Join(config.Dir(), "btw-"+q.Fork+".tried")
 	settingsFile, err := writeSettings(q.Fork, copySettings(mine, tried))
 	if err != nil {
@@ -127,6 +126,26 @@ func (Claude) Ask(ctx context.Context, s harness.Session, q harness.Question) (h
 	defer os.Remove(settingsFile)
 	defer os.Remove(tried)
 
+	a, err := runCopy(ctx, s, q, command, copyEnv(os.Environ(), session, known), settingsFile, tried, mine)
+	// A process's environment is the one it started with. Claude Desktop starts its sessions with an access token that
+	// expires within hours and refreshes it another way, so the copy of a session older than that signs in with an
+	// expired token: once more without it, signing in as Claude Code would with none (the keychain, its person's
+	// settings). A token that works, such as one from claude setup-token, is still the one the copy uses.
+	if errors.Is(err, harness.ErrSignIn) && slices.ContainsFunc(session, oauthToken) {
+		took := a.Took
+		_ = os.Remove(tried)
+		a, err = runCopy(ctx, s, q, command, copyEnv(os.Environ(), slices.DeleteFunc(slices.Clone(session), oauthToken), known),
+			settingsFile, tried, mine)
+		a.Took += took
+	}
+	return a, err
+}
+
+func oauthToken(kv string) bool { return strings.HasPrefix(kv, "CLAUDE_CODE_OAUTH_TOKEN=") }
+
+// runCopy runs one copy of session s with env, and reads its answer.
+func runCopy(ctx context.Context, s harness.Session, q harness.Question, command, env []string, settingsFile, tried string,
+	mine settingsOfMine) (harness.Answer, error) {
 	args := append(slices.Clone(command[1:]), "-p", "--resume", s.ID, "--fork-session", "--session-id", q.Fork,
 		"--no-session-persistence", "--setting-sources", "", "--settings", settingsFile,
 		"--permission-mode", "dontAsk", "--permission-prompts", "none", "--output-format", "json",
@@ -142,7 +161,7 @@ func (Claude) Ask(ctx context.Context, s harness.Session, q harness.Question) (h
 	cmd.WaitDelay = 2 * time.Second
 
 	start := time.Now()
-	err = cmd.Run()
+	err := cmd.Run()
 	took := time.Since(start)
 	if cmd.Process != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
