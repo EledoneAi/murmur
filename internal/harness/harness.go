@@ -158,7 +158,8 @@ type Event struct {
 	// session may leave with it. Some harnesses ignore what some of their hooks print.
 	Carries bool `json:"carries,omitempty"`
 	// Sub says a subagent of the session makes the call, which may work in a checkout of its own: it doesn't say
-	// where the session works.
+	// where the session works. Antigravity's subagents call under conversations of their own, which the daemon
+	// doesn't know: those it leaves out.
 	Sub bool `json:"sub,omitempty"`
 }
 

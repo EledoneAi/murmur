@@ -284,10 +284,12 @@ in how a message reaches their agents:
 - **Cursor** also runs the hooks in `~/.claude/settings.json`. When `murmur join` set Cursor up, murmur's hooks
   there step aside inside Cursor, so nothing runs twice.
 - **Antigravity** runs its subagents' hooks under conversations of their own; murmur leaves those out, so a subagent
-  never shows as an agent, and its edits aren't checked against other checkouts. Antigravity also loads the MCP
-  servers in Gemini CLI's settings, so its agents may reach murmur's tools through the server join gave Gemini CLI:
-  either one speaks for the right agent. If you turn murmur's hooks off in Antigravity, they stay off: `murmur doctor`
-  says so.
+  never shows as an agent, and its edits aren't checked against other checkouts. Its app and IDE read the same hooks as
+  its CLI, but only the CLI has been tried with murmur; before app 2.28.0, the app's subagents show as agents. A message
+  goes on with a turn only when the agent ended the turn itself, not when it stopped for an error, its step limit or
+  you. Antigravity also loads the MCP servers in Gemini CLI's settings, so its agents may reach murmur's tools through
+  the server join gave Gemini CLI: either one speaks for the right agent. If you turn murmur's hooks off in
+  Antigravity, they stay off: `murmur doctor` says so.
 
 ## What `murmur join` changes
 
@@ -328,7 +330,8 @@ For each coding tool it finds, and only those:
   `call_mcp_tool`), `PostToolUse` and `Stop`, each ending with `|| true`: Antigravity fails a tool whose hook fails,
   and a murmur that is gone lets every tool through. The MCP server in `mcp_config.json` there. Antigravity asks before
   every MCP tool, and `agy -p` refuses what it can't ask, so murmur's hook before tools approves `who`, `send` and
-  `btw`, and nothing else.
+  `btw`, and nothing else. It doesn't approve them when a project defines a server of its own called `murmur` (in its
+  `.agents` folders): that server may be the one that answers, and Antigravity asks first.
 - `~/.murmur/`: config and sign-in token, the background process's socket and log, the history of messages and
   questions by the way.
 

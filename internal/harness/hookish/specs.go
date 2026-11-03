@@ -1,9 +1,12 @@
 package hookish
 
 import (
+	"cmp"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/EledoneAi/murmur/v2/internal/config"
 	"github.com/EledoneAi/murmur/v2/internal/harness"
@@ -119,6 +122,76 @@ var Antigravity = &Spec{
 	mcpEntry:   func(exe string) map[string]any { return mcpArgs(exe, "antigravity") },
 	allowTools: []string{"mcp__murmur__who", "mcp__murmur__send", "mcp__murmur__btw"},
 	minVersion: "1.4.7", // Stop hooks that run (1.1.10), lastUserInput, which tells a subagent's hooks apart (1.4.7)
+}
+
+// projectMurmur says whether a project defines an MCP server of its own called murmur, where Antigravity looks for a
+// workspace folder's: .agents, or another spelling of it, in the folder and each folder above it up to the root of its
+// repository, and the personal folder its .gemini/config.json names. Two servers of one name don't both run, and the
+// one that answers may be the project's: murmur's hook then doesn't approve its tools, and Antigravity asks first. A
+// server that runs this murmur binary is murmur's, as a test laptop's is.
+func projectMurmur(roots []string) bool {
+	self, err := os.Executable()
+	if err != nil {
+		return true
+	}
+	for _, root := range roots {
+		var dirs []string
+		top := "" // the root of the folder's repository
+		for d := root; ; {
+			dirs = append(dirs, d)
+			if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+				top = d
+				break
+			}
+			up := filepath.Dir(d)
+			if up == d {
+				dirs = dirs[:1] // outside a repository, Antigravity reads the workspace folder alone
+				break
+			}
+			d = up
+		}
+		var files []string
+		for _, d := range dirs {
+			for _, name := range []string{".agents", ".agent", "_agents", "_agent"} {
+				files = append(files, filepath.Join(d, name, "mcp_config.json"))
+			}
+		}
+		if top != "" {
+			o, _, _ := harness.ReadObject(filepath.Join(top, ".gemini", "config.json"))
+			var personal string
+			_ = json.Unmarshal(o.Get("personal_customization_dir"), &personal)
+			if user := cmp.Or(os.Getenv("USER"), os.Getenv("USERNAME")); personal != "" {
+				files = append(files, filepath.Join(top, strings.ReplaceAll(personal, "{user}", user), ".agents", "mcp_config.json"))
+			}
+		}
+		for _, f := range files {
+			if theirs(f, self) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// theirs says whether an MCP config file defines a server called murmur that doesn't run the murmur binary self.
+func theirs(file, self string) bool {
+	o, _, err := harness.ReadObject(file)
+	server := o.Sub("mcpServers").Get("murmur")
+	if err != nil || server == nil {
+		return false
+	}
+	var e struct {
+		Command, ServerURL, URL string
+		Args                    []string
+	}
+	_ = json.Unmarshal(server, &e)
+	if e.ServerURL != "" || e.URL != "" || len(e.Args) == 0 || e.Args[0] != "mcp" || !filepath.IsAbs(e.Command) && strings.Contains(e.Command, "/") {
+		return true
+	}
+	cmd, err := exec.LookPath(e.Command)
+	a, err1 := os.Stat(cmd)
+	b, err2 := os.Stat(self)
+	return err != nil || err1 != nil || err2 != nil || !os.SameFile(a, b)
 }
 
 // Copilot CLI: a hooks file of murmur's own in ~/.copilot/hooks. Its PascalCase events take Claude Code's input and

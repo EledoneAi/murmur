@@ -1,6 +1,7 @@
 package hookish
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -192,14 +193,120 @@ func TestAntigravityInput(t *testing.T) {
 		`"ToolName":"who"}},`+common+`}`); ev.Tool != "mcp__murmur__who" {
 		t.Fatalf("murmur's who: %+v", ev)
 	}
-	// a subagent's hooks name its own conversation and no prompt: murmur leaves them out
-	if ev := parse(t, Antigravity, harness.Start, `{"conversationId":"b0f8f21b","workspacePaths":["/repo"],"lastUserInput":""}`); ev.Kind != "" {
+	// a subagent's hooks name its own conversation and no prompt: the daemon leaves them out, and the hook still
+	// approves murmur's tools for it
+	if ev := parse(t, Antigravity, harness.Start, `{"conversationId":"b0f8f21b","workspacePaths":["/repo"],"lastUserInput":""}`); !ev.Sub || ev.SessionID != "b0f8f21b" {
 		t.Fatalf("subagent: %+v", ev)
 	}
-	// before 1.4.7, hooks had no lastUserInput: each one speaks for its conversation
-	if ev := parse(t, Antigravity, harness.Stop, `{"conversationId":"c1","workspacePaths":["/repo"],"executionNum":0,"terminationReason":"NO_TOOL_CALL",`+
-		`"fullyIdle":true}`); ev.Kind != harness.Stop || ev.SessionID != "c1" || !ev.Carries {
-		t.Fatalf("stop: %+v", ev)
+	ev := parse(t, Antigravity, harness.BeforeTool, `{"conversationId":"b0f8f21b","workspacePaths":["/repo"],"lastUserInput":"",`+
+		`"toolCall":{"name":"call_mcp_tool","args":{"Arguments":{},"ServerName":"murmur","ToolName":"who"}}}`)
+	if got := string(Antigravity.Answer(ev, "")); !ev.Sub || got != `{"decision":"auto_approve"}`+"\n" {
+		t.Fatalf("subagent's who: %+v %q", ev, got)
+	}
+	if ev := parse(t, Antigravity, harness.Prompt, `{"conversationId":"c1","workspacePaths":["/repo"],"lastUserInput":"go on"}`); ev.Sub {
+		t.Fatalf("its person's session: %+v", ev)
+	}
+	// messages go on with a turn only when the model ended it and nothing it started still runs; before 1.4.7, hooks
+	// had no lastUserInput, and each one speaks for its conversation
+	for stop, carries := range map[string]bool{
+		`"terminationReason":"NO_TOOL_CALL","fullyIdle":true,"error":""`: true,
+		`"terminationReason":"model_stop","fullyIdle":true`:              true,
+		`"terminationReason":"NO_TOOL_CALL","fullyIdle":false`:           false, // a command still runs in the background
+		`"terminationReason":"max_steps_exceeded","fullyIdle":true`:      false,
+		`"terminationReason":"error","fullyIdle":true,"error":"quota"`:   false,
+		`"terminationReason":"USER_CANCELLED","fullyIdle":true`:          false,
+		`"fullyIdle":true`: false,
+	} {
+		ev := parse(t, Antigravity, harness.Stop, `{"conversationId":"c1","workspacePaths":["/repo"],"executionNum":0,`+stop+`}`)
+		if ev.Kind != harness.Stop || ev.SessionID != "c1" || ev.Sub || ev.Carries != carries {
+			t.Errorf("stop %s: %+v", stop, ev)
+		}
+	}
+}
+
+// A project may define an MCP server of its own called murmur, which may be the one that answers Antigravity's calls
+// to murmur: those keep Antigravity's name, and murmur's hook doesn't approve them. Antigravity reads a project's
+// .agents (or .agent, _agents, _agent) from the workspace folder up to the root of its repository, and the personal
+// folder the repository names. A server that runs this murmur binary is murmur's.
+func TestAntigravityProjectServer(t *testing.T) {
+	sandbox(t)
+	self, _ := os.Executable()
+	repo := t.TempDir()
+	work := filepath.Join(repo, "services", "api")
+	_ = os.MkdirAll(filepath.Join(repo, ".git"), 0o755)
+	_ = os.MkdirAll(work, 0o755)
+	call := `{"conversationId":"c1","workspacePaths":[` + string(harness.Marshal(work)) + `],"lastUserInput":"hi",` +
+		`"toolCall":{"name":"call_mcp_tool","args":{"Arguments":{"to":"bob","text":"hi"},"ServerName":"murmur","ToolName":"send"}}}`
+	approved := func() bool {
+		return Antigravity.Answer(parse(t, Antigravity, harness.BeforeTool, call), "") != nil
+	}
+	server := func(dir string, entry any) {
+		_ = os.MkdirAll(dir, 0o755)
+		_ = os.WriteFile(filepath.Join(dir, "mcp_config.json"), harness.Marshal(map[string]any{"mcpServers": map[string]any{"murmur": entry}}), 0o644)
+	}
+	if !approved() {
+		t.Fatal("no project server: murmur's tool isn't approved")
+	}
+	ours := map[string]any{"command": self, "args": []string{"mcp", "antigravity"}}
+	for _, theirs := range []any{
+		map[string]any{"serverUrl": "https://mcp.example.com/mcp/"},
+		map[string]any{"command": "./tools/murmur", "args": []string{"mcp", "antigravity"}},
+		map[string]any{"command": "/bin/sh", "args": []string{"mcp"}},
+		map[string]any{"command": self, "args": []string{"send", "bob", "hi"}},
+	} {
+		for _, dir := range []string{filepath.Join(work, ".agents"), filepath.Join(repo, "_agent")} {
+			server(dir, theirs)
+			if approved() {
+				t.Errorf("%s holds %v: approved", dir, theirs)
+			}
+			server(dir, ours)
+			if !approved() {
+				t.Errorf("%s holds murmur's own server: not approved", dir)
+			}
+		}
+	}
+	_ = os.MkdirAll(filepath.Join(repo, ".gemini"), 0o755)
+	_ = os.WriteFile(filepath.Join(repo, ".gemini", "config.json"), []byte(`{"personal_customization_dir": "people/{user}"}`), 0o644)
+	t.Setenv("USER", "alex")
+	if server(filepath.Join(repo, "people", "alex", ".agents"), map[string]any{"serverUrl": "https://x.example/mcp"}); approved() {
+		t.Error("the person's folder in the repository holds another murmur: approved")
+	}
+	// outside a repository, Antigravity reads the workspace folder alone
+	outside := t.TempDir()
+	server(filepath.Join(outside, ".agents"), map[string]any{"serverUrl": "https://x.example/mcp"})
+	inner := filepath.Join(outside, "app")
+	_ = os.MkdirAll(inner, 0o755)
+	if ev := parse(t, Antigravity, harness.BeforeTool, strings.Replace(call, string(harness.Marshal(work)), string(harness.Marshal(inner)), 1)); ev.Tool != "mcp__murmur__send" {
+		t.Errorf("a folder above a workspace that isn't in a repository: %+v", ev)
+	}
+}
+
+// A person may put a hook of theirs in murmur's block: setting up again and uninstall leave it, with the block.
+func TestAntigravityTheirHookInOurBlock(t *testing.T) {
+	sandbox(t)
+	Antigravity.Connect("/opt/murmur", nil)
+	o, b, _ := harness.ReadObject(Antigravity.hooksPath())
+	block := o.Sub("murmur")
+	var stop []json.RawMessage
+	_ = json.Unmarshal(block.Get("Stop"), &stop)
+	stop = append(stop, harness.Marshal(map[string]any{"type": "command", "command": "./notify.sh"}))
+	block = block.Set("Stop", harness.Marshal(stop)).Set("note", json.RawMessage(`"mine"`))
+	_ = harness.WriteObject(Antigravity.hooksPath(), b, o.PutSub("murmur", block), true)
+
+	Antigravity.Connect("/usr/local/bin/murmur", nil)
+	o, _, _ = harness.ReadObject(Antigravity.hooksPath())
+	if got := string(o.Sub("murmur").Get("Stop")); !strings.Contains(got, "/usr/local/bin/murmur hook antigravity stop") ||
+		!strings.Contains(got, "./notify.sh") || string(o.Sub("murmur").Get("note")) != `"mine"` || strings.Contains(read(t, Antigravity.hooksPath()), "/opt/murmur") {
+		t.Fatalf("set up again:\n%s", read(t, Antigravity.hooksPath()))
+	}
+	if err := Antigravity.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	o, _, _ = harness.ReadObject(Antigravity.hooksPath())
+	var left bytes.Buffer
+	_ = json.Compact(&left, o.Sub("murmur").Bytes())
+	if got := left.String(); got != `{"Stop":[{"command":"./notify.sh","type":"command"}],"note":"mine"}` {
+		t.Fatalf("after uninstall: %s", got)
 	}
 }
 

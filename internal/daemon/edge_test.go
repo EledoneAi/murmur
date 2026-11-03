@@ -264,6 +264,40 @@ func TestHookWithoutAProcess(t *testing.T) {
 	}
 }
 
+// An Antigravity subagent's hooks name a conversation of its own: it adds no agent and hears nothing, not even the
+// brief. Its person's session, once known, counts its events though they look like a subagent's (a prompt that is
+// only an image, say).
+func TestSubagentConversationAddsNoAgent(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir())
+	d := newDaemon("alice")
+	d.loadHistory()
+	defer d.hist.Close()
+	cwd := t.TempDir()
+	hook := func(kind, id string, sub bool) string {
+		text, _ := d.onHook(harness.Event{Kind: kind, Harness: "antigravity", SessionID: id, PID: os.Getpid(), Cwd: cwd, Carries: true, Sub: sub})
+		return text
+	}
+	for _, kind := range []string{harness.Start, harness.Prompt, harness.BeforeTool, harness.Stop} {
+		if text := hook(kind, "sub1", true); text != "" {
+			t.Fatalf("a subagent's %s: %q", kind, text)
+		}
+	}
+	d.mu.Lock()
+	n := len(d.sessions)
+	d.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("a subagent made %d sessions", n)
+	}
+	hook(harness.Start, "root", false)
+	hook(harness.Prompt, "root", true)
+	d.mu.Lock()
+	s := d.sessions[harness.Key("antigravity", "root")]
+	d.mu.Unlock()
+	if s == nil || s.status != protocol.StatusBusy {
+		t.Fatalf("its person's session, after a prompt with no text: %+v", s)
+	}
+}
+
 // A note murmur held for an idle agent whose session then ended doesn't reach the next session that takes its name.
 func TestHeldNoteStaysWithItsSession(t *testing.T) {
 	t.Setenv("MURMUR_HOME", t.TempDir())

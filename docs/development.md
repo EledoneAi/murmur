@@ -51,7 +51,10 @@ A build from source refuses to join without `MURMUR_HOME`, and leaves alone each
 set: join writes the binary's path into the tools' settings. OpenCode loads `OPENCODE_CONFIG_DIR` besides its own
 folder, so a test laptop's OpenCode also loads plugins from your own. Antigravity has no setting for its folder:
 `MURMUR_ANTIGRAVITY_DIR` is murmur's, and puts the test laptop's hooks in `.dev/antigravity/.agents`, which Antigravity
-reads for a project in `.dev/antigravity` as it reads `~/.gemini/config` for every project. Run `agy` there.
+reads for a project in `.dev/antigravity` as it reads `~/.gemini/config` for every project. Run `agy` there, and trust
+the folder when it asks. It still loads your own `~/.gemini/config` too: if your own murmur set Antigravity up, its
+hooks and MCP server run beside the test laptop's. Agents in other checkouts don't get the test laptop's hooks unless
+those checkouts have the same `.agents` folder.
 
 In that shell:
 

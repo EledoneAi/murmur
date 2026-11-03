@@ -186,11 +186,12 @@ func (s *Spec) editHooks(exe string, add bool) error {
 	if err != nil {
 		return err
 	}
+	key := "hooks" // the hooks of every event, or murmur's own block of them, where the person may add theirs too
 	if s.layout == named {
-		return s.editBlock(path, o, b, exe, add)
+		key = "murmur"
 	}
 	found, mine := false, harness.Object{}
-	hooks := o.Sub("hooks")
+	hooks := o.Sub(key)
 	for _, h := range s.hooks {
 		var entries []json.RawMessage
 		_ = json.Unmarshal(hooks.Get(h.event), &entries)
@@ -210,7 +211,10 @@ func (s *Spec) editHooks(exe string, add bool) error {
 	if !add && !found {
 		return nil
 	}
-	o = o.PutSub("hooks", hooks)
+	if s.layout == named && !add && len(hooks) == 1 && hooks.Get("enabled") != nil {
+		hooks = nil // the block held murmur's hooks alone, and whether the person turned them off
+	}
+	o = o.PutSub(key, hooks)
 	if s.layout == flat {
 		switch {
 		case add && o.Get("version") == nil:
@@ -220,39 +224,15 @@ func (s *Spec) editHooks(exe string, add bool) error {
 		}
 	}
 	if err := harness.WriteObject(path, b, o, add); errors.Is(err, harness.ErrComments) {
-		return byHand(path, add, map[string]any{"hooks": json.RawMessage(mine.Bytes())})
+		return byHand(path, add, map[string]any{key: json.RawMessage(mine.Bytes())})
 	} else if err != nil {
 		return err
 	}
 	return nil
 }
 
-// editBlock adds (or with add=false removes) murmur's block in a file of named blocks, after the person's own. The
-// person may turn murmur's hooks off in the harness, which sets enabled on the block: that stays, or the setup after
-// an update would turn them on again.
-func (s *Spec) editBlock(path string, o harness.Object, b []byte, exe string, add bool) error {
-	old := o.Sub("murmur")
-	if !add && !harness.HasOurs(old) {
-		return nil
-	}
-	var block harness.Object
-	if add {
-		if enabled := old.Get("enabled"); enabled != nil {
-			block = block.Set("enabled", enabled)
-		}
-		for _, h := range s.hooks {
-			block = block.Set(h.event, harness.Marshal([]json.RawMessage{s.entry(exe, h)}))
-		}
-	}
-	if err := harness.WriteObject(path, b, o.PutSub("murmur", block), add); errors.Is(err, harness.ErrComments) {
-		return byHand(path, add, map[string]any{"murmur": json.RawMessage(block.Bytes())})
-	} else if err != nil {
-		return err
-	}
-	return nil
-}
-
-// off says whether the person turned murmur's block of hooks off in the harness.
+// off says whether the person turned murmur's block of hooks off in the harness, with enabled: false on it, which
+// setting up again leaves as it is.
 func (s *Spec) off() bool {
 	o, _, _ := harness.ReadObject(s.hooksPath())
 	return s.layout == named && string(o.Sub("murmur").Get("enabled")) == "false"
@@ -492,7 +472,14 @@ type hookInput struct {
 		Args json.RawMessage `json:"args"`
 	} `json:"toolCall"`
 	LastInput *string `json:"lastUserInput"` // its person's last prompt, "" in a subagent's hooks
+	Ended     string  `json:"terminationReason"`
+	FullyIdle bool    `json:"fullyIdle"` // at the end of a turn, nothing the agent started still runs
+	Error     string  `json:"error"`
 }
+
+// normalEnds are Antigravity's reasons for the end of a turn its model ended, as its docs and agy 1.4.12 name them.
+// Only then does the turn go on with messages waiting: not when it stopped for an error, its step limit or its person.
+var normalEnds = map[string]bool{"model_stop": true, "no_tool_call": true}
 
 // claudeKinds are the events of murmur's Claude Code hooks, which Cursor runs too.
 var claudeKinds = map[string]string{"start": harness.Start, "edit": harness.BeforeTool, "notify": harness.Needs}
@@ -503,11 +490,6 @@ func (s *Spec) Parse(event string, stdin []byte) (harness.Event, error) {
 	var in hookInput
 	if err := json.Unmarshal(stdin, &in); err != nil {
 		return harness.Event{}, err
-	}
-	if s.dialect == antigravityStyle && in.LastInput != nil && *in.LastInput == "" {
-		// a subagent's: it names a conversation of its own, which would show as another agent, and nothing of its
-		// parent's. Its parent's hooks speak for the session, and its MCP calls name the parent's conversation
-		return harness.Event{}, nil
 	}
 	kind := event
 	if k, ok := claudeKinds[event]; ok {
@@ -525,7 +507,16 @@ func (s *Spec) Parse(event string, stdin []byte) (harness.Event, error) {
 			ev.Carries = h.carries
 		}
 	}
-	if roots := append(in.Roots, in.Workspaces...); ev.Cwd == "" && len(roots) > 0 {
+	if s.dialect == antigravityStyle {
+		// a subagent's hooks name a conversation of its own, with nothing of its parent's: the daemon takes in no
+		// session from them, but the hook still answers for murmur's tools
+		ev.Sub = in.LastInput != nil && *in.LastInput == ""
+		if kind == harness.Stop && (!normalEnds[strings.ToLower(in.Ended)] || !in.FullyIdle || in.Error != "") {
+			ev.Carries = false
+		}
+	}
+	roots := append(in.Roots, in.Workspaces...)
+	if ev.Cwd == "" && len(roots) > 0 {
 		ev.Cwd = roots[0]
 	}
 	input := in.Input
@@ -540,7 +531,9 @@ func (s *Spec) Parse(event string, stdin []byte) (harness.Event, error) {
 			ServerName, ToolName string
 			Arguments            json.RawMessage
 		}
-		if json.Unmarshal(input, &c) == nil && c.ServerName != "" && c.ToolName != "" {
+		// a server called murmur that a project defines may be the one that answers: its calls keep Antigravity's
+		// name, so murmur's hook neither approves them nor counts them as murmur's
+		if json.Unmarshal(input, &c) == nil && c.ServerName != "" && c.ToolName != "" && (c.ServerName != "murmur" || !projectMurmur(roots)) {
 			ev.Tool, input = "mcp__"+c.ServerName+"__"+c.ToolName, c.Arguments
 		}
 	}
