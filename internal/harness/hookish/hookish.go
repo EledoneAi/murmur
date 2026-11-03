@@ -1,8 +1,9 @@
-// Package hookish connects the harnesses whose hooks copied Claude Code's: Codex, Gemini CLI, GitHub Copilot CLI and
-// Cursor. Each is a Spec, a row of a table: where its settings are, which of its events murmur hooks and what they
-// mean, how its hooks answer, and where its MCP server is registered. None of them lists its live sessions or takes
-// a message while a session runs, so murmur learns their sessions from the hooks, and messages leave with the answers
-// of the hooks whose output the harness reads: after a tool call, at the end of a turn, or with the next prompt.
+// Package hookish connects the harnesses whose hooks copied Claude Code's: Codex, Gemini CLI, GitHub Copilot CLI,
+// Cursor and Antigravity. Each is a Spec, a row of a table: where its settings are, which of its events murmur hooks
+// and what they mean, how its hooks answer, and where its MCP server is registered. None of them lists its live
+// sessions or takes a message while a session runs, so murmur learns their sessions from the hooks, and messages
+// leave with the answers of the hooks whose output the harness reads: after a tool call, at the end of a turn, or
+// with the next prompt.
 package hookish
 
 import (
@@ -38,6 +39,7 @@ type Spec struct {
 	mcpEntry    func(exe string) map[string]any
 	sessionVar  string
 	apart       bool     // its MCP servers run in another process than its sessions
+	failsTools  bool     // a hook that fails fails its tool: murmur's end with || true, so a murmur that is gone lets tools through
 	allowTools  []string // murmur's tools as the harness names them, which its before-tool hook lets through
 	minVersion  string   // the oldest version whose hooks do what murmur needs
 	note        string   // what join tells its person to do once
@@ -71,16 +73,20 @@ const (
 	groups  layout = iota // Claude Code's: {hooks: {Event: [{matcher, hooks: [{type, command, timeout}]}]}} (Codex, Gemini)
 	ownFile               // a file of murmur's own, {version: 1, hooks: {event: [{type, bash, timeoutSec}]}} (Copilot)
 	flat                  // {version: 1, hooks: {event: [{command, matcher, timeout}]}}, shared with the person's own (Cursor)
+	// a block of murmur's own in a file of named blocks, {murmur: {Event: [{type, command, timeout}]}}, its tool
+	// events' handlers in Claude Code's groups (Antigravity)
+	named
 )
 
 // dialect is how a harness reads what its hooks print.
 type dialect int
 
 const (
-	claudeStyle  dialect = iota // Claude Code's: hookSpecificOutput, and decision: block at the end of a turn (Codex)
-	geminiStyle                 // decision: deny with a reason, hookSpecificOutput for context (Gemini CLI)
-	copilotStyle                // Claude Code's fields at the top level, and under hookSpecificOutput too (Copilot CLI)
-	cursorStyle                 // snake_case: additional_context, permission, agent_message, followup_message (Cursor)
+	claudeStyle      dialect = iota // Claude Code's: hookSpecificOutput, and decision: block at the end of a turn (Codex)
+	geminiStyle                     // decision: deny with a reason, hookSpecificOutput for context (Gemini CLI)
+	copilotStyle                    // Claude Code's fields at the top level, and under hookSpecificOutput too (Copilot CLI)
+	cursorStyle                     // snake_case: additional_context, permission, agent_message, followup_message (Cursor)
+	antigravityStyle                // injectSteps, decision: deny before a tool and continue at the end of a turn (Antigravity)
 )
 
 func (s *Spec) Name() string       { return s.name }
@@ -115,14 +121,21 @@ func (s *Spec) Holds() bool {
 	return false
 }
 
-// commandFor is murmur's command for one of its hooks. Copilot refuses a tool when its before-tool hook fails, so its
-// hooks never fail: a murmur that is gone lets every tool through.
+// commandFor is murmur's command for one of its hooks.
 func (s *Spec) commandFor(exe string, h hook) string {
 	cmd := harness.ShellQuote(exe) + " hook " + s.name + " " + h.kind
-	if s.layout == ownFile {
+	if s.failsTools {
 		cmd += " || true"
 	}
 	return cmd
+}
+
+// ours is the object of a hooks file that holds murmur's hooks: its block, or the hooks of every event.
+func (s *Spec) ours(o harness.Object) harness.Object {
+	if s.layout == named {
+		return o.Sub("murmur")
+	}
+	return o.Sub("hooks")
 }
 
 // events lists the events murmur hooks, for people.
@@ -144,7 +157,7 @@ func byHand(path string, add bool, what any) error {
 
 func (s *Spec) jsonHasOurs() bool {
 	o, _, err := harness.ReadObject(s.hooksPath())
-	return err == nil && harness.HasOurs(o.Sub("hooks"))
+	return err == nil && harness.HasOurs(s.ours(o))
 }
 
 // editHooks adds (or with add=false removes) murmur's hooks in the harness's hooks file. A hook of murmur's is
@@ -173,8 +186,12 @@ func (s *Spec) editHooks(exe string, add bool) error {
 	if err != nil {
 		return err
 	}
+	key := "hooks" // the hooks of every event, or murmur's own block of them, where the person may add theirs too
+	if s.layout == named {
+		key = "murmur"
+	}
 	found, mine := false, harness.Object{}
-	hooks := o.Sub("hooks")
+	hooks := o.Sub(key)
 	for _, h := range s.hooks {
 		var entries []json.RawMessage
 		_ = json.Unmarshal(hooks.Get(h.event), &entries)
@@ -194,7 +211,10 @@ func (s *Spec) editHooks(exe string, add bool) error {
 	if !add && !found {
 		return nil
 	}
-	o = o.PutSub("hooks", hooks)
+	if s.layout == named && !add && len(hooks) == 1 && hooks.Get("enabled") != nil {
+		hooks = nil // the block held murmur's hooks alone, and whether the person turned them off
+	}
+	o = o.PutSub(key, hooks)
 	if s.layout == flat {
 		switch {
 		case add && o.Get("version") == nil:
@@ -204,11 +224,18 @@ func (s *Spec) editHooks(exe string, add bool) error {
 		}
 	}
 	if err := harness.WriteObject(path, b, o, add); errors.Is(err, harness.ErrComments) {
-		return byHand(path, add, map[string]any{"hooks": json.RawMessage(mine.Bytes())})
+		return byHand(path, add, map[string]any{key: json.RawMessage(mine.Bytes())})
 	} else if err != nil {
 		return err
 	}
 	return nil
+}
+
+// off says whether the person turned murmur's block of hooks off in the harness, with enabled: false on it, which
+// setting up again leaves as it is.
+func (s *Spec) off() bool {
+	o, _, _ := harness.ReadObject(s.hooksPath())
+	return s.layout == named && string(o.Sub("murmur").Get("enabled")) == "false"
 }
 
 // entry is murmur's entry for one event in a shared hooks file.
@@ -218,9 +245,12 @@ func (s *Spec) entry(exe string, h hook) json.RawMessage {
 		handler["async"] = true
 	}
 	var e map[string]any
-	if s.layout == flat {
+	switch {
+	case s.layout == flat:
 		e = map[string]any{"command": handler["command"], "timeout": handler["timeout"]}
-	} else {
+	case s.layout == named && h.kind != harness.BeforeTool && h.kind != harness.AfterTool:
+		return harness.Marshal(handler) // Antigravity's other events take their handlers as they are, with no matcher
+	default:
 		e = map[string]any{"hooks": []any{handler}}
 	}
 	if h.matcher != "" {
@@ -300,6 +330,9 @@ func (s *Spec) Connect(exe string, _ func(string) bool) []protocol.Check {
 	if s.note != "" {
 		checks = append(checks, protocol.Check{Name: "Next", Detail: s.note})
 	}
+	if s.off() { // the person's choice, which setting up again after an update doesn't count as a failure
+		checks = append(checks, protocol.Check{Name: "Next", Detail: offFix})
+	}
 	if s.tomlFile != "" && codexInline(s) {
 		checks = append(checks, protocol.Check{Name: "Next", Detail: "you keep Codex hooks in " + config.Tildify(s.tomlPath()) +
 			", and murmur's are in hooks.json: Codex warns that both are in use until one holds them all"})
@@ -325,13 +358,18 @@ func (s *Spec) Disconnect(string) error {
 	return err
 }
 
+// offFix is what to do when the person turned murmur's hooks off in Antigravity.
+const offFix = "murmur's hooks are turned off in Antigravity: turn them on in /hooks, or in the app's Settings > Customizations > Hooks"
+
 func (s *Spec) Checks() []protocol.Check {
 	fix := "missing: run murmur join"
 	current := s.Connected()
-	if o, _, err := harness.ReadObject(s.hooksPath()); err == nil && harness.HasOld(o.Sub("hooks")) {
+	if o, _, err := harness.ReadObject(s.hooksPath()); err == nil && harness.HasOld(s.ours(o)) {
 		current, fix = false, "an older murmur's, which this version doesn't run: run murmur join, then restart your sessions"
-	} else if gone := harness.Gone(o.Sub("hooks")); gone != "" {
+	} else if gone := harness.Gone(s.ours(o)); gone != "" {
 		current, fix = false, "they run "+config.Tildify(gone)+", which isn't there any more: run murmur join"
+	} else if current && s.off() {
+		current, fix = false, offFix
 	}
 	checks := []protocol.Check{
 		harness.Check(current, "Hooks", s.events()+" in "+config.Tildify(s.hooksPath()), fix),
@@ -425,7 +463,23 @@ type hookInput struct {
 	Input        json.RawMessage `json:"tool_input"`
 	Args         string          `json:"toolArgs"` // Copilot's camelCase events: the arguments as a JSON string
 	Type         string          `json:"notification_type"`
+	// Antigravity's
+	ConversationID string   `json:"conversationId"`
+	Workspaces     []string `json:"workspacePaths"`
+	TranscriptPath string   `json:"transcriptPath"`
+	ToolCall       struct {
+		Name string          `json:"name"`
+		Args json.RawMessage `json:"args"`
+	} `json:"toolCall"`
+	LastInput *string `json:"lastUserInput"` // its person's last prompt, "" in a subagent's hooks
+	Ended     string  `json:"terminationReason"`
+	FullyIdle bool    `json:"fullyIdle"` // at the end of a turn, nothing the agent started still runs
+	Error     string  `json:"error"`
 }
+
+// normalEnds are Antigravity's reasons for the end of a turn its model ended, as its docs and agy 1.4.12 name them.
+// Only then does the turn go on with messages waiting: not when it stopped for an error, its step limit or its person.
+var normalEnds = map[string]bool{"model_stop": true, "no_tool_call": true}
 
 // claudeKinds are the events of murmur's Claude Code hooks, which Cursor runs too.
 var claudeKinds = map[string]string{"start": harness.Start, "edit": harness.BeforeTool, "notify": harness.Needs}
@@ -446,19 +500,42 @@ func (s *Spec) Parse(event string, stdin []byte) (harness.Event, error) {
 			}
 		}
 	}
-	ev := harness.Event{Kind: kind, Harness: s.name, SessionID: firstOf(in.SessionID, in.SessionCamel, in.Conversation),
-		Cwd: in.Cwd, Transcript: in.Transcript, Tool: firstOf(in.Tool, in.ToolCamel)}
+	ev := harness.Event{Kind: kind, Harness: s.name, SessionID: firstOf(in.SessionID, in.SessionCamel, in.Conversation, in.ConversationID),
+		Cwd: in.Cwd, Transcript: firstOf(in.Transcript, in.TranscriptPath), Tool: firstOf(in.Tool, in.ToolCamel, in.ToolCall.Name)}
 	for _, h := range s.hooks {
 		if h.kind == kind {
 			ev.Carries = h.carries
 		}
 	}
-	if ev.Cwd == "" && len(in.Roots) > 0 {
-		ev.Cwd = in.Roots[0]
+	if s.dialect == antigravityStyle {
+		// a subagent's hooks name a conversation of its own, with nothing of its parent's: the daemon takes in no
+		// session from them, but the hook still answers for murmur's tools
+		ev.Sub = in.LastInput != nil && *in.LastInput == ""
+		if kind == harness.Stop && (!normalEnds[strings.ToLower(in.Ended)] || !in.FullyIdle || in.Error != "") {
+			ev.Carries = false
+		}
+	}
+	roots := append(in.Roots, in.Workspaces...)
+	if ev.Cwd == "" && len(roots) > 0 {
+		ev.Cwd = roots[0]
 	}
 	input := in.Input
 	if len(input) == 0 && json.Valid([]byte(in.Args)) {
 		input = json.RawMessage(in.Args)
+	}
+	if len(input) == 0 {
+		input = in.ToolCall.Args
+	}
+	if ev.Tool == "call_mcp_tool" { // Antigravity calls every MCP tool through this one: murmur names it as Claude Code does
+		var c struct {
+			ServerName, ToolName string
+			Arguments            json.RawMessage
+		}
+		// a server called murmur that a project defines may be the one that answers: its calls keep Antigravity's
+		// name, so murmur's hook neither approves them nor counts them as murmur's
+		if json.Unmarshal(input, &c) == nil && c.ServerName != "" && c.ToolName != "" && (c.ServerName != "murmur" || !projectMurmur(roots)) {
+			ev.Tool, input = "mcp__"+c.ServerName+"__"+c.ToolName, c.Arguments
+		}
 	}
 	switch kind {
 	case harness.BeforeTool:
@@ -489,7 +566,11 @@ func firstOf(s ...string) string {
 func (s *Spec) Answer(ev harness.Event, text string) []byte {
 	if text == "" {
 		if ev.Kind == harness.BeforeTool && slices.Contains(s.allowTools, ev.Tool) {
-			// Copilot asks before every MCP tool, and remembers an answer per folder only: this hook allows murmur's
+			// they ask before MCP tools: this hook allows murmur's. Copilot remembers an answer per folder only, and
+			// Antigravity's agy -p refuses what it can't ask
+			if s.dialect == antigravityStyle {
+				return out(map[string]string{"decision": "auto_approve"})
+			}
 			return out(map[string]any{"permissionDecision": "allow",
 				"hookSpecificOutput": map[string]string{"hookEventName": "PreToolUse", "permissionDecision": "allow"}})
 		}
@@ -543,6 +624,15 @@ func (s *Spec) Answer(ev harness.Event, text string) []byte {
 			return out(map[string]any{"permission": "deny", "user_message": text, "agent_message": text, "additional_context": text})
 		case harness.Stop:
 			return out(map[string]any{"followup_message": text})
+		}
+	case antigravityStyle:
+		switch ev.Kind {
+		case harness.Start, harness.Prompt: // a step of the conversation, before the model's next call
+			return out(map[string]any{"injectSteps": []any{map[string]any{"systemMessage": map[string]string{"systemMessage": text}}}})
+		case harness.BeforeTool:
+			return out(map[string]string{"decision": "deny", "reason": text})
+		case harness.Stop: // the reason comes into the conversation, and the agent goes on
+			return out(map[string]string{"decision": "continue", "reason": text})
 		}
 	}
 	return nil

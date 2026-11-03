@@ -10,7 +10,7 @@ murmur join murmur.example.com
 ```
 
 `murmur join` signs the laptop in through your team's identity provider, in your browser, and connects each coding
-tool installed on the laptop: Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI
+tool installed on the laptop: Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI and Antigravity
 ([below](#what-murmur-join-changes) says what it changes). It leaves alone the tools it doesn't find; run it again
 after you install another. Run it once per laptop; `murmur` alone asks for the hub
 on a laptop that hasn't joined one. Murmur runs on macOS and Linux, and on Windows inside WSL.
@@ -244,7 +244,7 @@ sessions started from the Agent SDK `sdk`. Open the console in VS Code's termina
 
 ## Coding tools
 
-Murmur connects six coding tools, and a laptop can run several. They differ in what murmur can learn from them and
+Murmur connects seven coding tools, and a laptop can run several. They differ in what murmur can learn from them and
 in how a message reaches their agents:
 
 | Tool | Status and activity | Title | A message reaches an agent | "Needs you" |
@@ -255,6 +255,7 @@ in how a message reaches their agents:
 | Gemini CLI | its hooks | none | as Codex | tool confirmations |
 | Copilot CLI | its hooks | none | after a tool call, or at the end of a turn; an idle agent gets it once it works again | permission prompts |
 | Cursor | its hooks, in the editor and the CLI | none | as Copilot CLI | no: Cursor has no hook for it |
+| Antigravity | its hooks, in the CLI, the app and the IDE | none | before each step of the agent, or at the end of a turn; an idle agent gets it with your next prompt | no: Antigravity has no hook for it |
 
 - **Names.** A name belongs to its session, never to a folder: an agent keeps its address wherever it works.
   Murmur names a Claude Code session after its id, `claude-0905` for `0905d316-…`, unless you named it (`/rename`,
@@ -282,6 +283,13 @@ in how a message reaches their agents:
   server: murmur doesn't see its sessions there. Trust each project folder when Gemini CLI asks.
 - **Cursor** also runs the hooks in `~/.claude/settings.json`. When `murmur join` set Cursor up, murmur's hooks
   there step aside inside Cursor, so nothing runs twice.
+- **Antigravity** runs its subagents' hooks under conversations of their own; murmur leaves those out, so a subagent
+  never shows as an agent, and its edits aren't checked against other checkouts. Its app and IDE read the same hooks as
+  its CLI, but only the CLI has been tried with murmur; before app 2.28.0, the app's subagents show as agents. A message
+  goes on with a turn only when the agent ended the turn itself, not when it stopped for an error, its step limit or
+  you. Antigravity also loads the MCP servers in Gemini CLI's settings, so its agents may reach murmur's tools through
+  the server join gave Gemini CLI: either one speaks for the right agent. If you turn murmur's hooks off in
+  Antigravity, they stay off: `murmur doctor` says so.
 
 ## What `murmur join` changes
 
@@ -317,6 +325,13 @@ For each coding tool it finds, and only those:
   `replace`), `AfterTool`, `AfterAgent`, `Notification` and `SessionEnd`, and the MCP server, trusted, with
   `includeTools` naming its three tools, `who`, `send` and `btw`: Gemini CLI offers agents only those. A project's
   own server called `murmur` doesn't inherit that trust: Gemini CLI replaces the entry whole.
+- **Antigravity**, `~/.gemini/config/hooks.json`, which its CLI (`agy`), app and IDE share: a block of murmur's
+  own, `murmur`, after yours, with hooks on `SessionStart`, `PreInvocation`, `PreToolUse` (its file edits, and
+  `call_mcp_tool`), `PostToolUse` and `Stop`, each ending with `|| true`: Antigravity fails a tool whose hook fails,
+  and a murmur that is gone lets every tool through. The MCP server in `mcp_config.json` there. Antigravity asks before
+  every MCP tool, and `agy -p` refuses what it can't ask, so murmur's hook before tools approves `who`, `send` and
+  `btw`, and nothing else. It doesn't approve them when a project defines a server of its own called `murmur` (in its
+  `.agents` folders): that server may be the one that answers, and Antigravity asks first.
 - `~/.murmur/`: config and sign-in token, the background process's socket and log, the history of messages and
   questions by the way.
 

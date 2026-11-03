@@ -31,8 +31,10 @@ TEST_ENV := STORE_TEST_POSTGRES='postgres://postgres:postgres@localhost:15432/po
 
 # The test laptop's murmur, and the folder of each coding tool murmur connects. A development build connects a
 # tool only when its variable is set (see harness.Guard). OpenCode loads OPENCODE_CONFIG_DIR besides its own folder.
+# Antigravity has no such variable: murmur's own puts its hooks in a project of the test laptop's, .dev/antigravity.
 LAPTOP_ENV := MURMUR_HOME='$(DEV)/home' MURMUR_HUB='$(HUB_URL)' CLAUDE_CONFIG_DIR='$(DEV)/claude' CODEX_HOME='$(DEV)/codex' \
-	GEMINI_CLI_HOME='$(DEV)/gemini' COPILOT_HOME='$(DEV)/copilot' CURSOR_CONFIG_DIR='$(DEV)/cursor' OPENCODE_CONFIG_DIR='$(DEV)/opencode'
+	GEMINI_CLI_HOME='$(DEV)/gemini' COPILOT_HOME='$(DEV)/copilot' CURSOR_CONFIG_DIR='$(DEV)/cursor' OPENCODE_CONFIG_DIR='$(DEV)/opencode' \
+	MURMUR_ANTIGRAVITY_DIR='$(DEV)/antigravity/.agents'
 
 COMPOSE_DEV := MURMUR_IMAGE=$(IMAGE) PUBLIC_URL=http://localhost DEV_LOGIN=1 \
 	docker compose -f deploy/compose/docker-compose.yml
@@ -85,7 +87,7 @@ dev-dist: ## Cross-build the four laptop binaries and checksums.txt into .dev/di
 
 laptop: ## Build bin/murmur and open a shell whose murmur and coding tools keep their settings in .dev/
 	@$(BUILD) -tags laptop -o bin/murmur ./cmd/murmur
-	@mkdir -p $(DEV)/home $(DEV)/claude $(DEV)/codex $(DEV)/gemini $(DEV)/copilot $(DEV)/cursor $(DEV)/opencode
+	@mkdir -p $(DEV)/home $(DEV)/claude $(DEV)/codex $(DEV)/gemini $(DEV)/copilot $(DEV)/cursor $(DEV)/opencode $(DEV)/antigravity/.agents
 	@if [ -t 1 ]; then \
 		echo "Test laptop shell: MURMUR_HOME=.dev/home, each coding tool's settings in .dev/, hub $(HUB_URL)."; \
 		echo "Run murmur join, then claude or another coding tool, and murmur for the console. Type exit to leave."; \

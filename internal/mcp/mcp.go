@@ -123,8 +123,13 @@ type rpc struct {
 }
 
 // sessionOf is the session a tool call names in its metadata, as Codex does in x-codex-turn-metadata, or else
-// session.
+// session. Antigravity names the conversation its person sees, a subagent's calls included: it may call murmur through
+// the server Gemini CLI's settings register, which it reads too, so the session is found by that name, not by harness.
 func sessionOf(meta map[string]json.RawMessage, session string) string {
+	var root string
+	if json.Unmarshal(meta["antigravity.google/root_conversation_id"], &root) == nil && root != "" {
+		return root
+	}
 	for _, v := range meta {
 		var m struct {
 			SessionID string `json:"session_id"`

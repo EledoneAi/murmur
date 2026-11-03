@@ -1200,6 +1200,7 @@ func TestSender(t *testing.T) {
 	d.add(&session{harness: "codex", id: "t1", pid: 20, name: "codex-1", status: protocol.StatusBusy, since: 2})
 	d.add(&session{harness: "codex", id: "t2", pid: 20, name: "codex-2", status: protocol.StatusIdle, since: 3})
 	d.add(&session{harness: "cursor", id: "k1", pid: 30, name: "cursor-1", status: protocol.StatusBusy})
+	d.add(&session{harness: "antigravity", id: "g1", pid: 40, name: "antigravity-1", status: protocol.StatusBusy})
 	for _, c := range []struct {
 		req  ipc.Request
 		want string
@@ -1212,6 +1213,8 @@ func TestSender(t *testing.T) {
 		{ipc.Request{Harness: "codex", PID: 20, Session: "nope"}, ""},      // the one named isn't there: not its neighbour
 		{ipc.Request{Harness: "codex", PID: 21, Session: "t1"}, "codex-1"}, // named, in another process
 		{ipc.Request{Harness: "cursor", PID: 77}, "cursor-1"},
+		// Antigravity may call murmur through the server Gemini CLI's settings register, naming its conversation
+		{ipc.Request{Harness: "gemini", PID: 40, Session: "g1"}, "antigravity-1"},
 	} {
 		d.mu.Lock()
 		s := d.senderLocked(c.req)

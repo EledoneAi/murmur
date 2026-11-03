@@ -45,7 +45,7 @@ type Config struct {
 
 // DirVars are the variables that name the coding tools' folders.
 var DirVars = []string{"CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "OPENCODE_CONFIG_DIR", "XDG_CONFIG_HOME",
-	"COPILOT_HOME", "GEMINI_CLI_HOME"}
+	"COPILOT_HOME", "GEMINI_CLI_HOME", "MURMUR_ANTIGRAVITY_DIR"}
 
 // UseDirs sets the coding tools' folder variables as join saw them, when it recorded them.
 func UseDirs(c Config) {

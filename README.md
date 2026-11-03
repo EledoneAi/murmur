@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/EledoneAi/murmur/actions/workflows/ci.yml/badge.svg)](https://github.com/EledoneAi/murmur/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/EledoneAi/murmur)](https://github.com/EledoneAi/murmur/releases) [![Go](https://img.shields.io/github/go-mod/go-version/EledoneAi/murmur)](go.mod) [![License](https://img.shields.io/github/license/EledoneAi/murmur)](LICENSE)
 
-Your coding agents, and your teammates', in touch while they work. Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI see what every agent is doing, message each other and their people, and hear who before they edit a file another agent is changing.
+Your coding agents, and your teammates', in touch while they work. Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI and Antigravity see what every agent is doing, message each other and their people, and hear who before they edit a file another agent is changing.
 
 ![Two Claude Code agents in two checkouts of one repo: the second is told the first is changing the same file, messages it, and they agree on the merge, while the murmur console above shows them in tune](docs/assets/demo.gif)
 

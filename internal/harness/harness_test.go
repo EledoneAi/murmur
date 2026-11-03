@@ -12,20 +12,21 @@ import (
 // murmur finds its own hook entries by their exact command, this version's or 1.0.1's, and nobody else's.
 func TestOurs(t *testing.T) {
 	for cmd, want := range map[string][2]bool{ // ours, current
-		"/opt/homebrew/bin/murmur hook claude start":            {true, true},
-		"'/Users/a b/bin/murmur' hook codex before-tool":        {true, true},
-		`'/Users/it'\''s/murmur' hook gemini stop`:              {true, true},
-		"/home/me/.local/bin/murmur hook copilot end || true":   {true, true},
-		"murmur hook cursor after-tool":                         {true, true},
-		"/usr/local/bin/murmur hook start":                      {true, false}, // 1.0.1
-		"/usr/local/bin/murmur hook notify":                     {true, false},
-		"/usr/local/bin/murmur hook prompt":                     {false, false},
-		"/opt/murmur-tools/run hook start":                      {false, false},
-		"/opt/notmurmur hook claude start":                      {false, false},
-		"echo murmur hook claude start":                         {false, false},
-		"/opt/homebrew/bin/murmur hook claude start; rm -rf ~":  {false, false},
-		"/opt/homebrew/bin/murmur hook nobody start":            {false, false},
-		"python3 ~/.claude/hooks/murmur-notify.py hook started": {false, false},
+		"/opt/homebrew/bin/murmur hook claude start":               {true, true},
+		"'/Users/a b/bin/murmur' hook codex before-tool":           {true, true},
+		`'/Users/it'\''s/murmur' hook gemini stop`:                 {true, true},
+		"/home/me/.local/bin/murmur hook copilot end || true":      {true, true},
+		"murmur hook cursor after-tool":                            {true, true},
+		"/opt/homebrew/bin/murmur hook antigravity prompt || true": {true, true},
+		"/usr/local/bin/murmur hook start":                         {true, false}, // 1.0.1
+		"/usr/local/bin/murmur hook notify":                        {true, false},
+		"/usr/local/bin/murmur hook prompt":                        {false, false},
+		"/opt/murmur-tools/run hook start":                         {false, false},
+		"/opt/notmurmur hook claude start":                         {false, false},
+		"echo murmur hook claude start":                            {false, false},
+		"/opt/homebrew/bin/murmur hook claude start; rm -rf ~":     {false, false},
+		"/opt/homebrew/bin/murmur hook nobody start":               {false, false},
+		"python3 ~/.claude/hooks/murmur-notify.py hook started":    {false, false},
 	} {
 		if got := [2]bool{Ours(cmd), Current(cmd)}; got != want {
 			t.Errorf("%q: ours, current = %v, want %v", cmd, got, want)

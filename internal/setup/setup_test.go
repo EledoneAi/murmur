@@ -170,6 +170,28 @@ func TestStartHook(t *testing.T) {
 	}
 }
 
+// Antigravity refuses a tool whose hook answers {}, and agy -p refuses an MCP tool it can't ask about. With no
+// daemon, and for a subagent, which the daemon leaves out, the hook before tools still approves murmur's own tools,
+// and prints nothing for an edit.
+func TestAntigravityHook(t *testing.T) {
+	t.Setenv("MURMUR_HOME", t.TempDir()) // no daemon runs here
+	call := func(conv, prompt, tool string) string {
+		return `{"conversationId":"` + conv + `","workspacePaths":["/work"],"lastUserInput":"` + prompt + `","toolCall":` + tool + `}`
+	}
+	who := `{"name":"call_mcp_tool","args":{"Arguments":{},"ServerName":"murmur","ToolName":"who"}}`
+	edit := `{"name":"edit_file","args":{"Path":"/work/a.go","Target":"a","Replacement":"b"}}`
+	approve := `{"decision":"auto_approve"}` + "\n"
+	for _, c := range []struct{ input, want string }{{call("c1", "hi", who), approve}, {call("sub1", "", who), approve}, {call("c1", "hi", edit), ""}} {
+		if got := string(run(hookish.Antigravity, harness.BeforeTool, c.input)); got != c.want {
+			t.Errorf("no daemon, %s: %q", c.input, got)
+		}
+	}
+	fakeDaemon(t, &ipc.Reply{OK: true}) // what the daemon says for a subagent: nothing
+	if got := string(run(hookish.Antigravity, harness.BeforeTool, call("sub1", "", who))); got != approve {
+		t.Errorf("a subagent's who: %q", got)
+	}
+}
+
 // The edit hook prints the daemon's reason as Claude Code's refusal, and nothing at all when no daemon runs or it
 // doesn't answer in time: an edit never waits long, and never starts the daemon.
 func TestEditHook(t *testing.T) {

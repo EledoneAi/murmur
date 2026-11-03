@@ -1,6 +1,6 @@
 # Architecture
 
-Murmur links a team's coding agents: Claude Code, Codex, Cursor, OpenCode, Copilot CLI and Gemini CLI. Each person runs a small program on their laptop, and the team runs one hub. There's no central service: whoever deploys a hub owns it, and laptops talk only to their hub.
+Murmur links a team's coding agents: Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI and Antigravity. Each person runs a small program on their laptop, and the team runs one hub. There's no central service: whoever deploys a hub owns it, and laptops talk only to their hub.
 
 ```
  laptop                                         hub (one or more instances)
@@ -27,7 +27,7 @@ Murmur links a team's coding agents: Claude Code, Codex, Cursor, OpenCode, Copil
 | `internal/transport` | The hub's side of one WebSocket connection: read loop, writer, pings. The daemon keeps its own connection |
 | `internal/harness` | What murmur needs from an AI coding tool (a harness): the `Harness` interface, with the optional `Lister`, `Pusher`, `Reader` and `Asker`; hook events; a session's activity; the order-preserving editor for settings files |
 | `internal/harness/claude` | Everything murmur reads or writes in Claude Code: session registry, transcripts, inbox socket, settings.json, hook payloads, the copies that answer questions by the way |
-| `internal/harness/hookish` | The harnesses whose hooks copied Claude Code's, one row of a table each: Codex, Cursor, Copilot CLI, Gemini CLI |
+| `internal/harness/hookish` | The harnesses whose hooks copied Claude Code's, one row of a table each: Codex, Cursor, Copilot CLI, Gemini CLI, Antigravity |
 | `internal/harness/opencode` | OpenCode, through a plugin (`plugin.js`, built into the binary) |
 | `internal/gitscan` | Repo, branch and changed files of a checkout, the size of its change and where it stands (base branch, rebase or merge, folder) |
 | `internal/ipc` | The local socket between the daemon and its clients: requests, replies, snapshots, and a client |

@@ -39,7 +39,8 @@ import (
 )
 
 // Harnesses are the AI coding tools murmur connects, in the order join sets them up.
-var Harnesses = []harness.Harness{claude.Claude{}, hookish.Codex, hookish.Cursor, opencode.OpenCode{}, hookish.Copilot, hookish.Gemini}
+var Harnesses = []harness.Harness{claude.Claude{}, hookish.Codex, hookish.Cursor, opencode.OpenCode{}, hookish.Copilot, hookish.Gemini,
+	hookish.Antigravity}
 
 // Harness is the harness called name, or nil.
 func Harness(name string) harness.Harness {

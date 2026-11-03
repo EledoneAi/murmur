@@ -17,7 +17,7 @@ You need:
 - Docker, for the store and bus tests and for building images
 - Node and pnpm, only to change the hub's web pages in `web/`
 - a coding tool, to try a laptop end to end: Claude Code 2.1.224 or later (`npm install -g @anthropic-ai/claude-code`),
-  or Codex, Cursor, OpenCode, Copilot CLI or Gemini CLI
+  or Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI or Antigravity
 
 Then:
 

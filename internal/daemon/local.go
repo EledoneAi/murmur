@@ -176,6 +176,11 @@ func (d *Daemon) onHook(ev harness.Event) (string, string) {
 		d.mu.Unlock()
 		return "", ""
 	}
+	if ev.Sub && !listed && d.sessions[key] == nil {
+		// a subagent under a conversation of its own (Antigravity's), which isn't an agent: nothing to learn or tell it
+		d.mu.Unlock()
+		return "", ""
+	}
 	if ev.Kind == harness.Start {
 		if len(d.hints) > 500 {
 			clear(d.hints)

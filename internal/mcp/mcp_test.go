@@ -47,6 +47,15 @@ func TestSessionOf(t *testing.T) {
 	if got := sessionOf(nil, "from-env"); got != "from-env" {
 		t.Fatalf("without: %q", got)
 	}
+	// Antigravity names the conversation, and the one its person sees: a subagent's call speaks for that one
+	var ag struct {
+		Meta map[string]json.RawMessage `json:"_meta"`
+	}
+	_ = json.Unmarshal([]byte(`{"name":"send","arguments":{"to":"bob","text":"hi"},"_meta":{"antigravity.google/artifacts_dir":"/b/sub-1",
+		"antigravity.google/conversation_id":"sub-1","antigravity.google/root_conversation_id":"root-1","progressToken":"p:4"}}`), &ag)
+	if got := sessionOf(ag.Meta, ""); got != "root-1" {
+		t.Fatalf("antigravity: %q", got)
+	}
 }
 
 // fake is a daemon on this laptop's socket: it keeps each request it gets, and answers it with what answer returns,

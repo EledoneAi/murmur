@@ -122,6 +122,7 @@ apply at once on every instance.
 | `OPENCODE_CONFIG_DIR` | `~/.config/opencode` | A folder OpenCode loads plugins from besides its own, where murmur then writes its plugin. Without it, murmur follows `XDG_CONFIG_HOME`. |
 | `COPILOT_HOME` | `~/.copilot` | Copilot CLI's own setting for its folder, where murmur adds its hooks and MCP server. |
 | `GEMINI_CLI_HOME` | your home folder | Gemini CLI's own setting for the folder that holds `.gemini`, where murmur adds its hooks and MCP server. |
+| `MURMUR_ANTIGRAVITY_DIR` | `~/.gemini/config` | For development only: where murmur adds Antigravity's hooks and MCP server. Antigravity has no setting for its folder, so this one is murmur's, and it moves only where murmur writes: Antigravity still reads `~/.gemini/config`. Pointed at a project's `.agents` folder, which Antigravity reads the same way, it connects that project alone, as a test laptop does. |
 | `MURMUR_THEME` | the terminal's background | The console's colours: `dark`, `light`, `ansi` (the terminal's 16 colours) or `contrast`. |
 | `MURMUR_MOTION` | on | `0` stops the console's animations. They are off over SSH anyway. |
 | `MURMUR_GLYPHS` | from the locale | `ascii` draws the console with ASCII only; `unicode` forces the symbols. |
