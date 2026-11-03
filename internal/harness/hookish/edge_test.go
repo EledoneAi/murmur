@@ -57,6 +57,38 @@ func TestAnswersStayJSON(t *testing.T) {
 	}
 }
 
+// Blank settings files are there, with nothing in them: join writes murmur's entries into them and says so. Taking
+// them out leaves Cursor's CLI settings, which were there before join, as an empty object, and removes an MCP file
+// that only murmur's server filled.
+func TestBlankSettings(t *testing.T) {
+	sandbox(t)
+	dir := Cursor.dir()
+	for _, f := range []string{"cli-config.json", "mcp.json", "hooks.json"} {
+		_ = os.WriteFile(filepath.Join(dir, f), nil, 0o644)
+	}
+	for _, c := range Cursor.Connect("/opt/murmur", nil) {
+		if !c.OK {
+			t.Errorf("connect: %+v", c)
+		}
+	}
+	for f, want := range map[string]string{"cli-config.json": `"Mcp(murmur:btw)"`, "mcp.json": `"command": "/opt/murmur"`, "hooks.json": "hook cursor stop"} {
+		if got := read(t, filepath.Join(dir, f)); !strings.Contains(got, want) {
+			t.Errorf("%s:\n%s", f, got)
+		}
+	}
+	if err := Cursor.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "cli-config.json")); got != "{}\n" {
+		t.Errorf("cli-config.json after uninstall: %q", got)
+	}
+	for _, f := range []string{"mcp.json", "hooks.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("%s after uninstall: %q", f, read(t, filepath.Join(dir, f)))
+		}
+	}
+}
+
 // An empty MCP allowlist in Cursor's permissions.json allows nothing, where none at all leaves it to the editor's
 // settings: uninstall leaves the empty list there.
 func TestEmptyAllowlistStays(t *testing.T) {

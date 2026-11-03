@@ -115,14 +115,17 @@ func Marshal(v any) json.RawMessage {
 var ErrComments = errors.New("it has comments, which rewriting it would lose")
 
 // ReadObject reads a settings file, and returns what it held for WriteObject. A missing file is an empty object, and
-// so is an empty one, which Antigravity creates. Comments and trailing commas, which some harnesses allow, are read
-// past.
+// so is a blank one, which some harnesses create (Antigravity's mcp_config.json): its bytes come back, never nil, so
+// callers know the file is there. Comments and trailing commas, which some harnesses allow, are read past.
 func ReadObject(path string) (Object, []byte, error) {
 	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) || err == nil && len(bytes.TrimSpace(b)) == 0 {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil, nil
 	} else if err != nil {
 		return nil, nil, err
+	}
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, append([]byte{}, b...), nil
 	}
 	o, err := ParseObject(b)
 	if err != nil {
@@ -136,13 +139,15 @@ func ReadObject(path string) (Object, []byte, error) {
 
 // WriteObject saves o in place of the settings file that held b, keeping its key order, its indentation and its
 // permissions. When murmur adds to it, it keeps a copy of the file as it was before murmur first changed it; when
-// murmur takes its entries out and nothing is left, the file goes. It never rewrites a file with comments.
+// murmur takes its entries out and nothing is left, the file goes. It never rewrites a file with comments. A blank
+// file is written as a new one.
 func WriteObject(path string, b []byte, o Object, adding bool) error {
-	if b != nil && !json.Valid(b) {
+	blank := len(bytes.TrimSpace(b)) == 0 // no file, or one with nothing in it
+	if !blank && !json.Valid(b) {
 		return ErrComments
 	}
 	if len(o) == 0 && !adding {
-		if b == nil {
+		if blank {
 			return nil
 		}
 		if st, err := os.Lstat(path); err != nil || st.Mode()&os.ModeSymlink == 0 {
@@ -154,7 +159,7 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 	if err := json.Indent(&out, o.Bytes(), "", indentOf(b)); err != nil {
 		return err
 	}
-	if b == nil || bytes.HasSuffix(b, []byte("\n")) {
+	if blank || bytes.HasSuffix(b, []byte("\n")) {
 		out.WriteByte('\n')
 	}
 	text := out.Bytes()
@@ -164,7 +169,7 @@ func WriteObject(path string, b []byte, o Object, adding bool) error {
 	if bytes.Equal(text, b) {
 		return nil
 	}
-	if keep := path + ".before-murmur"; adding && len(b) > 2 {
+	if keep := path + ".before-murmur"; adding && !blank && len(b) > 2 {
 		if _, err := os.Stat(keep); errors.Is(err, os.ErrNotExist) {
 			_ = os.WriteFile(keep, b, 0o600)
 		}

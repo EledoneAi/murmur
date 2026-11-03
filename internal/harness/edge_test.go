@@ -29,20 +29,30 @@ func TestReadObjectRefuses(t *testing.T) {
 	}
 }
 
-// Antigravity creates its mcp_config.json empty: an empty or blank file is an empty object, which join writes into.
-func TestEmptyFile(t *testing.T) {
+// A blank settings file, which some harnesses create, is an empty object that is there: join writes into it as into a
+// new file, and taking out nothing leaves it as it was.
+func TestBlankFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mcp_config.json")
 	for _, content := range []string{"", " \n"} {
 		_ = os.WriteFile(path, []byte(content), 0o600)
 		o, b, err := ReadObject(path)
-		if err != nil || len(o) != 0 {
-			t.Fatalf("%q: %v, %s", content, err, o.Bytes())
+		if err != nil || len(o) != 0 || b == nil {
+			t.Fatalf("%q: %v, %s, %q", content, err, o.Bytes(), b)
+		}
+		if err := WriteObject(path, b, nil, false); err != nil {
+			t.Fatalf("%q, taking out nothing: %v", content, err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != content {
+			t.Fatalf("%q, taking out nothing: %q", content, got)
 		}
 		if err := WriteObject(path, b, o.Set("a", json.RawMessage(`1`)), true); err != nil {
 			t.Fatalf("%q: %v", content, err)
 		}
 		if got, _ := os.ReadFile(path); string(got) != "{\n  \"a\": 1\n}\n" {
 			t.Fatalf("%q: %q", content, got)
+		}
+		if _, err := os.Stat(path + ".before-murmur"); !os.IsNotExist(err) {
+			t.Fatalf("%q: kept a copy of a blank file", content)
 		}
 	}
 }
