@@ -44,11 +44,14 @@ It builds `bin/murmur` and opens a shell where:
 | `MURMUR_HOME` | `.dev/home` |
 | `MURMUR_HUB` | `http://localhost:8080` |
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `CURSOR_CONFIG_DIR`, `OPENCODE_CONFIG_DIR`, `COPILOT_HOME`, `GEMINI_CLI_HOME` | `.dev/claude`, `.dev/codex`… |
+| `MURMUR_ANTIGRAVITY_DIR` | `.dev/antigravity/.agents` |
 | `PATH` | `bin/` first |
 
 A build from source refuses to join without `MURMUR_HOME`, and leaves alone each coding tool whose variable isn't
 set: join writes the binary's path into the tools' settings. OpenCode loads `OPENCODE_CONFIG_DIR` besides its own
-folder, so a test laptop's OpenCode also loads plugins from your own.
+folder, so a test laptop's OpenCode also loads plugins from your own. Antigravity has no setting for its folder:
+`MURMUR_ANTIGRAVITY_DIR` is murmur's, and puts the test laptop's hooks in `.dev/antigravity/.agents`, which Antigravity
+reads for a project in `.dev/antigravity` as it reads `~/.gemini/config` for every project. Run `agy` there.
 
 In that shell:
 

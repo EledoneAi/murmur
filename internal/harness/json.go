@@ -114,11 +114,12 @@ func Marshal(v any) json.RawMessage {
 // ErrComments is a settings file murmur can read but not write without losing its person's comments.
 var ErrComments = errors.New("it has comments, which rewriting it would lose")
 
-// ReadObject reads a settings file, and returns what it held for WriteObject. A missing file is an empty object.
-// Comments and trailing commas, which some harnesses allow, are read past.
+// ReadObject reads a settings file, and returns what it held for WriteObject. A missing file is an empty object, and
+// so is an empty one, which Antigravity creates. Comments and trailing commas, which some harnesses allow, are read
+// past.
 func ReadObject(path string) (Object, []byte, error) {
 	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) || err == nil && len(bytes.TrimSpace(b)) == 0 {
 		return nil, nil, nil
 	} else if err != nil {
 		return nil, nil, err

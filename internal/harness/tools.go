@@ -11,18 +11,18 @@ import (
 )
 
 // Harnesses name their tools differently, and none of the names collide: Claude Code's Edit, Codex's apply_patch,
-// Gemini CLI's replace, OpenCode's edit. One table reads them all.
+// Gemini CLI's replace, OpenCode's edit, Antigravity's edit_file. One table reads them all.
 var toolKinds = map[string]byte{}
 
 func init() {
 	for kind, names := range map[byte][]string{
 		protocol.KindRead: {"Read", "Grep", "Glob", "LS", "NotebookRead", "LSP", "read_file", "read_many_files", "grep_search",
-			"search_file_content", "glob", "list_directory", "view", "read", "grep", "rg", "lsp"},
+			"search_file_content", "glob", "list_directory", "view", "read", "grep", "rg", "lsp", "view_file", "list_dir", "find_by_name"},
 		protocol.KindEdit: {"Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch", "write_file", "replace", "edit", "create",
-			"write", "str_replace_editor", "Delete"},
-		protocol.KindRun:      {"Bash", "Shell", "run_shell_command", "bash", "shell", "exec_command", "powershell"},
-		protocol.KindWeb:      {"WebFetch", "WebSearch", "web_fetch", "google_web_search", "web_search", "webfetch", "websearch"},
-		protocol.KindSubagent: {"Task", "Agent", "Subagent", "spawn_agent", "invoke_agent", "task"},
+			"write", "str_replace_editor", "Delete", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file"},
+		protocol.KindRun:      {"Bash", "Shell", "run_shell_command", "bash", "shell", "exec_command", "powershell", "run_command"},
+		protocol.KindWeb:      {"WebFetch", "WebSearch", "web_fetch", "google_web_search", "web_search", "webfetch", "websearch", "search_web", "read_url_content"},
+		protocol.KindSubagent: {"Task", "Agent", "Subagent", "spawn_agent", "invoke_agent", "task", "invoke_subagent"},
 		protocol.KindMessage: {"mcp__murmur__send", "mcp_murmur_send", "murmur-send", "murmur_send", "MCP:send",
 			"mcp__murmur__btw", "mcp_murmur_btw", "murmur-btw", "murmur_btw", "MCP:btw"},
 	} {
@@ -43,6 +43,13 @@ type toolInput struct {
 	DirPath      string          `json:"dir_path"`
 	Patch        string          `json:"patchText"`
 	Input        string          `json:"input"`
+	// Antigravity's, in PascalCase: the file of its app's and IDE's edits, view_file's, run_command's command, and the
+	// folders list_dir and find_by_name look in
+	TargetFile   string `json:"TargetFile"`
+	AbsolutePath string `json:"AbsolutePath"`
+	CommandLine  string `json:"CommandLine"`
+	Directory    string `json:"DirectoryPath"`
+	SearchDir    string `json:"SearchDirectory"`
 }
 
 func (in toolInput) command() string {
@@ -52,11 +59,11 @@ func (in toolInput) command() string {
 	}
 	var argv []string
 	_ = json.Unmarshal(in.Command, &argv)
-	return strings.Join(argv, " ")
+	return firstOf(strings.Join(argv, " "), in.CommandLine)
 }
 
 func (in toolInput) file() string {
-	for _, p := range []string{in.FilePath, in.FilePathCase, in.AbsPath, in.NotebookPath, in.Path} {
+	for _, p := range []string{in.FilePath, in.FilePathCase, in.AbsPath, in.NotebookPath, in.Path, in.TargetFile, in.AbsolutePath} {
 		if p != "" {
 			return p
 		}
@@ -65,7 +72,7 @@ func (in toolInput) file() string {
 }
 
 // readers are the tools that read one file; the other KindRead tools search.
-var readers = map[string]bool{"Read": true, "NotebookRead": true, "read_file": true, "view": true, "read": true}
+var readers = map[string]bool{"Read": true, "NotebookRead": true, "read_file": true, "view": true, "read": true, "view_file": true}
 
 // CallOf reads a tool call: what it does, in murmur's words, and the files it would change, absolute, when it is an
 // edit. input is the tool's arguments as JSON; cwd makes relative paths absolute.
@@ -98,8 +105,8 @@ func CallOf(cwd, tool string, input json.RawMessage) (Call, []string) {
 			c.Doing = "Reading " + filepath.Base(f)
 		}
 		c.Dirs = Dirs(cwd, in.file())
-		if in.DirPath != "" {
-			c.Dirs = append(c.Dirs, Abs(cwd, in.DirPath))
+		if dir := firstOf(in.DirPath, in.Directory, in.SearchDir); dir != "" {
+			c.Dirs = append(c.Dirs, Abs(cwd, dir))
 		}
 	case protocol.KindWeb:
 		c.Doing = "Reading a web page"

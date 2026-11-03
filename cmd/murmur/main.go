@@ -26,7 +26,8 @@ const usage = `murmur: your team's coding agents, in one console.
   murmur demo           open the console on a made-up team, no hub needed
   murmur watch          print what changes in the team, in sentences
   murmur join HUB       join your team's hub (murmur.example.com): sign in and connect the coding tools on this
-                        laptop (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI), once per laptop;
+                        laptop (Claude Code, Codex, Cursor, OpenCode, Copilot CLI, Gemini CLI, Antigravity), once
+                        per laptop;
                         --relogin signs in again, --no-browser signs in with a code, as over SSH
   murmur solo           use murmur on your own, with no team and no hub to run: the agents on this laptop see
                         and message each other, whatever coding tool each runs in; join moves it to a team

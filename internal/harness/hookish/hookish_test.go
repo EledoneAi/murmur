@@ -16,7 +16,7 @@ import (
 func sandbox(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	for _, v := range []string{"CODEX_HOME", "GEMINI_CLI_HOME", "COPILOT_HOME", "CURSOR_CONFIG_DIR", "HOME"} {
+	for _, v := range []string{"CODEX_HOME", "GEMINI_CLI_HOME", "COPILOT_HOME", "CURSOR_CONFIG_DIR", "MURMUR_ANTIGRAVITY_DIR", "HOME"} {
 		dir := filepath.Join(root, strings.ToLower(v))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -86,6 +86,11 @@ func TestAnswers(t *testing.T) {
 		{Cursor, harness.BeforeTool, `{"additional_context":"T","agent_message":"T","permission":"deny","user_message":"T"}`},
 		{Cursor, harness.AfterTool, `{"additional_context":"T"}`},
 		{Cursor, harness.Stop, `{"followup_message":"T"}`},
+		{Antigravity, harness.Start, `{"injectSteps":[{"systemMessage":{"systemMessage":"T"}}]}`},
+		{Antigravity, harness.Prompt, `{"injectSteps":[{"systemMessage":{"systemMessage":"T"}}]}`},
+		{Antigravity, harness.BeforeTool, `{"decision":"deny","reason":"T"}`},
+		{Antigravity, harness.AfterTool, ``}, // what follows a tool call is dropped
+		{Antigravity, harness.Stop, `{"decision":"continue","reason":"T"}`},
 	} {
 		if got := strings.TrimSpace(string(c.s.Answer(harness.Event{Kind: c.kind}, "T"))); got != c.want {
 			t.Errorf("%s %s:\n got %s\nwant %s", c.s.name, c.kind, got, c.want)
@@ -147,6 +152,144 @@ func TestCursorInput(t *testing.T) {
 	ev := parse(t, Cursor, "start", `{"conversation_id":"c9","session_id":"c9","is_background_agent":false,"composer_mode":"agent","hook_event_name":"sessionStart","cursor_version":"3.13.25","workspace_roots":["/w"]}`)
 	if ev.Kind != harness.Start || ev.Cwd != "/w" {
 		t.Fatalf("start: %+v", ev)
+	}
+}
+
+// Antigravity's input, as agy 1.4.12 sends it: camelCase, the conversation as the session and the first workspace as
+// the folder. Its CLI edits with write_file and edit_file, its app and IDE with write_to_file and the like, and it calls
+// every MCP tool through call_mcp_tool.
+func TestAntigravityInput(t *testing.T) {
+	common := `"conversationId":"cff87146","workspacePaths":["/repo","/other"],"transcriptPath":"/b/cff87146/logs/transcript.jsonl",` +
+		`"artifactDirectoryPath":"/b/cff87146","modelName":"gemini-3.8-flash-high","lastUserInput":"add a line to notes.txt"`
+	if ev := parse(t, Antigravity, harness.Start, `{`+common+`}`); ev.Kind != harness.Start || ev.SessionID != "cff87146" ||
+		ev.Cwd != "/repo" || ev.Transcript != "/b/cff87146/logs/transcript.jsonl" || !ev.Carries {
+		t.Fatalf("start: %+v", ev)
+	}
+	for call, want := range map[string]string{
+		`{"name":"write_file","args":{"Content":"hi\n","Path":"/repo/notes.txt"}}`:                                       "/repo/notes.txt",
+		`{"name":"edit_file","args":{"Path":"notes.txt","Target":"hi\n","Replacement":"hi\nthere\n"}}`:                   "/repo/notes.txt",
+		`{"name":"write_to_file","args":{"TargetFile":"/repo/src/app.go","CodeContent":"package app"}}`:                  "/repo/src/app.go",
+		`{"name":"multi_replace_file_content","args":{"TargetFile":"/repo/a.go","ReplacementChunks":[]}}`:                "/repo/a.go",
+		`{"name":"call_mcp_tool","args":{"Arguments":{"path":"/x"},"ServerName":"docs","ToolName":"open"}}`:              "",
+		`{"name":"call_mcp_tool","args":{"Arguments":{"to":"bob","text":"hi"},"ServerName":"murmur","ToolName":"send"}}`: "",
+	} {
+		if ev := parse(t, Antigravity, harness.BeforeTool, `{"toolCall":`+call+`,"stepIdx":3,`+common+`}`); strings.Join(ev.Paths, ",") != want {
+			t.Errorf("%s: %+v", call, ev)
+		}
+	}
+	for call, want := range map[string]string{
+		`{"name":"run_command","args":{"CommandLine":"ls -la","WaitMsBeforeAsync":5000,"toolSummary":"List files"}}`:     "Running ls",
+		`{"name":"view_file","args":{"AbsolutePath":"/repo/a.txt"}}`:                                                     "Reading a.txt",
+		`{"name":"call_mcp_tool","args":{"Arguments":{},"ServerName":"probe","ToolName":"ping"}}`:                        "probe · ping",
+		`{"name":"call_mcp_tool","args":{"Arguments":{"to":"bob","text":"hi"},"ServerName":"murmur","ToolName":"send"}}`: "murmur · send",
+	} {
+		ev := parse(t, Antigravity, harness.AfterTool, `{"toolCall":`+call+`,"stepIdx":9,"error":"",`+common+`}`)
+		if ev.Call == nil || ev.Call.Doing != want || ev.Carries {
+			t.Errorf("%s: %+v %+v", call, ev, ev.Call)
+		}
+	}
+	if ev := parse(t, Antigravity, harness.BeforeTool, `{"toolCall":{"name":"call_mcp_tool","args":{"Arguments":{},"ServerName":"murmur",`+
+		`"ToolName":"who"}},`+common+`}`); ev.Tool != "mcp__murmur__who" {
+		t.Fatalf("murmur's who: %+v", ev)
+	}
+	// a subagent's hooks name its own conversation and no prompt: murmur leaves them out
+	if ev := parse(t, Antigravity, harness.Start, `{"conversationId":"b0f8f21b","workspacePaths":["/repo"],"lastUserInput":""}`); ev.Kind != "" {
+		t.Fatalf("subagent: %+v", ev)
+	}
+	// before 1.4.7, hooks had no lastUserInput: each one speaks for its conversation
+	if ev := parse(t, Antigravity, harness.Stop, `{"conversationId":"c1","workspacePaths":["/repo"],"executionNum":0,"terminationReason":"NO_TOOL_CALL",`+
+		`"fullyIdle":true}`); ev.Kind != harness.Stop || ev.SessionID != "c1" || !ev.Carries {
+		t.Fatalf("stop: %+v", ev)
+	}
+}
+
+// Antigravity keeps hooks in named blocks: murmur's is one of its own, after the person's, and its commands never
+// fail. Its MCP server goes in mcp_config.json, which Antigravity creates empty. A block the person turned off in
+// Antigravity stays off. Uninstall leaves the person's hooks as they were.
+func TestAntigravitySetup(t *testing.T) {
+	root := sandbox(t)
+	exe, again := filepath.Join(root, "murmur"), filepath.Join(root, "bin", "murmur") // there: doctor checks the hooks' binary is
+	_ = os.MkdirAll(filepath.Dir(again), 0o755)
+	for _, f := range []string{exe, again} {
+		_ = os.WriteFile(f, []byte("#!/bin/sh\n"), 0o755)
+	}
+	mcpConfig := filepath.Join(Antigravity.dir(), "mcp_config.json")
+	mine := "{\n  \"lint\": {\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"run_command\",\n        \"hooks\": [\n          {\n" +
+		"            \"command\": \"./lint.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+	_ = os.WriteFile(Antigravity.hooksPath(), []byte(mine), 0o644)
+	_ = os.WriteFile(mcpConfig, nil, 0o644)
+	if checks := Antigravity.Connect(exe, nil); !checks[0].OK || !checks[1].OK {
+		t.Fatalf("connect: %+v", checks)
+	}
+	type handler struct {
+		Type, Command, Matcher string
+		Timeout                int
+		Hooks                  []struct{ Command string }
+	}
+	var f map[string]map[string][]handler
+	if err := json.Unmarshal([]byte(read(t, Antigravity.hooksPath())), &f); err != nil {
+		t.Fatal(err)
+	}
+	m := f["murmur"]
+	if len(f) != 2 || len(f["lint"]["PostToolUse"]) != 1 || len(m) != 5 {
+		t.Fatalf("hooks.json:\n%s", read(t, Antigravity.hooksPath()))
+	}
+	for event, kind := range map[string]string{"SessionStart": "start", "PreInvocation": "prompt", "Stop": "stop"} {
+		if h := m[event]; len(h) != 1 || h[0].Type != "command" || h[0].Timeout != 5 || h[0].Command != exe+" hook antigravity "+kind+" || true" {
+			t.Errorf("%s: %+v", event, h)
+		}
+	}
+	if h := m["PreToolUse"]; len(h) != 1 || !strings.HasPrefix(h[0].Matcher, "write_file|edit_file|") || !strings.HasSuffix(h[0].Matcher, "|call_mcp_tool") ||
+		h[0].Hooks[0].Command != exe+" hook antigravity before-tool || true" {
+		t.Errorf("PreToolUse: %+v", h)
+	}
+	if h := m["PostToolUse"]; len(h) != 1 || h[0].Matcher != "" || h[0].Hooks[0].Command != exe+" hook antigravity after-tool || true" {
+		t.Errorf("PostToolUse, on every tool: %+v", h)
+	}
+	var cfg struct {
+		MCPServers map[string]struct {
+			Command string
+			Args    []string
+		}
+	}
+	_ = json.Unmarshal([]byte(read(t, mcpConfig)), &cfg)
+	if s := cfg.MCPServers["murmur"]; s.Command != exe || strings.Join(s.Args, " ") != "mcp antigravity" {
+		t.Fatalf("mcp_config.json:\n%s", read(t, mcpConfig))
+	}
+	for _, c := range Antigravity.Checks() {
+		if !c.OK {
+			t.Errorf("doctor: %+v", c)
+		}
+	}
+
+	o, b, _ := harness.ReadObject(Antigravity.hooksPath())
+	_ = harness.WriteObject(Antigravity.hooksPath(), b, o.PutSub("murmur", o.Sub("murmur").Set("enabled", json.RawMessage(`false`))), true)
+	checks := Antigravity.Connect(again, nil) // as after an update: the person's choice isn't a failure, and join says so
+	if got := read(t, Antigravity.hooksPath()); !checks[0].OK || !strings.Contains(got, `"enabled": false`) ||
+		!strings.Contains(got, again+" hook antigravity stop || true") ||
+		!slices.ContainsFunc(checks, func(c protocol.Check) bool { return c.Name == "Next" && strings.Contains(c.Detail, "/hooks") }) {
+		t.Fatalf("set up again, turned off: %+v\n%s", checks, got)
+	}
+	if c := Antigravity.Checks()[0]; c.OK || !strings.Contains(c.Detail, "turned off") {
+		t.Fatalf("doctor, turned off: %+v", c)
+	}
+
+	if err := Antigravity.Disconnect(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, Antigravity.hooksPath()); got != mine {
+		t.Fatalf("after uninstall:\n%s", got)
+	}
+	if _, err := os.Stat(mcpConfig); !os.IsNotExist(err) {
+		t.Fatalf("mcp_config.json after uninstall: %s", read(t, mcpConfig))
+	}
+	os.Remove(Antigravity.hooksPath())
+	Antigravity.Connect(exe, nil)
+	if err := Antigravity.Disconnect(""); err != nil || Antigravity.Holds() {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(Antigravity.hooksPath()); !os.IsNotExist(err) {
+		t.Fatal("uninstall left the hooks file join created")
 	}
 }
 
@@ -454,6 +597,13 @@ func TestExactTools(t *testing.T) {
 			t.Errorf("copilot %s: allowed %v", tool, got)
 		}
 	}
+	for tool, allowed := range map[string]bool{"mcp__murmur__who": true, "mcp__murmur__send": true, "mcp__murmur__btw": true,
+		"mcp__murmur__evil": false, "mcp__other__send": false, "mcp__murmur__send2": false, "call_mcp_tool": false, "write_file": false} {
+		got := string(Antigravity.Answer(harness.Event{Kind: harness.BeforeTool, Tool: tool}, ""))
+		if want := map[bool]string{true: `{"decision":"auto_approve"}` + "\n"}[allowed]; got != want {
+			t.Errorf("antigravity %s: %q", tool, got)
+		}
+	}
 	sandbox(t)
 	_ = os.WriteFile(filepath.Join(Cursor.dir(), "permissions.json"), []byte(`{"mcpAllowlist": []}`), 0o644)
 	Cursor.Connect("/opt/murmur", nil)
@@ -479,6 +629,10 @@ func TestCarries(t *testing.T) {
 		{Copilot, harness.Stop, `{"session_id":"c","hook_event_name":"Stop"}`, true},
 		{Codex, harness.Prompt, `{"session_id":"c","hook_event_name":"UserPromptSubmit","prompt":"hi"}`, true},
 		{Gemini, harness.Prompt, `{"session_id":"c","hook_event_name":"BeforeAgent","prompt":"hi"}`, true},
+		{Antigravity, harness.Start, `{"conversationId":"c","workspacePaths":["/w"],"lastUserInput":"hi"}`, true},
+		{Antigravity, harness.Prompt, `{"conversationId":"c","invocationNum":0,"initialNumSteps":1,"lastUserInput":"hi"}`, true},
+		{Antigravity, harness.AfterTool, `{"conversationId":"c","toolCall":{"name":"view_file","args":{}},"lastUserInput":"hi"}`, false},
+		{Antigravity, harness.Stop, `{"conversationId":"c","terminationReason":"NO_TOOL_CALL","fullyIdle":true,"lastUserInput":"hi"}`, true},
 	} {
 		if ev := parse(t, c.s, c.kind, c.input); ev.Carries != c.want {
 			t.Errorf("%s %s: carries %v", c.s.name, c.kind, ev.Carries)

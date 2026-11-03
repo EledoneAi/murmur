@@ -342,9 +342,9 @@ func ShellQuote(s string) string {
 
 // hookCommand is murmur's hook command as join writes it: the murmur binary, quoted when its path needs it, hook,
 // the harness and the event. 1.0.1 wrote it without the harness, for Claude Code's start, edit and notify. Copilot's
-// end with || true, so a missing binary never refuses a tool.
+// and Antigravity's end with || true, so a missing binary never refuses a tool.
 var hookCommand = regexp.MustCompile(`^('(?:[^']|'\\'')*/murmur'|[^\s'"]*/murmur|murmur) hook ` +
-	`(?:(?:claude|codex|cursor|opencode|copilot|gemini) (start|prompt|before-tool|after-tool|stop|needs|end|edit|notify)|(start|edit|notify))` +
+	`(?:(?:claude|codex|cursor|opencode|copilot|gemini|antigravity) (start|prompt|before-tool|after-tool|stop|needs|end|edit|notify)|(start|edit|notify))` +
 	`( \|\| true)?$`)
 
 // Ours says whether a hook command is one of murmur's, as this version or 1.0.1 wrote it. Join, uninstall and the

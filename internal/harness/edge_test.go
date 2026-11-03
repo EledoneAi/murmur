@@ -29,6 +29,24 @@ func TestReadObjectRefuses(t *testing.T) {
 	}
 }
 
+// Antigravity creates its mcp_config.json empty: an empty or blank file is an empty object, which join writes into.
+func TestEmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp_config.json")
+	for _, content := range []string{"", " \n"} {
+		_ = os.WriteFile(path, []byte(content), 0o600)
+		o, b, err := ReadObject(path)
+		if err != nil || len(o) != 0 {
+			t.Fatalf("%q: %v, %s", content, err, o.Bytes())
+		}
+		if err := WriteObject(path, b, o.Set("a", json.RawMessage(`1`)), true); err != nil {
+			t.Fatalf("%q: %v", content, err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != "{\n  \"a\": 1\n}\n" {
+			t.Fatalf("%q: %q", content, got)
+		}
+	}
+}
+
 // A file that holds more than one object, or one cut short, is read for what it says but never rewritten: writing
 // it would drop what comes after the first object.
 func TestWriteObjectRefusesWhatItCannotKeep(t *testing.T) {
