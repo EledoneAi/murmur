@@ -573,6 +573,12 @@ func TestMergedFilesStayOnGitHub(t *testing.T) {
 	if _, err := mergedFiles(context.Background(), ev, "ghtok", []string{host}); err == nil {
 		t.Error("a pull request without a number")
 	}
+	for _, repo := range []string{"https://" + host + "/user", "https://" + host + "/repos/acme/api?x=", "https://" + host + "/repos/acme/api#x"} {
+		ev.Repo.URL, ev.PR.Number = repo, 7
+		if _, err := mergedFiles(context.Background(), ev, "ghtok", []string{host}); err == nil {
+			t.Errorf("the token went to %q", repo)
+		}
+	}
 	if n := asked.Load(); n != 0 {
 		t.Fatalf("%d requests left the hub", n)
 	}

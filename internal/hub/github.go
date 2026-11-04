@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -128,10 +129,14 @@ func (h *Hub) githubAPIHosts() []string {
 	return hosts
 }
 
+// repoAPI is a repository's address in GitHub's API, on api.github.com or a GitHub Enterprise server: nothing more,
+// so a signed event can't point the token at another path, a query or a fragment.
+var repoAPI = regexp.MustCompile(`^https://[^/?#]+(/api/v3)?/repos/[\w.-]+/[\w.-]+$`)
+
 // mergedFiles lists the files a pull request changed, the old names of renamed files included, page by page.
 func mergedFiles(ctx context.Context, ev prEvent, token string, hosts []string) ([]string, error) {
 	u, err := url.Parse(ev.Repo.URL)
-	if err != nil || u.Scheme != "https" || !slices.Contains(hosts, u.Host) || ev.PR.Number <= 0 {
+	if err != nil || !repoAPI.MatchString(ev.Repo.URL) || !slices.Contains(hosts, u.Host) || ev.PR.Number <= 0 {
 		return nil, fmt.Errorf("the event's repository API address isn't GitHub's: %q", ev.Repo.URL)
 	}
 	var files []string
