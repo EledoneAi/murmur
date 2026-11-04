@@ -22,16 +22,17 @@ import (
 	"github.com/EledoneAi/murmur/v2/internal/store"
 )
 
-// safeNext keeps a page to return to after sign-in only when it is a path on this hub. Browsers drop tabs and line
-// breaks from addresses and read a backslash as a slash, so "/<tab>/evil.example" or "/\\evil.example" would
-// otherwise send people to another site.
+// localPath matches a path on this hub: "/", or "/" then anything but a second slash or backslash, with no backslash
+// or control character anywhere. Browsers drop tabs and line breaks from addresses and read a backslash as a slash, so
+// "/<tab>/evil.example" or "/\\evil.example" would otherwise send people to another site.
+var localPath = regexp.MustCompile(`^/([^/\\\x00-\x1f\x7f][^\\\x00-\x1f\x7f]*)?$`)
+
+// safeNext keeps a page to return to after sign-in only when it is a path on this hub.
 func safeNext(n string) string {
-	u, err := url.Parse(n)
-	if err != nil || u.Scheme != "" || u.Host != "" || u.User != nil || !strings.HasPrefix(n, "/") || strings.HasPrefix(n, "//") ||
-		strings.ContainsFunc(n, func(r rune) bool { return r < ' ' || r == 0x7f || r == '\\' }) {
-		return "/"
+	if localPath.MatchString(n) {
+		return n
 	}
-	return n
+	return "/"
 }
 
 // devLoginOn says whether people may sign in by typing an email: only on a hub that serves this computer alone, with
